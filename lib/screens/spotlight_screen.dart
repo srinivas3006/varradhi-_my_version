@@ -255,6 +255,8 @@ class _SpotlightScreenState extends State<SpotlightScreen> {
                 ),
               ),
             ),
+          ),
+        ),
             
             // Optional top bar for promo/ad skip since they don't have built-in close buttons
             Positioned(
