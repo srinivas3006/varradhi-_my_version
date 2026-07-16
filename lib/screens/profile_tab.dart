@@ -125,6 +125,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
               const SizedBox(height: 4),
               _settingsTile(
+                context,
                 icon: Icons.campaign_outlined,
                 title: 'Advertise with Us',
                 color: AppColors.primary,
@@ -144,6 +145,7 @@ class _ProfileTabState extends State<ProfileTab> {
               ),
 
               _settingsTile(
+                context,
                 icon: Icons.live_tv_outlined,
                 title: 'Live News',
                 onTap: () => Navigator.push(
@@ -158,6 +160,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
               const SizedBox(height: 12),
               _settingsTile(
+                context,
                 icon: Icons.tune,
                 title: AppState.instance.language == 'Telugu' ? 'కంటెంట్ అభిరుచులు' : 'News Preferences',
                 onTap: () {
@@ -168,6 +171,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               _settingsTile(
+                context,
                 icon: Icons.language,
                 title: tr('language'),
                 trailing: Text(state.language,
@@ -178,6 +182,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               ),
               _settingsSwitch(
+                context,
                 icon: Icons.notifications_none_rounded,
                 title: tr('push_notifications'),
                 value: _pushNotifications,
@@ -198,11 +203,13 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               ),
               _settingsTile(
+                context,
                 icon: Icons.info_outline,
                 title: tr('about'),
                 onTap: () {},
               ),
               _settingsTile(
+                context,
                 icon: Icons.privacy_tip_outlined,
                 title: tr('privacy_policy'),
                 onTap: () {},
@@ -211,6 +218,7 @@ class _ProfileTabState extends State<ProfileTab> {
               const SizedBox(height: 8),
               if (state.isLoggedIn) ...[
                 _settingsTile(
+                  context,
                   icon: Icons.devices,
                   title: 'Device Sessions',
                   onTap: () => Navigator.push(
@@ -219,14 +227,16 @@ class _ProfileTabState extends State<ProfileTab> {
                   ),
                 ),
                 _settingsTile(
+                  context,
                   icon: Icons.lock_outline,
                   title: 'Change Password',
                   onTap: _showPasswordChangeDialog,
                 ),
                 _settingsTile(
+                  context,
                   icon: Icons.logout,
                   title: tr('log_out'),
-                  color: Colors.red,
+                  color: AppColors.primary,
                   onTap: () {
                     AppState.instance.logout();
                   },
@@ -247,9 +257,9 @@ class _ProfileTabState extends State<ProfileTab> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withValues(alpha: 0.05),
@@ -262,7 +272,7 @@ class _ProfileTabState extends State<ProfileTab> {
           children: [
             const Row(
               children: [
-                Icon(Icons.admin_panel_settings_outlined, color: Colors.red, size: 20),
+                Icon(Icons.admin_panel_settings_outlined, color: AppColors.primary, size: 20),
                 SizedBox(width: 8),
                 Text('Admin Access',
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
@@ -297,7 +307,7 @@ class _ProfileTabState extends State<ProfileTab> {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
         ),
@@ -340,7 +350,7 @@ class _ProfileTabState extends State<ProfileTab> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -406,24 +416,27 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  Widget _settingsTile({
+  Widget _settingsTile(
+    BuildContext context, {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
     Widget? trailing,
-    Color color = AppColors.textDark,
+    Color? color,
   }) {
+    final effectiveColor = color ?? Theme.of(context).textTheme.bodyLarge?.color;
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: color),
-      title: Text(title, style: TextStyle(fontSize: 14, color: color)),
+      leading: Icon(icon, color: effectiveColor),
+      title: Text(title, style: TextStyle(fontSize: 14, color: effectiveColor)),
       trailing: trailing ??
           const Icon(Icons.chevron_right, color: AppColors.textMuted),
       onTap: onTap,
     );
   }
 
-  Widget _settingsSwitch({
+  Widget _settingsSwitch(
+    BuildContext context, {
     required IconData icon,
     required String title,
     required bool value,
@@ -431,8 +444,8 @@ class _ProfileTabState extends State<ProfileTab> {
   }) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: AppColors.textDark),
-      title: Text(title, style: const TextStyle(fontSize: 14)),
+      leading: Icon(icon, color: Theme.of(context).textTheme.bodyLarge?.color),
+      title: Text(title, style: TextStyle(fontSize: 14, color: Theme.of(context).textTheme.bodyLarge?.color)),
       trailing: Switch(
         value: value,
         activeThumbColor: AppColors.primary,

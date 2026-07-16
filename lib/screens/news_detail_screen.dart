@@ -121,15 +121,17 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 260,
             pinned: true,
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.white,
+            backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+            foregroundColor: isDark ? Colors.white : AppColors.textDark,
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,
@@ -208,19 +210,19 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: isPlaying ? Colors.red.withValues(alpha: 0.1) : AppColors.primary.withValues(alpha: 0.1),
+                            color: AppColors.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Row(
                             children: [
                               Icon(isPlaying ? Icons.stop_rounded : Icons.volume_up_rounded, 
-                                  size: 16, color: isPlaying ? Colors.red : AppColors.primary),
+                                  size: 16, color: AppColors.primary),
                               const SizedBox(width: 4),
                               Text(isPlaying ? 'Stop' : 'Listen', 
                                   style: TextStyle(
                                       fontSize: 12, 
                                       fontWeight: FontWeight.w700, 
-                                      color: isPlaying ? Colors.red : AppColors.primary)),
+                                      color: AppColors.primary)),
                             ],
                           ),
                         ),
@@ -230,11 +232,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   const SizedBox(height: 12),
                   Text(
                     article.title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       height: 1.3,
-                      color: AppColors.textDark,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -242,18 +244,18 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     children: [
                       CircleAvatar(
                         radius: 14,
-                        backgroundColor: AppColors.chipBg,
+                        backgroundColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                         child: Text(
                           article.source.isNotEmpty ? article.source[0] : '?',
-                          style: const TextStyle(color: AppColors.textDark),
+                          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         article.source,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: AppColors.textDark),
+                            color: Theme.of(context).textTheme.bodyLarge?.color),
                       ),
                       const SizedBox(width: 8),
                       const Text('·', style: TextStyle(color: AppColors.textMuted)),
@@ -272,10 +274,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   const Divider(height: 32),
                   Text(
                     article.body,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15.5,
                       height: 1.65,
-                      color: Color(0xFF2E2E2E),
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
                     ),
                   ),
                   const SizedBox(height: 28),

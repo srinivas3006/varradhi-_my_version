@@ -190,7 +190,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   }
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
+                  backgroundColor: const Color(0xFF25D366), // WhatsApp Green
                   foregroundColor: Colors.white,
                 ),
                 icon: const Icon(Icons.chat),
@@ -202,10 +202,10 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     );
   }
 
-  @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -222,11 +222,11 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildSectionTitle('Your Details'),
-              _buildTextField('Your Name', _nameController),
+              _buildTextField(context, 'Your Name', _nameController),
               const SizedBox(height: 12),
-              _buildTextField('Phone Number', _phoneController, keyboardType: TextInputType.phone),
+              _buildTextField(context, 'Phone Number', _phoneController, keyboardType: TextInputType.phone),
               const SizedBox(height: 12),
-              _buildTextField('Business Name', _businessNameController),
+              _buildTextField(context, 'Business Name', _businessNameController),
 
               const SizedBox(height: 24),
               _buildSectionTitle('Ad Targeting'),
@@ -259,7 +259,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 _isLoadingAreas
                     ? const CircularProgressIndicator()
                     : DropdownButtonFormField<String>(
-                        decoration: _inputDecoration('Select Area'),
+                        decoration: _inputDecoration(context, 'Select Area'),
                         initialValue: _selectedAreaId,
                         items: _areas.map<DropdownMenuItem<String>>((area) {
                           return DropdownMenuItem<String>(
@@ -310,10 +310,10 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 onSelectionChanged: (set) => _onDurationChanged(set.first),
                 style: ButtonStyle(
                   backgroundColor: WidgetStateProperty.resolveWith((states) {
-                    return states.contains(WidgetState.selected) ? AppColors.primary : Colors.white;
+                    return states.contains(WidgetState.selected) ? AppColors.primary : Theme.of(context).cardColor;
                   }),
                   foregroundColor: WidgetStateProperty.resolveWith((states) {
-                    return states.contains(WidgetState.selected) ? Colors.white : AppColors.textDark;
+                    return states.contains(WidgetState.selected) ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color;
                   }),
                 ),
               ),
@@ -323,9 +323,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppColors.chipBg,
+                  color: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
+                  border: Border.all(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE)),
                 ),
                 child: Column(
                   children: [
@@ -348,7 +348,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               ),
 
               const SizedBox(height: 24),
-              _buildTextField('Additional message (optional)', _messageController, maxLines: 3),
+              _buildTextField(context, 'Additional message (optional)', _messageController, maxLines: 3),
 
               const SizedBox(height: 32),
               SizedBox(
@@ -384,23 +384,24 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String label) {
+  InputDecoration _inputDecoration(BuildContext context, String label) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InputDecoration(
       labelText: label,
       filled: true,
-      fillColor: Colors.grey.shade50,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade300)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
+      fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.02),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController controller, {int maxLines = 1, TextInputType? keyboardType}) {
+  Widget _buildTextField(BuildContext context, String label, TextEditingController controller, {int maxLines = 1, TextInputType? keyboardType}) {
     return TextField(
       controller: controller,
       maxLines: maxLines,
       keyboardType: keyboardType,
-      decoration: _inputDecoration(label),
+      decoration: _inputDecoration(context, label),
     );
   }
 

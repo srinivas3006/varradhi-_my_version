@@ -45,7 +45,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Create Account')),
       body: SafeArea(
         child: Padding(
@@ -53,10 +53,10 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Join as a reader',
                 style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textDark),
+                    fontSize: 22, fontWeight: FontWeight.w800, color: Theme.of(context).textTheme.bodyLarge?.color),
               ),
               const SizedBox(height: 4),
               const Text(
@@ -117,7 +117,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 20),
               SizedBox(

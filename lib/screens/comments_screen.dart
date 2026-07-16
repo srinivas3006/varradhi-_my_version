@@ -75,8 +75,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
               ),
               const SizedBox(height: 16),
               ListTile(
-                leading: const Icon(Icons.flag_outlined, color: Colors.red),
-                title: const Text('Report Comment', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                leading: const Icon(Icons.flag_outlined, color: AppColors.primary),
+                title: const Text('Report Comment', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(context);
                   AppState.instance.reportComment(widget.article.id, comment.id);
@@ -109,7 +109,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
         margin: EdgeInsets.only(left: isReply ? 48 : 0, bottom: 16),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.grey.shade100,
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(8),
         ),
         child: const Row(
@@ -219,21 +219,21 @@ class _CommentsScreenState extends State<CommentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
+          icon: Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'Comments',
-          style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold),
+          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(color: Colors.grey.withValues(alpha: 0.2), height: 1),
+          child: Container(color: Theme.of(context).dividerColor, height: 1),
         ),
       ),
       body: AnimatedBuilder(
@@ -261,7 +261,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).cardColor,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.05),

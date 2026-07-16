@@ -45,7 +45,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Admin Access')),
       body: SafeArea(
         child: Padding(
@@ -63,10 +63,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                     color: Color(0xFF16123F), size: 28),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Moderator sign-in',
                 style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.textDark),
+                    fontSize: 20, fontWeight: FontWeight.w800, color: Theme.of(context).textTheme.bodyLarge?.color),
               ),
               const SizedBox(height: 4),
               const Text(
@@ -110,7 +110,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
-                Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+                Text(_error!, style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 20),
               SizedBox(

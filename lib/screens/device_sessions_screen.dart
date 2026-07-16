@@ -55,7 +55,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                 const SnackBar(content: Text('Device session revoked.')),
               );
             },
-            child: const Text('Revoke', style: TextStyle(color: Colors.red)),
+            child: const Text('Revoke', style: TextStyle(color: AppColors.primary)),
           ),
         ],
       ),
@@ -65,11 +65,11 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Device Sessions'),
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.textDark,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         elevation: 0.5,
       ),
       body: ListView.separated(
@@ -79,7 +79,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
         itemBuilder: (context, index) {
           final session = _sessions[index];
           return Container(
-            color: Colors.white,
+            color: Theme.of(context).cardColor,
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
@@ -105,10 +105,10 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                         children: [
                           Text(
                             session['device'],
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: AppColors.textDark,
+                              color: Theme.of(context).textTheme.bodyLarge?.color,
                             ),
                           ),
                           if (session['isCurrent']) ...[
@@ -116,12 +116,12 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.green.withValues(alpha: 0.1),
+                                color: const Color(0xFF10B981).withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
                                 'Current',
-                                style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ]
@@ -140,7 +140,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                 ),
                 if (!session['isCurrent'])
                   IconButton(
-                    icon: const Icon(Icons.exit_to_app, color: Colors.red),
+                    icon: const Icon(Icons.exit_to_app, color: AppColors.primary),
                     onPressed: () => _revokeSession(session['id']),
                     tooltip: 'Revoke Session',
                   ),

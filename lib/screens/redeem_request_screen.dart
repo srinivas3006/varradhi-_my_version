@@ -37,8 +37,10 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
   Widget build(BuildContext context) {
     const tokens = AppState.tokensNeededToRedeem;
     const amount = tokens * AppState.rupeesPerToken;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Request Redeem')),
       body: SafeArea(
         child: Padding(
@@ -71,10 +73,18 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                 decoration: InputDecoration(
                   hintText: 'yourname@bank',
                   filled: true,
-                  fillColor: AppColors.chipBg,
+                  fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.02),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
                   ),
                 ),
               ),

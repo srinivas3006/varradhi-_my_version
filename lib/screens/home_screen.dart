@@ -59,16 +59,10 @@ class _HomeScreenState extends State<HomeScreen> {
       canPop: false,
       onPopInvokedWithResult: _onPopInvoked,
       child: Scaffold(
-        body: SafeArea(
-          top: false,
-          bottom: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: IndexedStack(index: _navIndex, children: tabs),
-              ),
-            ],
-          ),
+        extendBody: true,
+        body: IndexedStack(
+          index: _navIndex,
+          children: tabs,
         ),
         bottomNavigationBar: BottomNavBar(
           currentIndex: _navIndex,

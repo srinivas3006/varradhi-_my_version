@@ -9,7 +9,7 @@ class BreakingNewsTicker extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: Colors.red.shade700,
+      color: AppColors.primary,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [

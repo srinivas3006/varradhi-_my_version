@@ -20,11 +20,11 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Live News'),
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.textDark,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         elevation: 0.5,
       ),
       body: ListView.separated(
@@ -73,7 +73,7 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,7 +89,7 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.red,
+                    color: AppColors.primary,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text(
@@ -98,13 +98,13 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Breaking News Live Coverage',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.textDark,
+                      color: Theme.of(context).textTheme.bodyLarge?.color,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,

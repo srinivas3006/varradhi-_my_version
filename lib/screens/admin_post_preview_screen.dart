@@ -33,7 +33,7 @@ class AdminPostPreviewScreen extends StatelessWidget {
               Navigator.pop(context); // Close dialog
               Navigator.pop(context); // Close preview screen
             },
-            child: const Text('Reject', style: TextStyle(color: Colors.red)),
+            child: const Text('Reject', style: TextStyle(color: AppColors.primary)),
           ),
         ],
       ),
@@ -144,8 +144,8 @@ class AdminPostPreviewScreen extends StatelessWidget {
                       Expanded(
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.redAccent,
-                            side: const BorderSide(color: Colors.redAccent),
+                            foregroundColor: AppColors.primary,
+                            side: const BorderSide(color: AppColors.primary),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),

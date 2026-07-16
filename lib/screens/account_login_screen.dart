@@ -43,7 +43,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Log In')),
       body: SafeArea(
         child: Padding(
@@ -61,10 +61,10 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                     color: AppColors.primary, size: 28),
               ),
               const SizedBox(height: 18),
-              const Text(
+              Text(
                 'Welcome back',
                 style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textDark),
+                    fontSize: 22, fontWeight: FontWeight.w800, color: Theme.of(context).textTheme.bodyLarge?.color),
               ),
               const SizedBox(height: 4),
               const Text(
@@ -108,7 +108,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 20),
               SizedBox(

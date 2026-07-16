@@ -68,7 +68,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                   : 'Select topics you are interested in. We will personalize your feed.',
               style: TextStyle(
                 fontSize: 15,
-                color: isDark ? AppColors.textMuted : Colors.grey[700],
+                color: isDark ? AppColors.textMuted : Theme.of(context).textTheme.bodyMedium?.color,
               ),
             ),
           ),
