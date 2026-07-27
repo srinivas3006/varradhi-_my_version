@@ -1,20 +1,20 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../localization/app_translations.dart';
+import 'package:flutter/services.dart';
 import '../state/app_state.dart';
-import '../theme/app_theme.dart';
+import '../models/reporter_post.dart';
 import 'account_login_screen.dart';
-import 'admin_panel_screen.dart';
-
-import 'create_post_screen.dart';
-import 'language_screen.dart';
-import 'my_posts_screen.dart';
 import 'reporter_intro_screen.dart';
-import 'reporter_wallet_screen.dart';
-
-import 'live_news_screen.dart';
-import 'device_sessions_screen.dart';
-import 'ad_booking_screen.dart';
+import 'admin_panel_screen.dart';
+import 'bookmarks_screen.dart';
 import 'preferences_screen.dart';
+import 'about_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'my_posts_screen.dart';
+import 'my_posts_screen.dart';
+import 'reporter_wallet_screen.dart';
+import 'ad_booking_screen.dart';
+import '../localization/app_translations.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -23,45 +23,84 @@ class ProfileTab extends StatefulWidget {
   State<ProfileTab> createState() => _ProfileTabState();
 }
 
-class _ProfileTabState extends State<ProfileTab> {
-  bool _pushNotifications = true;
+class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateMixin {
+  late AnimationController _themeAnimController;
 
-  void _showPasswordChangeDialog() {
+  @override
+  void initState() {
+    super.initState();
+    _themeAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    // Initial value for theme animation
+    if (AppState.instance.themeMode == ThemeMode.dark) {
+      _themeAnimController.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _themeAnimController.dispose();
+    super.dispose();
+  }
+
+  void _toggleTheme(AppState state) {
+    HapticFeedback.lightImpact();
+    
+    // Determine what it currently is
+    final isCurrentlyDark = state.themeMode == ThemeMode.dark || 
+                            (state.themeMode == ThemeMode.system && Theme.of(context).brightness == Brightness.dark);
+    
+    final newMode = isCurrentlyDark ? ThemeMode.light : ThemeMode.dark;
+    state.setThemeMode(newMode);
+    
+    if (newMode == ThemeMode.dark) {
+      _themeAnimController.forward();
+    } else {
+      _themeAnimController.reverse();
+    }
+  }
+
+  void _handleGatedAction(AppState state, VoidCallback onAuthorized) {
+    if (!state.isLoggedIn) {
+      HapticFeedback.warningNotification();
+      _showLoginRequiredDialog();
+    } else {
+      onAuthorized();
+    }
+  }
+
+  void _showLoginRequiredDialog() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Change Password'),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                obscureText: true,
-                decoration: InputDecoration(labelText: 'Current Password'),
-              ),
-              TextField(
-                obscureText: true,
-                decoration: InputDecoration(labelText: 'New Password'),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(tr('account_required'), style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+        content: Text(
+          tr('account_required_sub'),
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(tr('cancel'), style: TextStyle(color: isDark ? Colors.white38 : Colors.black38)),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Password changed successfully.')),
-                );
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
+            },
+            child: Text(tr('log_in'), style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -71,437 +110,530 @@ class _ProfileTabState extends State<ProfileTab> {
       animation: AppState.instance,
       builder: (context, _) {
         final state = AppState.instance;
-        return SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-                    child: Text(
-                      state.userName.isNotEmpty ? state.userName[0] : 'G',
-                      style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(state.userName,
-                            style: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Text(
-                          state.isLoggedIn
-                              ? '+91 ${state.userPhone}'
-                              : tr('not_logged_in'),
-                          style: const TextStyle(
-                              fontSize: 12.5, color: AppColors.textMuted),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!state.isLoggedIn)
-                    TextButton(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                      ),
-                      child: Text(tr('log_in')),
-                    ),
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final bgColor = Theme.of(context).scaffoldBackgroundColor;
+
+        return Scaffold(
+          backgroundColor: bgColor,
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 100),
+              children: [
+                // 1. Identity Header Card
+                _buildIdentityCard(state, isDark),
+                const SizedBox(height: 16),
+
+                // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
+                if (state.isLoggedIn && !state.isReporter) ...[
+                  _buildBecomeReporterCard(),
+                  const SizedBox(height: 16),
+                ] else if (state.isReporter) ...[
+                  _buildReporterDashboardCard(state, isDark),
+                  const SizedBox(height: 16),
                 ],
-              ),
 
-              _buildAdminSection(context, state),
-              _buildReporterSection(context, state),
-              const SizedBox(height: 24),
-              const Text('Explore',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-              const SizedBox(height: 4),
-              _settingsTile(
-                context,
-                icon: Icons.campaign_outlined,
-                title: 'Advertise with Us',
-                color: AppColors.primary,
-                onTap: () {
-                  if (!AppState.instance.isLoggedIn) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                    );
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const AdBookingScreen()),
-                    );
-                  }
-                },
-              ),
+                // 3. Admin Access Badge (Conditional)
+                if (state.isAdmin) ...[
+                  _buildAdminCard(isDark),
+                  const SizedBox(height: 16),
+                ],
 
-              _settingsTile(
-                context,
-                icon: Icons.live_tv_outlined,
-                title: 'Live News',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LiveNewsScreen()),
-                ),
-              ),
-
-
-              const SizedBox(height: 24),
-              Text(tr('settings'),
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-              const SizedBox(height: 12),
-              _settingsTile(
-                context,
-                icon: Icons.tune,
-                title: AppState.instance.language == 'Telugu' ? 'కంటెంట్ అభిరుచులు' : 'News Preferences',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const PreferencesScreen()),
-                  );
-                },
-              ),
-              _settingsTile(
-                context,
-                icon: Icons.language,
-                title: tr('language'),
-                trailing: Text(state.language,
-                    style: const TextStyle(color: AppColors.textMuted)),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LanguageScreen()),
-                ),
-              ),
-              _settingsSwitch(
-                context,
-                icon: Icons.notifications_none_rounded,
-                title: tr('push_notifications'),
-                value: _pushNotifications,
-                onChanged: (v) => setState(() => _pushNotifications = v),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  state.themeMode == ThemeMode.dark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
-                  color: Theme.of(context).textTheme.bodyMedium?.color,
-                ),
-                title: Text(tr('dark_mode'), style: const TextStyle(fontSize: 14)),
-                trailing: _ThemeToggleSwitch(
-                  isDark: state.themeMode == ThemeMode.dark || (state.themeMode == ThemeMode.system && Theme.of(context).brightness == Brightness.dark),
-                  onChanged: (isDark) {
-                    AppState.instance.setThemeMode(isDark ? ThemeMode.dark : ThemeMode.light);
-                  },
-                ),
-              ),
-              _settingsTile(
-                context,
-                icon: Icons.info_outline,
-                title: tr('about'),
-                onTap: () {},
-              ),
-              _settingsTile(
-                context,
-                icon: Icons.privacy_tip_outlined,
-                title: tr('privacy_policy'),
-                onTap: () {},
-              ),
-
-              const SizedBox(height: 8),
-              if (state.isLoggedIn) ...[
-                _settingsTile(
-                  context,
-                  icon: Icons.devices,
-                  title: 'Device Sessions',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const DeviceSessionsScreen()),
+                // 4. Explore & Settings Group
+                _buildSectionTitle(tr('explore_saved'), isDark),
+                _buildSettingsGroup(isDark, [
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.bookmark_border_rounded,
+                    title: tr('saved_articles'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => _handleGatedAction(state, () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const BookmarksScreen()));
+                    }),
                   ),
-                ),
-                _settingsTile(
-                  context,
-                  icon: Icons.lock_outline,
-                  title: 'Change Password',
-                  onTap: _showPasswordChangeDialog,
-                ),
-                _settingsTile(
-                  context,
-                  icon: Icons.logout,
-                  title: tr('log_out'),
-                  color: AppColors.primary,
-                  onTap: () {
-                    AppState.instance.logout();
-                  },
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.campaign_outlined,
+                    title: tr('advertise_with_us'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AdBookingScreen()));
+                    },
+                  ),
+                  if (state.isReporter)
+                    _buildListTile(
+                      isDark: isDark,
+                      icon: Icons.account_balance_wallet_rounded,
+                      title: tr('rewards_earnings'),
+                      trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ReporterWalletScreen()));
+                      },
+                    ),
+                ]),
+
+                const SizedBox(height: 20),
+
+                _buildSectionTitle('PREFERENCES', isDark),
+                _buildSettingsGroup(isDark, [
+                  // Language Tile
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.language_rounded,
+                    title: tr('language'),
+                    trailing: Text(state.language, style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    onTap: () => _showLanguagePicker(state, isDark),
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.tune,
+                    title: tr('news_preferences'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen())),
+                  ),
+                  // Push Notifications Toggle
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.notifications_none_rounded,
+                    title: tr('push_notifications'),
+                    trailing: Switch.adaptive(
+                      value: state.pushNotificationsEnabled,
+                      activeColor: Colors.redAccent,
+                      onChanged: (val) {
+                        HapticFeedback.selectionClick();
+                        state.togglePushNotifications(val);
+                      },
+                    ),
+                    onTap: () {},
+                  ),
+                  // Animated Theme Switch Tile
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.palette_outlined,
+                    title: tr('dark_mode'),
+                    trailing: GestureDetector(
+                      onTap: () => _toggleTheme(state),
+                      child: RotationTransition(
+                        turns: _themeAnimController,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            isDark ? '🌙' : '☀️',
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                        ),
+                      ),
+                    ),
+                    onTap: () => _toggleTheme(state),
+                  ),
+                ]),
+
+                const SizedBox(height: 20),
+
+                _buildSectionTitle(tr('about_legal'), isDark),
+                _buildSettingsGroup(isDark, [
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.info_outline_rounded,
+                    title: tr('about'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen())),
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.lock_outline_rounded,
+                    title: tr('privacy_policy'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen())),
+                  ),
+                ]),
+
+                const SizedBox(height: 24),
+
+                // 5. Account Management / Logout Button
+                if (state.isLoggedIn)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.redAccent),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: const Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                      label: Text(tr('log_out').toUpperCase(), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        state.logout();
+                      },
+                    ),
+                  ),
+                  
+                const SizedBox(height: 20),
+                Center(
+                  child: Text(
+                    'Vaaradhi v1.0.0',
+                    style: TextStyle(
+                      color: isDark ? Colors.white38 : Colors.black38, 
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600
+                    ),
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildAdminSection(BuildContext context, AppState state) {
-    if (!state.isAdmin) return const SizedBox.shrink();
+  /// Identity Header Card (Guest vs Logged-In)
+  Widget _buildIdentityCard(AppState state, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05)),
+      ),
+      child: Row(
+        children: [
+          Stack(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: Colors.redAccent,
+                child: Text(
+                  !state.isLoggedIn ? 'G' : (state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U'),
+                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (state.isLoggedIn)
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey.shade800 : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.edit_rounded,
+                      size: 12,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  !state.isLoggedIn ? tr('guest_user') : state.userName,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  !state.isLoggedIn ? tr('not_logged_in') : '+91 ${state.userPhone}',
+                  style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          if (!state.isLoggedIn)
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
+              },
+              child: Text(tr('log_in').toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+        ],
+      ),
+    );
+  }
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+  /// "Become a Reporter" CTA Card
+  Widget _buildBecomeReporterCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.redAccent.shade700, Colors.deepOrange.shade800],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.redAccent.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.campaign_rounded, color: Colors.white, size: 36),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tr('become_reporter'),
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('become_reporter_sub'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const ReporterIntroScreen()));
+            },
+            child: Text(tr('join').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Reporter Dashboard Card (Wallet + Submissions)
+  Widget _buildReporterDashboardCard(AppState state, bool isDark) {
+    final pendingCount = state.reporterPosts.where((p) => p.status == PostStatus.pending).length;
+    final approvedCount = state.reporterPosts.where((p) => p.status == PostStatus.approved).length;
+    final publishedCount = state.reporterPosts.where((p) => p.status == PostStatus.published).length;
+    final rejectedCount = state.reporterPosts.where((p) => p.status == PostStatus.rejected).length;
+
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const MyPostsScreen()));
+      },
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4)),
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+          boxShadow: isDark ? [] : [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.admin_panel_settings_outlined, color: AppColors.primary, size: 20),
-                SizedBox(width: 8),
-                Text('Admin Access',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Row(
+                  children: [
+                    const Icon(Icons.verified_rounded, color: Colors.green, size: 20),
+                    const SizedBox(width: 6),
+                    Text(tr('reporter_dashboard').toUpperCase(), style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
               ],
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.fact_check_outlined, size: 18),
-                label: const Text('Review Reporter Posts'),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AdminPanelScreen()),
-                ),
-              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatusStat(tr('pending'), pendingCount.toString(), Colors.amber, isDark),
+                _buildStatusStat(tr('approved'), approvedCount.toString(), Colors.blueAccent, isDark),
+                _buildStatusStat(tr('published'), publishedCount.toString(), Colors.green, isDark),
+                _buildStatusStat(tr('rejected'), rejectedCount.toString(), Colors.redAccent, isDark),
+              ],
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildReporterSection(BuildContext context, AppState state) {
-    // Guests can't become reporters until they have a real account.
-    if (!state.isLoggedIn) {
-      return const SizedBox.shrink();
-    }
-
-    if (!state.isReporter) {
-      // CTA card inviting a logged-in (non-reporter) user to join.
-      return Container(
-        padding: const EdgeInsets.all(16),
+  Widget _buildRewardsCard(AppState state, bool isDark) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const ReporterWalletScreen()));
+      },
+      child: Container(
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFFD700), Color(0xFFF5A623)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: const Color(0xFFF5A623).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  tr('rewards_earnings'),
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusStat(String label, String value, Color color, bool isDark) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 11)),
+      ],
+    );
+  }
+
+  /// Admin Queue Quick Card
+  Widget _buildAdminCard(bool isDark) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPanelScreen()));
+      },
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.purple.withOpacity(0.15),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+          border: Border.all(color: Colors.purple.withOpacity(0.4)),
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.campaign_rounded, color: AppColors.primary),
-            ),
+            const Icon(Icons.admin_panel_settings_rounded, color: Colors.purple, size: 28),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Become a Reporter',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  SizedBox(height: 2),
-                  Text('Post news, get it reviewed, earn ₹5 per approved post.',
-                      style: TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+                  Text(tr('admin_desk_review'), style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold)),
+                  Text(tr('review_reporter_posts'), style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 12)),
                 ],
               ),
             ),
-            TextButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ReporterIntroScreen()),
-              ),
-              child: const Text('Join'),
-            ),
+            const Icon(Icons.arrow_forward_ios_rounded, color: Colors.purple, size: 16),
           ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
-    // Reporter Dashboard: wallet summary + quick actions.
+  Widget _buildSectionTitle(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Text(
+        title,
+        style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+      ),
+    );
+  }
+
+  Widget _buildSettingsGroup(bool isDark, List<Widget> tiles) {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.02),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
-        ],
+        border: Border.all(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        children: tiles,
+      ),
+    );
+  }
+
+  Widget _buildListTile({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    required Widget trailing,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: isDark ? Colors.white70 : Colors.black87, size: 22),
+      title: Text(title, style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 15, fontWeight: FontWeight.w500)),
+      trailing: trailing,
+    );
+  }
+
+  void _showLanguagePicker(AppState state, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.badge_rounded, color: AppColors.primary, size: 18),
-              const SizedBox(width: 8),
-              const Text('Reporter Dashboard',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-              const Spacer(),
-              Text('${state.reporterTokens} tokens · ₹${state.reporterTokens * AppState.rupeesPerToken}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                  label: const Text('Post News'),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const CreatePostScreen()),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.article_outlined, size: 18),
-                  label: const Text('My Posts'),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const MyPostsScreen()),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
-              label: const Text('View Wallet'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ReporterWalletScreen()),
-              ),
-            ),
-          ),
+          const SizedBox(height: 16),
+          Text('Select Language', style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          _buildLangOption(state, isDark, 'English'),
+          _buildLangOption(state, isDark, 'Telugu'),
+
+          const SizedBox(height: 16),
         ],
       ),
     );
   }
 
-  Widget _settingsTile(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required VoidCallback onTap,
-    Widget? trailing,
-    Color? color,
-  }) {
-    final effectiveColor = color ?? Theme.of(context).textTheme.bodyLarge?.color;
+  Widget _buildLangOption(AppState state, bool isDark, String lang) {
     return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: effectiveColor),
-      title: Text(title, style: TextStyle(fontSize: 14, color: effectiveColor)),
-      trailing: trailing ??
-          const Icon(Icons.chevron_right, color: AppColors.textMuted),
-      onTap: onTap,
-    );
-  }
-
-  Widget _settingsSwitch(
-    BuildContext context, {
-    required IconData icon,
-    required String title,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: Theme.of(context).textTheme.bodyLarge?.color),
-      title: Text(title, style: TextStyle(fontSize: 14, color: Theme.of(context).textTheme.bodyLarge?.color)),
-      trailing: Switch(
-        value: value,
-        activeThumbColor: AppColors.primary,
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-class _ThemeToggleSwitch extends StatelessWidget {
-  final bool isDark;
-  final ValueChanged<bool> onChanged;
-
-  const _ThemeToggleSwitch({required this.isDark, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!isDark),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? AppColors.chipBgDark : AppColors.chipBg,
-          border: Border.all(
-            color: isDark ? Colors.white24 : Colors.black12,
-            width: 1.5,
-          ),
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            AnimatedPositioned(
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeInOut,
-              left: isDark ? 24 : 2,
-              right: isDark ? 2 : 24,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 400),
-                transitionBuilder: (child, anim) => RotationTransition(
-                  turns: child.key == const ValueKey('moon') 
-                      ? Tween<double>(begin: -0.5, end: 0.0).animate(anim) 
-                      : Tween<double>(begin: 0.5, end: 0.0).animate(anim),
-                  child: ScaleTransition(scale: anim, child: child),
-                ),
-                child: isDark
-                    ? const Icon(Icons.nightlight_round, key: ValueKey('moon'), size: 20, color: Colors.amber)
-                    : const Icon(Icons.wb_sunny_rounded, key: ValueKey('sun'), size: 20, color: Colors.orange),
-              ),
-            ),
-          ],
-        ),
-      ),
+      title: Text(lang, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+      trailing: state.language == lang ? const Icon(Icons.check_rounded, color: Colors.redAccent) : null,
+      onTap: () {
+        state.setLanguage(lang);
+        Navigator.of(context).pop();
+      },
     );
   }
 }

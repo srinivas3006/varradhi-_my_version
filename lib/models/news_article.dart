@@ -11,6 +11,13 @@ class NewsArticle {
   final int comments;
   final int shares;
   final int readTimeMinutes;
+  final int viewCount;
+  final String? state;
+  final String? district;
+  final String? subdistrict;
+  final String? village;
+  final bool isBreaking;
+  final bool isRegional;
   final List<String>? imageUrls;
   bool isLiked;
   bool isBookmarked;
@@ -28,6 +35,13 @@ class NewsArticle {
     required this.comments,
     required this.shares,
     required this.readTimeMinutes,
+    required this.viewCount,
+    this.state,
+    this.district,
+    this.subdistrict,
+    this.village,
+    this.isBreaking = false,
+    this.isRegional = false,
     this.imageUrls,
     this.isLiked = false,
     this.isBookmarked = false,
@@ -51,6 +65,13 @@ class NewsArticle {
       comments: json['comments_count'] ?? json['comments'] ?? 0,
       shares: json['shares_count'] ?? json['shares'] ?? 0,
       readTimeMinutes: json['read_time_minutes'] ?? 2,
+      viewCount: json['view_count'] ?? json['views_count'] ?? 0,
+      state: json['state'],
+      district: json['district'],
+      subdistrict: json['subdistrict'],
+      village: json['village'],
+      isBreaking: json['is_breaking'] ?? false,
+      isRegional: json['is_regional'] ?? false,
       imageUrls: (json['image_urls'] as List?)?.map((e) => e.toString()).toList(),
       isLiked: json['is_liked_by_user'] ?? false,
       isBookmarked: json['is_bookmarked_by_user'] ?? false,
@@ -62,6 +83,33 @@ class NewsArticle {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'summary': summary,
+      'content': body,
+      'thumbnail_url': imageUrl,
+      'source_name': source,
+      'category': {'name': category},
+      'published_at': publishedAt.toIso8601String(),
+      'likes_count': likes,
+      'comments_count': comments,
+      'shares_count': shares,
+      'read_time_minutes': readTimeMinutes,
+      'view_count': viewCount,
+      'state': state,
+      'district': district,
+      'subdistrict': subdistrict,
+      'village': village,
+      'is_breaking': isBreaking,
+      'is_regional': isRegional,
+      'image_urls': imageUrls,
+      'is_liked_by_user': isLiked,
+      'is_bookmarked_by_user': isBookmarked,
+    };
   }
 }
 

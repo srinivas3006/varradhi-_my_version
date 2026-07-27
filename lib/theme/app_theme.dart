@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  static const primary = Color(0xFFE8412B); // Way2News-style red-orange
-  static const primaryDark = Color(0xFFC22F1C);
-  static const background = Color(0xFFF7F7F9);
+  static const primary = Color(0xFFFF2300); // Vermilion bright red-orange
+  static const primaryDark = Color(0xFFFF3000); // Bottom gradient red-orange
+  static const accent = Color(0xFFFED915); // Vibrant Yellow
+  static const background = Color(0xFFFFFFFF); // Pure white background
   static const cardDark = Color(0xFF141414);
   static const textDark = Color(0xFF1A1A1A);
   static const textMuted = Color(0xFF8A8A8E);

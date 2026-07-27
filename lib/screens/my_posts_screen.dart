@@ -10,6 +10,8 @@ class MyPostsScreen extends StatelessWidget {
     switch (status) {
       case PostStatus.approved:
         return const Color(0xFF10B981);
+      case PostStatus.published:
+        return const Color(0xFF3B82F6);
       case PostStatus.rejected:
         return const Color(0xFFE8412B);
       case PostStatus.pending:
@@ -21,6 +23,8 @@ class MyPostsScreen extends StatelessWidget {
     switch (status) {
       case PostStatus.approved:
         return 'Approved · +1 token';
+      case PostStatus.published:
+        return 'Published';
       case PostStatus.rejected:
         return 'Rejected';
       case PostStatus.pending:

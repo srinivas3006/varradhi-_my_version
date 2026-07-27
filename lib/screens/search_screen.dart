@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../data/mock_news.dart';
 import '../localization/app_translations.dart';
 import '../models/news_article.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import 'news_detail_screen.dart';
 
@@ -34,18 +34,22 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  void _runSearch(String query) {
+  bool _isLoading = false;
+
+  void _runSearch(String query) async {
     if (query.trim().isEmpty) {
       setState(() => _results = []);
       return;
     }
+    setState(() => _isLoading = true);
+    
+    final response = await ApiService.instance.searchArticles(query);
+    
+    if (!mounted) return;
+    
     setState(() {
-      _results = mockArticles
-          .where((a) =>
-              a.title.toLowerCase().contains(query.toLowerCase()) ||
-              a.summary.toLowerCase().contains(query.toLowerCase()) ||
-              a.category.toLowerCase().contains(query.toLowerCase()))
-          .toList();
+      _results = response.data ?? [];
+      _isLoading = false;
       if (!_recent.contains(query)) {
         _recent.insert(0, query);
         if (_recent.length > 6) _recent.removeLast();
@@ -89,7 +93,9 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       body: _controller.text.isEmpty
           ? _buildSuggestions()
-          : _buildResults(),
+          : _isLoading 
+              ? const Center(child: CircularProgressIndicator()) 
+              : _buildResults(),
     );
   }
 

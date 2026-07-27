@@ -1,10 +1,21 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:device_preview/device_preview.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/splash_screen.dart';
+import 'services/api_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
+
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  debugPrint("Handling a background message: ${message.messageId}");
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,13 +37,59 @@ void main() async {
     print('User granted permission: ${settings.authorizationStatus}');
     
     String? token = await messaging.getToken();
-    print('FCM Token: $token');
+    if (token != null) {
+      AppState.instance.fcmToken = token;
+    }
+    
+    // Listen to token refreshes
+    messaging.onTokenRefresh.listen((newToken) {
+      AppState.instance.fcmToken = newToken;
+      if (AppState.instance.isLoggedIn) {
+        ApiService.instance.updateFcmToken(newToken);
+      }
+    });
+
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('Got a message whilst in the foreground!');
+      if (message.notification != null) {
+        scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(message.notification!.title ?? 'New Notification', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(message.notification!.body ?? ''),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.only(top: 50, left: 16, right: 16),
+            backgroundColor: AppTheme.light('English').primaryColor,
+            duration: const Duration(seconds: 4),
+            dismissDirection: DismissDirection.up,
+          ),
+        );
+      }
+    });
   } catch (e) {
-    print('Firebase initialization error (Missing google-services.json?): $e');
+    debugPrint('Firebase initialization error (Missing google-services.json?): $e');
   }
 
   await AppState.instance.init();
-  runApp(const Way2NewsCloneApp());
+  
+  // If we already logged in previously, sync the token we just fetched
+  if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
+    ApiService.instance.updateFcmToken(AppState.instance.fcmToken!);
+  }
+
+  runApp(
+    DevicePreview(
+      enabled: !kReleaseMode,
+      builder: (context) => const Way2NewsCloneApp(),
+    ),
+  );
 }
 
 class Way2NewsCloneApp extends StatelessWidget {
@@ -47,8 +104,11 @@ class Way2NewsCloneApp extends StatelessWidget {
       animation: AppState.instance,
       builder: (context, _) {
         return MaterialApp(
-          title: 'DailyBuzz — Way2News Clone',
+          locale: DevicePreview.locale(context),
+          builder: DevicePreview.appBuilder,
+          title: 'Vaaradhi',
           debugShowCheckedModeBanner: false,
+          scaffoldMessengerKey: scaffoldMessengerKey,
           theme: AppTheme.light(AppState.instance.language),
           darkTheme: AppTheme.dark(AppState.instance.language),
           themeMode: AppState.instance.themeMode,

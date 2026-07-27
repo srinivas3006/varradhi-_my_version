@@ -1,0 +1,4 @@
+- [ ] Launch Pixel_7 emulator
+- [ ] Run Flutter app on emulator
+- [ ] Take screenshot of the app
+- [ ] Present preview to user

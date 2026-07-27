@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -26,8 +27,8 @@ class BottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark 
-        ? AppColors.cardDarkSlate.withOpacity(0.9)
-        : Colors.white.withOpacity(0.9);
+        ? AppColors.cardDarkSlate.withValues(alpha: 0.85)
+        : Colors.white.withValues(alpha: 0.9);
 
     return AnimatedBuilder(
       animation: AppState.instance,
@@ -38,13 +39,13 @@ class BottomNavBar extends StatelessWidget {
           children: [
             ClipRRect(
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                 child: Container(
                   decoration: BoxDecoration(
                     color: bgColor,
                     border: Border(
                       top: BorderSide(
-                        color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
+                        color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
                       ),
                     ),
                   ),
@@ -62,35 +63,45 @@ class BottomNavBar extends StatelessWidget {
                           final isActive = index == currentIndex;
                           
                           return Expanded(
-                            child: InkWell(
-                              onTap: () => onTap(index),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                HapticFeedback.selectionClick();
+                                onTap(index);
+                              },
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(
-                                    item.icon,
-                                    size: 24,
-                                    color: isActive ? AppColors.primary : AppColors.textMuted,
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    tr(item.key),
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                                  AnimatedScale(
+                                    scale: isActive ? 1.15 : 1.0,
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutBack,
+                                    child: Icon(
+                                      item.icon,
+                                      size: 24,
                                       color: isActive ? AppColors.primary : AppColors.textMuted,
                                     ),
                                   ),
-                                  if (isActive)
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 2),
-                                      width: 4,
-                                      height: 4,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.primary,
-                                        shape: BoxShape.circle,
-                                      ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    tr(item.key),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                                      color: isActive ? AppColors.primary : AppColors.textMuted,
                                     ),
+                                  ),
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeOutCubic,
+                                    margin: const EdgeInsets.only(top: 4),
+                                    width: isActive ? 4 : 0,
+                                    height: isActive ? 4 : 0,
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.primary,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -105,29 +116,36 @@ class BottomNavBar extends StatelessWidget {
             
             // Floating Center FAB
             Positioned(
-              top: -24,
+              top: -20,
               child: GestureDetector(
-                onTap: () => onTap(2),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onTap(2);
+                },
                 child: Container(
-                  width: 56,
-                  height: 56,
+                  width: 54,
+                  height: 54,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: AppColors.primary,
+                    gradient: const LinearGradient(
+                      colors: [AppColors.primary, AppColors.primaryDark],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                     border: Border.all(
                       color: isDark ? AppColors.cardDarkSlate : Colors.white,
-                      width: 4,
+                      width: 3,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primary.withOpacity(0.4),
-                        blurRadius: 15,
-                        offset: const Offset(0, 5),
+                        color: AppColors.primary.withValues(alpha: 0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
                   child: const Icon(
-                    Icons.add,
+                    Icons.add_rounded,
                     color: Colors.white,
                     size: 28,
                   ),

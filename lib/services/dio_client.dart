@@ -1,5 +1,9 @@
 import 'package:dio/dio.dart';
 import '../state/app_state.dart';
+import 'mock_interceptor.dart';
+
+// Toggle this to false to connect to the real backend
+const bool useMockBackend = true;
 
 class DioClient {
   static final DioClient _instance = DioClient._internal();
@@ -21,6 +25,10 @@ class DioClient {
     );
 
     // Add interceptors
+    if (useMockBackend) {
+      dio.interceptors.add(MockInterceptor());
+    }
+
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {

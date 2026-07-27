@@ -1,4 +1,5 @@
 import 'news_article.dart';
+import 'ad_banner.dart';
 
 enum SpotlightType {
   standard,
@@ -7,6 +8,7 @@ enum SpotlightType {
   ad,
   poster,
   infoCard,
+  shimmer,
 }
 
 class SpotlightItem {
@@ -20,9 +22,10 @@ class SpotlightItem {
   final List<String>? imageUrls;
   final String? title;
   
-  // For promo / poster / infoCard
+  // For promo / poster / infoCard / ad
   final String? promoImageUrl;
   final String? mediaUrl;
+  final AdBanner? adBanner;
   
   const SpotlightItem({
     required this.id,
@@ -32,6 +35,7 @@ class SpotlightItem {
     this.title,
     this.promoImageUrl,
     this.mediaUrl,
+    this.adBanner,
   });
 
   factory SpotlightItem.standard(NewsArticle article) {
@@ -84,10 +88,18 @@ class SpotlightItem {
     );
   }
 
-  factory SpotlightItem.ad(String id) {
+  factory SpotlightItem.ad(AdBanner ad) {
     return SpotlightItem(
-      id: id,
+      id: ad.id,
       type: SpotlightType.ad,
+      adBanner: ad,
+    );
+  }
+
+  factory SpotlightItem.shimmer() {
+    return SpotlightItem(
+      id: 'shimmer_${DateTime.now().millisecondsSinceEpoch}',
+      type: SpotlightType.shimmer,
     );
   }
 }

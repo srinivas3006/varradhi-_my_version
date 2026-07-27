@@ -1,6 +1,6 @@
 enum PostType { image, video }
 
-enum PostStatus { pending, approved, rejected }
+enum PostStatus { pending, approved, published, rejected }
 
 class ReporterPost {
   final String id;

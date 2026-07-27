@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/reporter_post.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 
 class AdminPostPreviewScreen extends StatelessWidget {
   final ReporterPost post;
@@ -25,13 +26,13 @@ class AdminPostPreviewScreen extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              AppState.instance.adminRejectPost(
-                post.id,
-                controller.text.trim().isEmpty ? null : controller.text.trim(),
-              );
+            onPressed: () async {
+              // Close dialog immediately to prevent multiple taps, show loading? 
+              // We'll just close it and the preview screen, relying on the refresh back in AdminPanel.
+              final reason = controller.text.trim().isEmpty ? null : controller.text.trim();
               Navigator.pop(context); // Close dialog
               Navigator.pop(context); // Close preview screen
+              await ApiService.instance.rejectUgcSubmission(post.id, reason);
             },
             child: const Text('Reject', style: TextStyle(color: AppColors.primary)),
           ),
@@ -41,8 +42,8 @@ class AdminPostPreviewScreen extends StatelessWidget {
   }
 
   void _approve(BuildContext context) {
-    AppState.instance.adminApprovePost(post.id);
-    Navigator.pop(context); // Close preview screen
+    Navigator.pop(context); // Close preview screen instantly
+    ApiService.instance.approveUgcSubmission(post.id);
   }
 
   @override

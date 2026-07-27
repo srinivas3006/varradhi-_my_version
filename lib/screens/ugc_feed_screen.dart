@@ -13,7 +13,7 @@ class UgcFeedScreen extends StatefulWidget {
 class _UgcFeedScreenState extends State<UgcFeedScreen> {
   final List<NewsArticle> _reports = [];
   bool _isLoading = false;
-  String? _nextCursor;
+  int _page = 1;
   bool _hasMore = true;
   final ScrollController _scrollController = ScrollController();
 
@@ -32,14 +32,34 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
     if (_isLoading || !_hasMore) return;
     setState(() => _isLoading = true);
 
-    final response = await ApiService.instance.getUgcFeed(cursor: _nextCursor);
+    final response = await ApiService.instance.getUgcFeed(page: _page);
 
     if (!mounted) return;
     setState(() {
-      final newArticles = response.data ?? [];
+      final newArticles = response.map((u) => NewsArticle(
+        id: u.id,
+        title: u.title,
+        summary: u.summary,
+        body: u.summary,
+        imageUrl: u.thumbnailUrl,
+        imageUrls: [u.thumbnailUrl],
+        source: u.source,
+        category: 'UGC',
+        publishedAt: u.createdAt,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        viewCount: 0,
+        readTimeMinutes: 1,
+      )).toList();
+      
       _reports.addAll(newArticles);
-      _nextCursor = response.nextCursor;
-      _hasMore = _nextCursor != null;
+      if (newArticles.isNotEmpty) {
+        _page++;
+      } else {
+        _page = 1;
+      }
+      _hasMore = true;
       _isLoading = false;
     });
   }

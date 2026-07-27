@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../services/api_service.dart';
 import 'account_signup_screen.dart';
 
 /// Full account login for the Reporter Program — distinct from the
@@ -17,31 +18,58 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _submitting = false;
   String? _error;
 
-  void _submit() {
-    final username = _usernameController.text.trim();
+  Future<void> _submit() async {
+    final email = _usernameController.text.trim();
     final password = _passwordController.text;
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Enter your full name/username and password.');
-      return;
-    }
-    
-    // Secret backdoor for Admin Panel
-    if (username.toLowerCase() == 'admin' && password == 'way2news123') {
-      AppState.instance.accountLogin(username: 'Admin', password: password);
-      AppState.instance.isAdmin = true;
-      Navigator.of(context).pop();
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Enter your email address and password.');
       return;
     }
 
-    // Mock: no real backend to check credentials against.
-    AppState.instance.accountLogin(username: username, password: password);
-    Navigator.of(context).pop();
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      final data = await ApiService.instance.login(
+        email, 
+        password, 
+        fcmToken: AppState.instance.fcmToken,
+      );
+      final token = data['access'] ?? data['token'];
+      if (token == null) {
+        throw Exception('No access token returned');
+      }
+
+      // Persist the token in secure storage rather than plain AppState,
+      // and never retain the raw password anywhere on-device.
+      await AppState.instance.setAuthToken(token);
+      final user = data['user'] as Map<String, dynamic>?;
+      AppState.instance.accountLogin(username: user?['full_name'] ?? user?['username'] ?? 'Reporter');
+
+      // isAdmin (if it exists at all) must come from the decoded token /
+      // user payload returned by the server — never set client-side.
+      AppState.instance.isAdmin = user?['is_admin'] == true;
+
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Invalid email or password.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Log In')),
@@ -64,7 +92,9 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               Text(
                 'Welcome back',
                 style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: Theme.of(context).textTheme.bodyLarge?.color),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Theme.of(context).textTheme.bodyLarge?.color),
               ),
               const SizedBox(height: 4),
               const Text(
@@ -75,9 +105,9 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               TextField(
                 controller: _usernameController,
                 decoration: InputDecoration(
-                  labelText: 'Full name / Username',
+                  labelText: 'Email Address',
                   filled: true,
-                  fillColor: AppColors.chipBg,
+                  fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -91,7 +121,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                 decoration: InputDecoration(
                   labelText: 'Password',
                   filled: true,
-                  fillColor: AppColors.chipBg,
+                  fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
@@ -108,7 +138,8 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!,
-                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
+                    style:
+                        const TextStyle(color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 20),
               SizedBox(
@@ -122,9 +153,19 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                         borderRadius: BorderRadius.circular(14)),
                     elevation: 0,
                   ),
-                  onPressed: _submit,
-                  child: const Text('Log In',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  onPressed: _submitting ? null : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Log In',
+                          style:
+                              TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(height: 16),

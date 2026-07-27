@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../data/mock_news.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -13,9 +12,24 @@ class PreferencesScreen extends StatefulWidget {
 
 class _PreferencesScreenState extends State<PreferencesScreen> {
   final List<String> _selected = [];
-  final List<String> _selectableCategories = categories
-      .where((c) => c != 'For You' && c != 'Trending')
-      .toList();
+  final List<String> _selectableCategories = [
+    'Latest News',
+    'Andhra Pradesh',
+    'Telangana',
+    'National',
+    'International',
+    'Politics',
+    'Business',
+    'Sports',
+    'Cinema',
+    'Technology',
+    'Education & Jobs',
+    'Health',
+    'Agriculture',
+    'Spiritual',
+    'Videos',
+    'Photos',
+  ];
 
   @override
   void initState() {

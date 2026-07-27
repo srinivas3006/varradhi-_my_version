@@ -5,7 +5,9 @@ import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/share_service.dart';
+import '../services/api_service.dart';
 import 'comments_screen.dart';
+import 'account_login_screen.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
@@ -33,8 +35,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     String languageCode = 'en-US';
     if (lang == 'telugu') {
       languageCode = 'te-IN';
-    } else if (lang == 'hindi') {
-      languageCode = 'hi-IN';
     } else if (lang == 'tamil') {
       languageCode = 'ta-IN';
     } else if (lang == 'kannada') {
@@ -98,8 +98,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       String languageCode = 'en-US';
       if (lang == 'telugu') {
         languageCode = 'te-IN';
-      } else if (lang == 'hindi') {
-        languageCode = 'hi-IN';
       } else if (lang == 'tamil') {
         languageCode = 'ta-IN';
       } else if (lang == 'kannada') {
@@ -164,12 +162,19 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               ),
             ),
             actions: [
-              IconButton(
-                icon: Icon(
-                  article.isBookmarked ? Icons.bookmark : Icons.bookmark_border,
-                ),
-                onPressed: () =>
-                    setState(() => article.isBookmarked = !article.isBookmarked),
+              AnimatedBuilder(
+                animation: AppState.instance,
+                builder: (context, _) {
+                  return IconButton(
+                    icon: Icon(
+                      AppState.instance.isBookmarked(article.id) ? Icons.bookmark : Icons.bookmark_border,
+                    ),
+                    onPressed: () async {
+                      AppState.instance.toggleBookmark(article.id);
+                      await ApiService.instance.toggleBookmark(article.id);
+                    },
+                  );
+                }
               ),
               IconButton(
                 icon: const Icon(Icons.share_outlined),
@@ -293,17 +298,23 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         onTap: () =>
                             setState(() => article.isLiked = !article.isLiked),
                       ),
-                      _statButton(
-                        icon: Icons.mode_comment_outlined,
-                        label: 'Comment',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CommentsScreen(article: article),
-                            ),
+                      AnimatedBuilder(
+                        animation: AppState.instance,
+                        builder: (context, _) {
+                          final count = AppState.instance.getDisplayCommentCount(article.id, article.comments);
+                          return _statButton(
+                            icon: Icons.mode_comment_outlined,
+                            label: count > 0 ? count.toString() : 'Comment',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CommentsScreen(article: article),
+                                ),
+                              );
+                            },
                           );
-                        },
+                        }
                       ),
                       _statButton(
                         icon: Icons.share_outlined,

@@ -10,11 +10,13 @@ class LiveNewsScreen extends StatefulWidget {
 }
 
 class _LiveNewsScreenState extends State<LiveNewsScreen> {
-  // Mock YouTube video IDs for live news
-  final List<String> _liveVideoIds = [
-    'jfKfPfyJRdk', // Lofi hip hop radio (often live)
-    '21X5lGlDOfg', // NASA Live stream
-    '5qap5aO4i9A', // Lofi hip hop radio 
+  // Mock YouTube video IDs for live news (Telugu Channels)
+  final List<Map<String, String>> _liveChannels = [
+    {'id': 'j6rF0N5Y0uM', 'title': 'TV9 Telugu Live - Telangana & AP Breaking News'},
+    {'id': 'XWq5kBlakcQ', 'title': 'NTV Telugu Live - 24/7 Live News Updates'},
+    {'id': 'O1N6mP3p4_E', 'title': 'V6 News Live - Telangana Local News'},
+    {'id': 'Y8sQ-x54L_g', 'title': 'T News Live - Telangana Politics & Updates'},
+    {'id': '9Auq9mYxFEE', 'title': 'Sakshi TV Live - Andhra Pradesh & TS News'},
   ];
 
   @override
@@ -29,10 +31,14 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
       ),
       body: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        itemCount: _liveVideoIds.length,
+        itemCount: _liveChannels.length,
         separatorBuilder: (_, __) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
-          return _LiveVideoCard(videoId: _liveVideoIds[index]);
+          final channel = _liveChannels[index];
+          return _LiveVideoCard(
+            videoId: channel['id']!,
+            title: channel['title']!,
+          );
         },
       ),
     );
@@ -41,8 +47,9 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
 
 class _LiveVideoCard extends StatefulWidget {
   final String videoId;
+  final String title;
 
-  const _LiveVideoCard({required this.videoId});
+  const _LiveVideoCard({required this.videoId, required this.title});
 
   @override
   State<_LiveVideoCard> createState() => _LiveVideoCardState();
@@ -100,7 +107,7 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Breaking News Live Coverage',
+                    widget.title,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,

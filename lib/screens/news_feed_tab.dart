@@ -1,10 +1,11 @@
+import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
-import '../data/mock_news.dart';
 import '../models/news_article.dart';
 import '../theme/app_theme.dart';
 import 'news_detail_screen.dart';
 import 'search_screen.dart';
 import 'spotlight_screen.dart';
+import 'live_news_screen.dart';
 import 'video_tab.dart'; // To navigate to video tab for reels
 import '../services/api_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -18,7 +19,11 @@ class NewsFeedTab extends StatefulWidget {
 
 class _NewsFeedTabState extends State<NewsFeedTab> {
   late List<NewsArticle> _articles;
+  List<NewsArticle> _featuredArticles = [];
+  List<NewsArticle> _recommendedArticles = [];
   bool _isLoadingMore = false;
+  bool _isLoadingFeatured = false;
+  bool _isLoadingRecommendations = false;
   String? _nextCursor;
   bool _hasMore = true;
 
@@ -29,6 +34,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   void initState() {
     super.initState();
     _articles = [];
+    _loadFeatured();
+    _loadRecommendations();
     _loadMore();
   }
 
@@ -50,67 +57,120 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     setState(() {
       final newArticles = response.data ?? [];
       _articles.addAll(newArticles);
-      _nextCursor = response.nextCursor;
-      _hasMore = _nextCursor != null;
+      _nextCursor = response.nextCursor ?? "0";
+      _hasMore = true;
       _isLoadingMore = false;
     });
+  }
+
+  Future<void> _loadFeatured() async {
+    setState(() => _isLoadingFeatured = true);
+    try {
+      final featured = await ApiService.instance.getFeaturedArticles();
+      if (mounted) {
+        setState(() => _featuredArticles = featured);
+      }
+    } catch (e) {
+      // Silently fail, fall back to empty list
+    } finally {
+      if (mounted) setState(() => _isLoadingFeatured = false);
+    }
+  }
+
+  Future<void> _loadRecommendations() async {
+    setState(() => _isLoadingRecommendations = true);
+    try {
+      final recs = await ApiService.instance.getRecommendations(limit: 5);
+      if (mounted) {
+        setState(() => _recommendedArticles = recs);
+      }
+    } catch (e) {
+      // Silently fail
+    } finally {
+      if (mounted) setState(() => _isLoadingRecommendations = false);
+    }
   }
 
   Future<void> _refresh() async {
     _nextCursor = null;
     _hasMore = true;
     _articles.clear();
-    await _loadMore();
+    await Future.wait([
+      _loadFeatured(),
+      _loadRecommendations(),
+      _loadMore(),
+    ]);
   }
 
   Widget _buildTopAppBar() {
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AppColors.primary, AppColors.primaryDark],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: dart_ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top + 8,
+            bottom: 12,
+            left: 16,
+            right: 16,
+          ),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.black.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.7),
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
                 borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: 32,
+                  height: 32,
+                  fit: BoxFit.cover,
+                ),
               ),
-              child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 18),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'DailyBuzz',
-              style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-                color: Theme.of(context).textTheme.bodyLarge?.color,
+              const SizedBox(width: 8),
+              Text(
+                'Vaaradhi',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
               ),
-            ),
-            const Spacer(),
-            IconButton(
-              icon: Icon(Icons.search, color: Theme.of(context).iconTheme.color),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SearchScreen()),
-                );
-              },
-            ),
-            IconButton(
-              icon: Icon(Icons.add_circle_outline, color: Theme.of(context).iconTheme.color),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SpotlightScreen()),
-                );
-              },
-            ),
-          ],
+              const Spacer(),
+              IconButton(
+                icon: Icon(Icons.search_rounded, color: Theme.of(context).iconTheme.color),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SearchScreen()),
+                  );
+                },
+              ),
+              Container(
+                margin: const EdgeInsets.only(left: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.auto_awesome_rounded, color: AppColors.primary),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const SpotlightScreen()),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -120,13 +180,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     if (breakingNews.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03);
     final borderColor = isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05);
 
     return Column(
       children: [
         SizedBox(
-          height: 250, // aspect ratio 16/11 roughly
+          height: 260,
           child: PageView.builder(
             controller: _breakingNewsController,
             onPageChanged: (index) {
@@ -145,126 +204,165 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(32),
-                    color: cardColor,
+                    borderRadius: BorderRadius.circular(28),
                     border: Border.all(color: borderColor),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
                     image: article.imageUrl != null
                         ? DecorationImage(
                             image: CachedNetworkImageProvider(article.imageUrl!),
                             fit: BoxFit.cover,
-                            colorFilter: ColorFilter.mode(
-                              Colors.black.withValues(alpha: 0.6),
-                              BlendMode.darken,
-                            ),
                           )
                         : null,
                   ),
-                  padding: const EdgeInsets.all(20),
-                  child: Stack(
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(28),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.4),
+                          Colors.black.withValues(alpha: 0.9),
+                        ],
+                        stops: const [0.4, 0.7, 1.0],
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(20),
+                    child: Stack(
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: BackdropFilter(
+                                    filter: dart_ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      color: Colors.orange.withValues(alpha: 0.3),
+                                      child: const Text(
+                                        'BREAKING',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 1.2,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                child: const Text(
-                                  'BREAKING',
-                                  style: TextStyle(
-                                    fontSize: 10,
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const LiveNewsScreen()),
+                                    );
+                                  },
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: BackdropFilter(
+                                      filter: dart_ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                                          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                                          borderRadius: BorderRadius.circular(16),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 6,
+                                              height: 6,
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFF34D399),
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'LIVE • ${breakingNews.length}',
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w800,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  article.title,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 22,
                                     fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.2,
-                                    color: Colors.orange,
+                                    letterSpacing: -0.5,
+                                    height: 1.2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'Updated ${article.timeAgo}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: BackdropFilter(
+                              filter: dart_ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                color: Colors.white.withValues(alpha: 0.15),
+                                child: Text(
+                                  '${(index + 1).toString().padLeft(2, '0')} / ${breakingNews.length.toString().padLeft(2, '0')}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.5,
+                                    color: Colors.white,
                                   ),
                                 ),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withValues(alpha: 0.2),
-                                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: Color(0xFF34D399),
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'LIVE • ${breakingNews.length}',
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF34D399),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                article.title,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1.1,
-                                  color: Colors.white, // Always white on image
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Updated ${article.timeAgo}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white.withValues(alpha: 0.7),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            '${(index + 1).toString().padLeft(2, '0')} / ${breakingNews.length.toString().padLeft(2, '0')}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.5,
-                              color: Colors.white.withValues(alpha: 0.8),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -279,12 +377,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             final isActive = index == _currentBreakingIndex;
             return AnimatedContainer(
               duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
               margin: const EdgeInsets.symmetric(horizontal: 3),
               height: 6,
               width: isActive ? 24 : 6,
               decoration: BoxDecoration(
                 color: isActive ? AppColors.primary : (isDark ? Colors.white24 : Colors.black26),
-                borderRadius: BorderRadius.circular(3),
+                borderRadius: BorderRadius.circular(4),
               ),
             );
           }),
@@ -293,12 +392,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  Widget _buildNewsReelsSection() {
-    final reels = mockTrendingArticles; // Using mock trending articles as reels
+  Widget _buildNewsReelsSection(List<NewsArticle> reels) {
     if (reels.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03);
     final borderColor = isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05);
 
     return Column(
@@ -343,11 +440,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       'See all',
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
                         color: Theme.of(context).textTheme.bodySmall?.color,
                       ),
                     ),
-                    const Icon(Icons.chevron_right, size: 16),
+                    const Icon(Icons.chevron_right_rounded, size: 18),
                   ],
                 ),
               ),
@@ -370,73 +467,88 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   width: 140,
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: cardColor,
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: borderColor),
                     image: article.imageUrl != null
                         ? DecorationImage(
                             image: CachedNetworkImageProvider(article.imageUrl!),
                             fit: BoxFit.cover,
-                            colorFilter: ColorFilter.mode(
-                              Colors.black.withValues(alpha: 0.4),
-                              BlendMode.darken,
-                            ),
                           )
                         : null,
                   ),
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (index == 0) // Just a mock "Hot" tag for the first item
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.8),
+                        ],
+                        stops: const [0.5, 1.0],
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (index == 0)
+                              ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'HOT',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
+                                child: BackdropFilter(
+                                  filter: dart_ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    color: AppColors.primary.withValues(alpha: 0.8),
+                                    child: const Text(
+                                      'HOT',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              const SizedBox(),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: BackdropFilter(
+                                filter: dart_ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
                                 ),
                               ),
-                            )
-                          else
-                            const SizedBox(),
-                          Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.4),
-                              shape: BoxShape.circle,
                             ),
-                            child: const Icon(
-                              Icons.play_arrow_rounded,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        article.title,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          height: 1.2,
+                          ],
                         ),
-                      ),
-                    ],
+                        Text(
+                          article.title,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -491,12 +603,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   const Text(
                     'Local',
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
                       color: AppColors.primary,
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 16, color: AppColors.primary),
+                  const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.primary),
                 ],
               ),
             ],
@@ -520,6 +632,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
             final article = remainingArticles[index];
             return GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () {
                 Navigator.push(
                   context,
@@ -529,10 +642,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               child: Row(
                 children: [
                   Container(
-                    width: 96,
-                    height: 96,
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(20),
                       color: cardColor,
                       border: Border.all(color: borderColor),
                       image: article.imageUrl != null
@@ -548,44 +661,58 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          article.category.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.primary,
-                            letterSpacing: 1.0,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            article.category.toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.primary,
+                              letterSpacing: 1.0,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 8),
                         Text(
                           article.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            height: 1.2,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            height: 1.3,
+                            letterSpacing: -0.3,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         Row(
                           children: [
+                            Icon(Icons.access_time_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
+                            const SizedBox(width: 4),
                             Text(
                               article.timeAgo,
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
                                 color: Theme.of(context).textTheme.bodySmall?.color,
                               ),
                             ),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: Text('•', style: TextStyle(fontSize: 10, color: Theme.of(context).textTheme.bodySmall?.color)),
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              child: Text('•', style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
                             ),
+                            Icon(Icons.favorite_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
+                            const SizedBox(width: 4),
                             Text(
-                              '${article.likes} likes',
+                              '${article.likes}',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
                                 color: Theme.of(context).textTheme.bodySmall?.color,
                               ),
                             ),
@@ -605,14 +732,15 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   @override
   Widget build(BuildContext context) {
-    final breakingNews = _articles.take(5).toList();
-    final remainingArticles = _articles.skip(5).toList();
+    final breakingNews = _featuredArticles.isNotEmpty ? _featuredArticles : _articles.take(5).toList();
+    final reels = _articles.skip(breakingNews == _featuredArticles ? 0 : 5).take(5).toList();
+    final recommended = _recommendedArticles.isNotEmpty ? _recommendedArticles : _articles.skip(breakingNews == _featuredArticles ? 5 : 10).toList();
 
-    return Column(
-      children: [
-        _buildTopAppBar(),
-        Expanded(
-          child: _articles.isEmpty && _isLoadingMore
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Stack(
+        children: [
+          _articles.isEmpty && _isLoadingMore
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(
                   onRefresh: _refresh,
@@ -625,22 +753,32 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       return false;
                     },
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(bottom: 100), // padding for floating bottom nav
+                      padding: EdgeInsets.only(
+                        top: MediaQuery.of(context).padding.top + 70, // Space for floating app bar
+                        bottom: 120, // space for floating bottom nav
+                      ),
                       child: Column(
                         children: [
-                          const SizedBox(height: 16),
                           _buildBreakingNewsSection(breakingNews),
                           const SizedBox(height: 32),
-                          _buildNewsReelsSection(),
+                          _buildNewsReelsSection(reels),
                           const SizedBox(height: 32),
-                          _buildForYouSection(remainingArticles),
+                          _buildForYouSection(recommended),
                         ],
                       ),
                     ),
                   ),
                 ),
-        ),
-      ],
+          
+          // Floating Top App Bar Layer
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopAppBar(),
+          ),
+        ],
+      ),
     );
   }
 }

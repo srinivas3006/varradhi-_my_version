@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../localization/app_translations.dart';
 
 class NewsFeedCard extends StatefulWidget {
   final NewsArticle article;
@@ -147,7 +148,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        article.category,
+                        categoryLabel(article.category).toUpperCase(),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -159,12 +160,18 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                   Positioned(
                     top: 12,
                     right: 12,
-                    child: _iconPill(
-                      icon: article.isBookmarked
-                          ? Icons.bookmark
-                          : Icons.bookmark_border,
-                      onTap: _handleBookmark,
-                      active: article.isBookmarked,
+                    child: AnimatedBuilder(
+                      animation: AppState.instance,
+                      builder: (context, _) {
+                        final isSaved = AppState.instance.isBookmarked(article.id);
+                        return _iconPill(
+                          icon: isSaved
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                          onTap: _handleBookmark,
+                          active: isSaved,
+                        );
+                      }
                     ),
                   ),
                   if (hasMultipleImages)
@@ -231,6 +238,18 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                   children: [
                     Row(
                       children: [
+                        if (article.isBreaking) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
+                            ),
+                            child: Text(tr('breaking_news').toUpperCase(), style: const TextStyle(fontSize: 8, color: Colors.red, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         CircleAvatar(
                           radius: 10,
                           backgroundColor: AppColors.chipBg,
@@ -244,7 +263,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          article.source,
+                          article.district ?? article.state ?? article.source,
                           style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
@@ -261,8 +280,10 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                               fontSize: 12, color: AppColors.textMuted),
                         ),
                         const Spacer(),
+                        Icon(Icons.visibility, size: 12, color: AppColors.textMuted),
+                        const SizedBox(width: 4),
                         Text(
-                          '${article.readTimeMinutes} min read',
+                          '${article.viewCount}',
                           style: const TextStyle(
                               fontSize: 11.5, color: AppColors.textMuted),
                         ),
@@ -306,20 +327,17 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                           active: article.isLiked,
                           onTap: _handleLike,
                         ),
-                        AnimatedBuilder(
-                          animation: AppState.instance,
-                          builder: (context, _) {
-                            final stateComments = AppState.instance.articleComments[article.id];
-                            final count = stateComments != null 
-                                ? AppState.instance.getCommentCount(article.id)
-                                : article.comments;
-                            return _actionButton(
-                              icon: Icons.mode_comment_outlined,
-                              label: _formatCount(count),
-                              onTap: _handleComment,
-                            );
-                          }
-                        ),
+                          AnimatedBuilder(
+                            animation: AppState.instance,
+                            builder: (context, _) {
+                              final count = AppState.instance.getDisplayCommentCount(article.id, article.comments);
+                              return _actionButton(
+                                icon: Icons.mode_comment_outlined,
+                                label: _formatCount(count),
+                                onTap: _handleComment,
+                              );
+                            }
+                          ),
                         _actionButton(
                           icon: Icons.share_outlined,
                           label: _formatCount(article.shares),

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/news_article.dart';
+import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../localization/app_translations.dart';
 
 class CommentsScreen extends StatefulWidget {
   final NewsArticle article;
@@ -76,22 +78,22 @@ class _CommentsScreenState extends State<CommentsScreen> {
               const SizedBox(height: 16),
               ListTile(
                 leading: const Icon(Icons.flag_outlined, color: AppColors.primary),
-                title: const Text('Report Comment', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                title: Text(tr('report_comment'), style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(context);
                   AppState.instance.reportComment(widget.article.id, comment.id);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Comment reported and hidden.')),
+                    SnackBar(content: Text(tr('comment_reported_hidden'))),
                   );
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.block, color: AppColors.textDark),
-                title: const Text('Block User', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.w600)),
+                title: Text(tr('block_user'), style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.w600)),
                 onTap: () {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('${comment.username} blocked.')),
+                    SnackBar(content: Text('${comment.username} ${tr('blocked')}')),
                   );
                 },
               ),
@@ -112,11 +114,11 @@ class _CommentsScreenState extends State<CommentsScreen> {
           color: Theme.of(context).dividerColor.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.info_outline, size: 16, color: Colors.grey),
-            SizedBox(width: 8),
-            Text('This comment was hidden.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+            const Icon(Icons.info_outline, size: 16, color: Colors.grey),
+            const SizedBox(width: 8),
+            Text(tr('comment_hidden'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
           ],
         ),
       );
@@ -196,9 +198,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                       const SizedBox(width: 16),
                       GestureDetector(
                         onTap: () => _onReplyTap(comment),
-                        child: const Text(
-                          'Reply',
-                          style: TextStyle(
+                        child: Text(
+                          tr('reply'),
+                          style: const TextStyle(
                             fontSize: 12,
                             color: AppColors.textMuted,
                             fontWeight: FontWeight.w600,
@@ -228,7 +230,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Comments',
+          tr('comments_title'),
           style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
         ),
         bottom: PreferredSize(
@@ -278,7 +280,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                         Row(
                           children: [
                             Text(
-                              'Replying to $_replyingToUsername',
+                              '${tr('replying_to')} $_replyingToUsername',
                               style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
                             ),
                             const Spacer(),
@@ -302,7 +304,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                               controller: _commentController,
                               focusNode: _focusNode,
                               decoration: InputDecoration(
-                                hintText: 'Add a comment...',
+                                hintText: tr('add_comment_hint'),
                                 hintStyle: const TextStyle(fontSize: 14, color: AppColors.textMuted),
                                 filled: true,
                                 fillColor: AppColors.chipBg,
