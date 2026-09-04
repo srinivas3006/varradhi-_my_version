@@ -9,6 +9,10 @@ import 'live_news_screen.dart';
 import 'video_tab.dart'; // To navigate to video tab for reels
 import '../services/api_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../models/ad_banner.dart';
+import '../widgets/ads/ad_banner_widget.dart';
+import '../widgets/feed/horoscope_widget.dart';
+import '../widgets/feed/daily_greeting_widget.dart';
 
 class NewsFeedTab extends StatefulWidget {
   const NewsFeedTab({super.key});
@@ -22,8 +26,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   List<NewsArticle> _featuredArticles = [];
   List<NewsArticle> _recommendedArticles = [];
   bool _isLoadingMore = false;
-  bool _isLoadingFeatured = false;
-  bool _isLoadingRecommendations = false;
   String? _nextCursor;
   bool _hasMore = true;
 
@@ -48,23 +50,30 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   Future<void> _loadMore() async {
     if (_isLoadingMore || !_hasMore) return;
     setState(() => _isLoadingMore = true);
-    
-    final response = await ApiService.instance.getNewsFeed(
-      cursor: _nextCursor,
-    );
-    
-    if (!mounted) return;
-    setState(() {
+
+    try {
+      final response = await ApiService.instance.getNewsFeed(
+        cursor: _nextCursor,
+        scope: 'main',
+      );
+
+      if (!mounted) return;
       final newArticles = response.data ?? [];
-      _articles.addAll(newArticles);
-      _nextCursor = response.nextCursor ?? "0";
-      _hasMore = true;
-      _isLoadingMore = false;
-    });
+      setState(() {
+        _articles.addAll(newArticles);
+        _nextCursor = response.nextCursor;
+        _hasMore = response.nextCursor != null;
+      });
+    } catch (_) {
+      // Leave existing articles in place and retry on next scroll.
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingMore = false);
+      }
+    }
   }
 
   Future<void> _loadFeatured() async {
-    setState(() => _isLoadingFeatured = true);
     try {
       final featured = await ApiService.instance.getFeaturedArticles();
       if (mounted) {
@@ -72,22 +81,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       }
     } catch (e) {
       // Silently fail, fall back to empty list
-    } finally {
-      if (mounted) setState(() => _isLoadingFeatured = false);
     }
   }
 
   Future<void> _loadRecommendations() async {
-    setState(() => _isLoadingRecommendations = true);
     try {
-      final recs = await ApiService.instance.getRecommendations(limit: 5);
+      final recs = await ApiService.instance.getRecommendations(limit: 15);
       if (mounted) {
         setState(() => _recommendedArticles = recs);
       }
     } catch (e) {
       // Silently fail
-    } finally {
-      if (mounted) setState(() => _isLoadingRecommendations = false);
     }
   }
 
@@ -198,7 +202,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article)),
+                    MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)),
                   );
                 },
                 child: Container(
@@ -213,9 +217,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         offset: const Offset(0, 10),
                       ),
                     ],
-                    image: article.imageUrl != null
+                    image: article.imageUrl.isNotEmpty
                         ? DecorationImage(
-                            image: CachedNetworkImageProvider(article.imageUrl!),
+                            image: CachedNetworkImageProvider(article.imageUrl),
                             fit: BoxFit.cover,
                           )
                         : null,
@@ -469,9 +473,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: borderColor),
-                    image: article.imageUrl != null
+                    image: article.imageUrl.isNotEmpty
                         ? DecorationImage(
-                            image: CachedNetworkImageProvider(article.imageUrl!),
+                            image: CachedNetworkImageProvider(article.imageUrl),
                             fit: BoxFit.cover,
                           )
                         : null,
@@ -598,9 +602,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   ),
                 ],
               ),
-              Row(
+              const Row(
                 children: [
-                  const Text(
+                  Text(
                     'Local',
                     style: TextStyle(
                       fontSize: 13,
@@ -608,7 +612,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       color: AppColors.primary,
                     ),
                   ),
-                  const Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.primary),
+                  Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.primary),
                 ],
               ),
             ],
@@ -619,7 +623,29 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           itemCount: remainingArticles.length + (_hasMore ? 1 : 0),
-          separatorBuilder: (context, index) => const SizedBox(height: 16),
+          separatorBuilder: (context, index) {
+            if ((index + 1) % 4 == 0) {
+              return Column(
+                children: [
+                  const SizedBox(height: 16),
+                  AdBannerWidget(
+                    ad: AdBanner(
+                      id: 'mock_for_you_ad_$index',
+                      imageUrl: 'https://images.unsplash.com/photo-1593642532842-98d0fd5ebc1a?auto=format&fit=crop&q=80&w=800',
+                      destinationUrl: 'https://flutter.dev',
+                      adType: 'banner',
+                      placementZone: 'feed',
+                      targetScope: 'global',
+                      displayFrequency: 1,
+                      ctr: 0.0,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              );
+            }
+            return const SizedBox(height: 16);
+          },
           itemBuilder: (context, index) {
             if (index == remainingArticles.length) {
               return const Center(
@@ -636,7 +662,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article)),
+                  MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)),
                 );
               },
               child: Row(
@@ -648,9 +674,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       borderRadius: BorderRadius.circular(20),
                       color: cardColor,
                       border: Border.all(color: borderColor),
-                      image: article.imageUrl != null
+                      image: article.imageUrl.isNotEmpty
                           ? DecorationImage(
-                              image: CachedNetworkImageProvider(article.imageUrl!),
+                              image: CachedNetworkImageProvider(article.imageUrl),
                               fit: BoxFit.cover,
                             )
                           : null,
@@ -760,9 +786,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       child: Column(
                         children: [
                           _buildBreakingNewsSection(breakingNews),
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 16),
+                          const DailyGreetingWidget(
+                            imageUrl: 'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?auto=format&fit=crop&q=80&w=800',
+                            title: 'Good Morning!',
+                            quote: 'The secret of getting ahead is getting started. Make today count.',
+                          ),
+                          const SizedBox(height: 16),
                           _buildNewsReelsSection(reels),
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 16),
+                          const HoroscopeWidget(),
+                          const SizedBox(height: 16),
                           _buildForYouSection(recommended),
                         ],
                       ),

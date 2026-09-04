@@ -177,7 +177,7 @@ class _SearchScreenState extends State<SearchScreen> {
               style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article)),
+            MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)),
           ),
         );
       },

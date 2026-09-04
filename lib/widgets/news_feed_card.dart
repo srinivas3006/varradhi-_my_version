@@ -5,6 +5,8 @@ import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../localization/app_translations.dart';
+import 'reaction_buttons.dart';
+import '../services/api_service.dart';
 
 class NewsFeedCard extends StatefulWidget {
   final NewsArticle article;
@@ -35,6 +37,10 @@ class _NewsFeedCardState extends State<NewsFeedCard>
   late Animation<double> _heartOpacity;
   
   int _currentImageIndex = 0;
+  // Local optimistic reaction state (keeps UI responsive without mutating model counts)
+  late Reaction _localReaction;
+  late int _localLikes;
+  late int _localDislikes;
 
   @override
   void initState() {
@@ -56,6 +62,10 @@ class _NewsFeedCardState extends State<NewsFeedCard>
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.0), weight: 60),
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 20),
     ]).animate(_heartController);
+
+    _localReaction = widget.article.isLiked ? Reaction.like : Reaction.none;
+    _localLikes = widget.article.likes;
+    _localDislikes = 0;
   }
 
   @override
@@ -70,11 +80,6 @@ class _NewsFeedCardState extends State<NewsFeedCard>
       widget.onLike();
     }
     _heartController.forward(from: 0.0);
-  }
-
-  void _handleLike() {
-    HapticFeedback.lightImpact();
-    widget.onLike();
   }
 
   void _handleBookmark() {
@@ -135,7 +140,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                               return _buildImage(images[index]);
                             },
                           )
-                        : _buildImage(images[0]),
+                        : _buildMediaPreview(),
                   ),
                   Positioned(
                     top: 12,
@@ -197,6 +202,50 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                         ),
                       ),
                     ),
+                  // Video Play Overlay & Duration Badge
+                  if (article.isVideo) ...[
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 38,
+                        ),
+                      ),
+                    ),
+                    if (article.formattedVideoDuration.isNotEmpty)
+                      Positioned(
+                        bottom: 12,
+                        right: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.play_circle_fill, color: Colors.white, size: 12),
+                              const SizedBox(width: 4),
+                              Text(
+                                article.formattedVideoDuration,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                   // Double tap heart animation
                   Center(
                     child: IgnorePointer(
@@ -280,7 +329,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                               fontSize: 12, color: AppColors.textMuted),
                         ),
                         const Spacer(),
-                        Icon(Icons.visibility, size: 12, color: AppColors.textMuted),
+                        const Icon(Icons.visibility, size: 12, color: AppColors.textMuted),
                         const SizedBox(width: 4),
                         Text(
                           '${article.viewCount}',
@@ -318,15 +367,29 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _actionButton(
-                          icon: article.isLiked
-                              ? Icons.favorite
-                              : Icons.favorite_border,
-                          label: _formatCount(
-                              article.likes + (article.isLiked ? 1 : 0)),
-                          active: article.isLiked,
-                          onTap: _handleLike,
-                        ),
+                            // Reaction buttons (like/dislike) - mutually exclusive, optimistic update
+                            ReactionButtons(
+                              articleId: article.id,
+                              initialReaction: _localReaction,
+                              initialLikeCount: _localLikes,
+                              initialDislikeCount: _localDislikes,
+                              onServerSync: (articleId, reaction) async {
+                                // Map Reaction enum to backend string and call ApiService
+                                await ApiService.instance.postArticleReaction(
+                                    articleId,
+                                    reaction == Reaction.like
+                                        ? 'like'
+                                        : (reaction == Reaction.dislike ? 'dislike' : 'none'));
+                              },
+                              onChanged: (reaction, likes, dislikes) {
+                                setState(() {
+                                  _localReaction = reaction;
+                                  _localLikes = likes;
+                                  _localDislikes = dislikes;
+                                  widget.article.isLiked = reaction == Reaction.like;
+                                });
+                              },
+                            ),
                           AnimatedBuilder(
                             animation: AppState.instance,
                             builder: (context, _) {
@@ -358,16 +421,137 @@ class _NewsFeedCardState extends State<NewsFeedCard>
     );
   }
 
+  Widget _buildMediaPreview() {
+    final article = widget.article;
+    final previewUrl = article.imageUrl.isNotEmpty
+        ? article.imageUrl
+        : (article.imageUrls != null && article.imageUrls!.isNotEmpty ? article.imageUrls!.first : '');
+    final shouldShowVideoCard = article.isVideo && article.videoUrl.isNotEmpty;
+
+    if (shouldShowVideoCard) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (previewUrl.isNotEmpty)
+            CachedNetworkImage(
+              imageUrl: previewUrl,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(color: AppColors.chipBg),
+              errorWidget: (context, url, error) => Container(
+                color: AppColors.chipBg,
+                child: const Icon(Icons.image_not_supported_outlined,
+                    color: AppColors.textMuted, size: 40),
+              ),
+            )
+          else
+            Container(color: AppColors.chipBg),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.center,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.18)],
+                ),
+              ),
+            ),
+          ),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
+            ),
+          ),
+          if (article.formattedVideoDuration.isNotEmpty)
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.75),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.play_circle_fill, color: Colors.white, size: 12),
+                    const SizedBox(width: 4),
+                    Text(
+                      article.formattedVideoDuration,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    return _buildImage(previewUrl);
+  }
+
   Widget _buildImage(String url) {
-    return CachedNetworkImage(
-      imageUrl: url,
-      fit: BoxFit.cover,
-      placeholder: (context, url) => Container(color: AppColors.chipBg),
-      errorWidget: (context, url, error) => Container(
+    if (url.isEmpty) {
+      return Container(
         color: AppColors.chipBg,
         child: const Icon(Icons.image_not_supported_outlined,
             color: AppColors.textMuted, size: 40),
-      ),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(color: AppColors.chipBg),
+          errorWidget: (context, url, error) => Container(
+            color: AppColors.chipBg,
+            child: const Icon(Icons.image_not_supported_outlined,
+                color: AppColors.textMuted, size: 40),
+          ),
+        ),
+
+        // Vaaradhi Watermark Badge (Bottom-Right)
+        Positioned(
+          bottom: 8,
+          right: 8,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.bolt_rounded, color: Colors.white, size: 12),
+                SizedBox(width: 3),
+                Text(
+                  'Vaaradhi',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -6,8 +6,8 @@ import '../../models/news_article.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
 import '../../screens/comments_screen.dart';
-import '../../screens/account_login_screen.dart';
 import '../../services/api_service.dart';
+import '../../repositories/news_article_repository.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
   final NewsArticle article;
@@ -41,13 +41,23 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   bool _isAudioPlaying = false;
   bool _isDisliked = false;
   final FlutterTts _flutterTts = FlutterTts();
+  bool _isLoadingDetail = false;
+  String? _detailError;
+  NewsArticle? _detailArticle;
 
   @override
   void initState() {
     super.initState();
     _flutterTts.setCompletionHandler(() {
-      if (mounted) setState(() => _isAudioPlaying = false);
+      if (mounted) {
+        setState(() => _isAudioPlaying = false);
+      }
     });
+    // Fetch full article detail (content) using slug or id from feed item.
+    final slugToFetch = widget.article.slug.isNotEmpty ? widget.article.slug : widget.article.id;
+    if (slugToFetch.isNotEmpty) {
+      _fetchArticleDetail(slugToFetch);
+    }
   }
 
   @override
@@ -56,17 +66,51 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     super.dispose();
   }
 
+  Future<void> _fetchArticleDetail(String slug) async {
+    setState(() {
+      _isLoadingDetail = true;
+      _detailError = null;
+    });
+
+    try {
+      debugPrint('Spotlight: fetching detail for slug: $slug');
+      final full = await NewsArticleRepository.instance.getDetail(slug);
+      debugPrint('Spotlight: detail fetched for $slug. content length: ${full.body.length}');
+      if (mounted) {
+        setState(() {
+          _detailArticle = full;
+          _isLoadingDetail = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Spotlight: failed to fetch detail for $slug: $e');
+      if (mounted) {
+        setState(() {
+          _detailError = e.toString();
+          _isLoadingDetail = false;
+        });
+      }
+    }
+  }
+
   Future<void> _toggleAudio() async {
     if (_isAudioPlaying) {
       await _flutterTts.stop();
-      if (mounted) setState(() => _isAudioPlaying = false);
+      if (mounted) {
+        setState(() => _isAudioPlaying = false);
+      }
     } else {
-      if (mounted) setState(() => _isAudioPlaying = true);
+      if (mounted) {
+        setState(() => _isAudioPlaying = true);
+      }
       
       final lang = AppState.instance.language;
       String code = "en-IN";
-      if (lang == 'Telugu') code = "te-IN";
-      else if (lang == 'Tamil') code = "ta-IN";
+      if (lang == 'Telugu') {
+        code = "te-IN";
+      } else if (lang == 'Tamil') {
+        code = "ta-IN";
+      }
       await _flutterTts.setLanguage(code);
 
       await _flutterTts.speak("${widget.article.title}. ${widget.article.summary}");
@@ -100,48 +144,62 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                 opacity: imageOpacity,
                 child: Transform.scale(
                   scale: imageScale,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      CachedNetworkImage(
-                        imageUrl: article.imageUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: AppColors.chipBg),
-                        errorWidget: (context, url, error) => Container(
-                          color: AppColors.chipBg,
-                          child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted),
+                  child: GestureDetector(
+                    onDoubleTap: () {
+                      HapticFeedback.mediumImpact();
+                      if (!AppState.instance.likedItemIds.contains(article.id)) {
+                        AppState.instance.toggleLike(article.id);
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Liked story ❤️'),
+                          duration: Duration(milliseconds: 900),
                         ),
-                      ),
-                      // Smooth Gradient Masking (Vignette) for seamless blend
-                      Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Theme.of(context).scaffoldBackgroundColor.withOpacity(0.5),
-                              Theme.of(context).scaffoldBackgroundColor,
-                            ],
-                            stops: const [0.6, 0.9, 1.0],
+                      );
+                    },
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: article.imageUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(color: AppColors.chipBg),
+                          errorWidget: (context, url, error) => Container(
+                            color: AppColors.chipBg,
+                            child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted),
                           ),
                         ),
-                      ),
-                      // Logo Watermark (Bottom-Right of Image)
-                      Positioned(
-                        bottom: 32,
-                        right: 16,
-                        child: Opacity(
-                          opacity: 0.8,
-                          child: Image.asset(
-                            'assets/images/logo.png',
-                            width: 38,
-                            height: 38,
-                            fit: BoxFit.contain,
+                        // Smooth Gradient Masking (Vignette) for seamless blend
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.5),
+                                Theme.of(context).scaffoldBackgroundColor,
+                              ],
+                              stops: const [0.6, 0.9, 1.0],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        // Logo Watermark (Bottom-Right of Image)
+                        Positioned(
+                          bottom: 32,
+                          right: 16,
+                          child: Opacity(
+                            opacity: 0.8,
+                            child: Image.asset(
+                              'assets/images/logo.png',
+                              width: 38,
+                              height: 38,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -172,17 +230,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             },
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _isAudioPlaying
-                                    ? AppColors.primary
-                                    : (isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
+                                decoration: BoxDecoration(
                                   color: _isAudioPlaying
                                       ? AppColors.primary
-                                      : (isDark ? Colors.white24 : Colors.black12),
+                                      : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: _isAudioPlaying
+                                        ? AppColors.primary
+                                        : (isDark ? Colors.white24 : Colors.black12),
+                                  ),
                                 ),
-                              ),
                               child: Row(
                                 children: [
                                   Icon(
@@ -248,18 +306,53 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                     
                     const SizedBox(height: 12),
                     
-                    // Body Text (Approx 200-400 chars)
+                    // Body Text (load full content from detail API)
                     Expanded(
                       child: Transform.translate(
                         offset: Offset(0, bodyOffset),
-                        child: Text(
-                          _truncateBody(article.body, 350), 
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isDark ? Colors.white70 : AppColors.textDark.withOpacity(0.85),
-                            height: 1.55,
-                          ),
-                        ),
+                        child: Builder(builder: (context) {
+                          final content = _detailArticle?.body ?? '';
+
+                          if (_isLoadingDetail && content.isEmpty) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+
+                          if (_detailError != null && content.isEmpty) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Failed to load full article content.', style: TextStyle(color: Colors.redAccent)),
+                                const SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  onPressed: () => _fetchArticleDetail(widget.article.slug),
+                                  icon: const Icon(Icons.refresh, size: 16),
+                                  label: const Text('Retry'),
+                                ),
+                                const SizedBox(height: 12),
+                                // Fallback to summary if available
+                                if (article.summary.isNotEmpty)
+                                  Text(
+                                    _truncateBody(article.summary, 350),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark ? Colors.white70 : AppColors.textDark.withValues(alpha: 0.85),
+                                      height: 1.55,
+                                    ),
+                                  ),
+                              ],
+                            );
+                          }
+
+                          final toShow = content.isNotEmpty ? content : article.summary;
+                          return Text(
+                            _truncateBody(toShow, 350),
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: isDark ? Colors.white70 : AppColors.textDark.withValues(alpha: 0.85),
+                              height: 1.55,
+                            ),
+                          );
+                        }),
                       ),
                     ),
                     
@@ -267,7 +360,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                     Transform.translate(
                       offset: Offset(0, bodyOffset),
                       child: Padding(
-                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 24, top: 12),
+                                padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 24, top: 12),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -306,10 +399,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             // Share (Center, Prominent)
                             GestureDetector(
                               onTap: widget.onShare,
-                              child: Container(
+                                child: Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: AppColors.primary.withOpacity(0.1),
+                                  color: AppColors.primary.withValues(alpha: 0.1),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.share_rounded, color: AppColors.primary, size: 24),

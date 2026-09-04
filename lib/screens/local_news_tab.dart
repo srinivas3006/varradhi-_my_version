@@ -1,11 +1,14 @@
 import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
 import '../localization/app_translations.dart';
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
+import '../services/location_service.dart';
+import 'news_detail_screen.dart';
+import '../models/ad_banner.dart';
+import '../widgets/ads/ad_banner_widget.dart';
 
 class LocalNewsTab extends StatefulWidget {
   const LocalNewsTab({super.key});
@@ -15,13 +18,12 @@ class LocalNewsTab extends StatefulWidget {
 }
 
 class _LocalNewsTabState extends State<LocalNewsTab> {
-  String _location = 'Hyderabad, Telangana';
+  late String _location;
   bool _isLoading = true;
   bool _isDetectingLocation = false;
   final List<NewsArticle> _feed = [];
   String? _nextCursor;
   bool _hasMore = true;
-  int _currentIndex = 0;
 
   // Mock list for Autocomplete (since no real Places API backend is connected)
   static const List<String> _telanganaLocations = [
@@ -31,26 +33,37 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   @override
   void initState() {
     super.initState();
+    _location = AppState.instance.displayLocation;
     _loadFeed();
   }
 
   Future<void> _loadFeed() async {
     if (!_hasMore) return;
-    
-    final response = await ApiService.instance.getNewsFeed(
-      cursor: _nextCursor,
-      category: 'local',
-    );
 
-    if (!mounted) return;
-    
-    setState(() {
+    try {
+      final response = await ApiService.instance.getNewsFeed(
+        cursor: _nextCursor,
+        scope: 'local',
+        state: AppState.instance.stateName,
+        district: AppState.instance.district,
+        city: AppState.instance.city,
+        latitude: AppState.instance.latitude,
+        longitude: AppState.instance.longitude,
+      );
+
+      if (!mounted) return;
       final newArticles = response.data ?? [];
-      _feed.addAll(newArticles);
-      _nextCursor = response.nextCursor ?? "0";
-      _hasMore = true;
-      _isLoading = false;
-    });
+      setState(() {
+        _feed.addAll(newArticles);
+        _nextCursor = response.nextCursor;
+        _hasMore = response.nextCursor != null;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   Future<void> _refresh() async {
@@ -59,56 +72,31 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       _feed.clear();
       _nextCursor = null;
       _hasMore = true;
-      _currentIndex = 0;
     });
     await _loadFeed();
   }
 
   Future<void> _detectLocation() async {
     setState(() => _isDetectingLocation = true);
-    
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      setState(() => _isDetectingLocation = false);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location services are disabled.')));
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        setState(() => _isDetectingLocation = false);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permissions are denied')));
-        return;
-      }
-    }
-    
-    if (permission == LocationPermission.deniedForever) {
-      setState(() => _isDetectingLocation = false);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permissions are permanently denied.')));
-      return;
-    } 
 
     try {
-      Position position = await Geolocator.getCurrentPosition();
-      List<Placemark> placemarks = await Geocoding().placemarkFromCoordinates(position.latitude, position.longitude);
-      
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks[0];
-        String city = place.locality ?? place.subAdministrativeArea ?? place.administrativeArea ?? 'Unknown';
-        String state = place.administrativeArea ?? 'Unknown';
+      final deviceLocation = await LocationService.detectLocation();
+      AppState.instance.setDeviceLocation(deviceLocation);
+      if (AppState.instance.isLoggedIn) {
+        await ApiService.instance.updateUserLocationDevice(deviceLocation);
+      }
+      if (mounted) {
         setState(() {
-          _location = '$city, $state';
+          _location = AppState.instance.displayLocation;
         });
         _refresh();
-        if (mounted) Navigator.pop(context);
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+      }
+    } on LocationException catch (exception) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exception.message)));
       }
     } catch (e) {
       if (mounted) {
@@ -217,8 +205,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                         ),
                         onPressed: _isDetectingLocation ? null : () async {
                           setModalState(() => _isDetectingLocation = true);
+                          final navigator = Navigator.of(context);
                           await _detectLocation();
-                          if (mounted && Navigator.canPop(context)) {
+                          if (mounted && navigator.canPop()) {
                             setModalState(() => _isDetectingLocation = false);
                           }
                         },
@@ -338,7 +327,29 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       itemCount: _feed.length + (_hasMore ? 1 : 0),
-      separatorBuilder: (context, index) => const SizedBox(height: 16),
+      separatorBuilder: (context, index) {
+        if ((index + 1) % 4 == 0) {
+          return Column(
+            children: [
+              const SizedBox(height: 16),
+              AdBannerWidget(
+                ad: AdBanner(
+                  id: 'mock_local_ad_$index',
+                  imageUrl: 'https://images.unsplash.com/photo-1593642532842-98d0fd5ebc1a?auto=format&fit=crop&q=80&w=800',
+                  destinationUrl: 'https://flutter.dev',
+                  adType: 'banner',
+                  placementZone: 'feed',
+                  targetScope: 'local',
+                  displayFrequency: 1,
+                  ctr: 0.0,
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+          );
+        }
+        return const SizedBox(height: 16);
+      },
       itemBuilder: (context, index) {
         if (index == _feed.length) {
           return const Center(
@@ -353,7 +364,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
-            // Navigator.push(context, MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article)));
+            Navigator.push(context, MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)));
           },
           child: Row(
             children: [
@@ -364,9 +375,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                   borderRadius: BorderRadius.circular(20),
                   color: cardColor,
                   border: Border.all(color: borderColor),
-                  image: article.imageUrl != null
+                  image: article.imageUrl.isNotEmpty
                       ? DecorationImage(
-                          image: NetworkImage(article.imageUrl!),
+                          image: NetworkImage(article.imageUrl),
                           fit: BoxFit.cover,
                         )
                       : null,

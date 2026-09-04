@@ -2,6 +2,54 @@ import 'package:dio/dio.dart';
 import '../data/mock_videos.dart';
 import '../data/mock_news.dart';
 import '../state/app_state.dart';
+
+/// Shared fake submission shape for the Admin UGC Moderation mocks below —
+/// matches AdminUgcSubmissionModel.fromJson's expected fields.
+/// The `{id}` segment in a `.../submissions/{id}/<action>/` path.
+String _submissionIdFromPath(String path) {
+  final segments = path.split('/').where((e) => e.isNotEmpty).toList();
+  return segments[segments.length - 2];
+}
+
+Map<String, dynamic> _mockAdminUgcSubmission(String id, {String status = 'PENDING', String title = 'Mock UGC submission'}) {
+  return {
+    "id": id,
+    "title": title,
+    "description": "Mock description for $title.",
+    "category": "local",
+    "publication_level": "district",
+    "level": "district",
+    "status": status,
+    "village": "Madhapur",
+    "subdistrict": "Serilingampally",
+    "district": "Hyderabad",
+    "state": "Telangana",
+    "latitude": 17.385,
+    "longitude": 78.4867,
+    "media_url": "https://images.unsplash.com/photo-1596727289524-77e77b69ab8d",
+    "media_type": "image",
+    "thumbnail_url": "https://images.unsplash.com/photo-1596727289524-77e77b69ab8d",
+    "branded_media_url": "",
+    "upload_status": "READY",
+    "validation_status": "VALID",
+    "reporter": {
+      "id": "mock-reporter-1",
+      "name": "Jane Doe",
+      "email": "jane@example.com",
+      "mobile": "9876543210",
+      "trust_level": "NEW_USER",
+      "trust_score": 40,
+      "is_blocked": false,
+    },
+    "duplicate_flagged": false,
+    "duplicate_score": 0,
+    "report_count": 0,
+    "admin_notes": "",
+    "created_at": DateTime.now().toIso8601String(),
+    "updated_at": DateTime.now().toIso8601String(),
+  };
+}
+
 class MockInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
@@ -178,6 +226,27 @@ class MockInterceptor extends Interceptor {
 
     // Handle User Location POST
     if (options.path.contains('/api/v1/user/location/')) {
+      final authHeader = options.headers['Authorization'];
+      if (authHeader == null || !authHeader.toString().startsWith('Bearer ')) {
+        return handler.reject(
+          DioException(
+            requestOptions: options,
+            response: Response(
+              requestOptions: options,
+              statusCode: 401,
+              data: {
+                "errors": [
+                  {
+                    "code": "unauthorized",
+                    "message": "Authentication credentials were not provided."
+                  }
+                ]
+              },
+            ),
+            type: DioExceptionType.badResponse,
+          ),
+        );
+      }
       return handler.resolve(
         Response(
           requestOptions: options,
@@ -228,14 +297,31 @@ class MockInterceptor extends Interceptor {
 
     // Handle Article Feed
     if (options.path.contains('/api/v1/articles/feed/')) {
+      final reqDistrict = options.queryParameters['district'] ?? options.queryParameters['city'] ?? AppState.instance.district;
+      final reqState = options.queryParameters['state'] ?? AppState.instance.stateName;
+      final lat = options.queryParameters['latitude'] ?? options.queryParameters['lat'] ?? AppState.instance.latitude;
+      final lon = options.queryParameters['longitude'] ?? options.queryParameters['lng'] ?? options.queryParameters['lon'] ?? AppState.instance.longitude;
+
+      final articles = mockArticles.map((a) {
+        final json = a.toJson();
+        // Dynamically personalize top article for real-time location feedback
+        if (json['id'] == '1' || json['id'] == 't1') {
+          json['title'] = '$reqDistrict Local News & Real-Time Regional Updates';
+          json['summary'] = 'Latest developments and breaking stories in $reqDistrict, $reqState${lat != null ? " (GPS: ${double.parse(lat.toString()).toStringAsFixed(3)}, ${double.parse(lon.toString()).toStringAsFixed(3)})" : ""}.';
+          json['category'] = reqDistrict;
+          json['location_tags'] = [reqDistrict, reqState];
+        }
+        return json;
+      }).toList();
+
       return handler.resolve(
         Response(
           requestOptions: options,
           statusCode: 200,
           data: {
-            "data": mockArticles.map((a) => a.toJson()).toList(),
+            "data": articles,
             "meta": {
-              "count": mockArticles.length,
+              "count": articles.length,
               "next": null,
               "previous": null
             },
@@ -267,7 +353,7 @@ class MockInterceptor extends Interceptor {
           requestOptions: options,
           statusCode: 200,
           data: {
-            "data": mockArticles.skip(5).take(5).map((a) => a.toJson()).toList(),
+            "data": mockArticles.skip(5).take(15).map((a) => a.toJson()).toList(),
             "meta": {},
             "errors": null
           },
@@ -976,54 +1062,174 @@ class MockInterceptor extends Interceptor {
       );
     }
     
-    // --- Admin Moderation ---
-    if (options.path.endsWith('/api/v1/ugc/moderation/queue/')) {
+    // --- Admin UGC Moderation (lib/features/admin/) ---
+    if (options.path.endsWith('/admin/api/ugc/queue/')) {
       return handler.resolve(
         Response(
           requestOptions: options,
           statusCode: 200,
           data: {
-            "data": [
-              {
-                "id": "mock-mod-1",
-                "title": "Mock pending video",
-                "content_type": "video",
-                "category": "local",
-                "thumbnail_url": "https://example.com/thumb.jpg",
-                "created_at": DateTime.now().toIso8601String(),
-                "uploader": "Jane Doe"
-              },
-              {
-                "id": "mock-mod-2",
-                "title": "Mock pending image",
-                "content_type": "image",
-                "category": "local",
-                "thumbnail_url": "https://example.com/thumb.jpg",
-                "created_at": DateTime.now().toIso8601String(),
-                "uploader": "John Smith"
-              }
+            "items": [
+              _mockAdminUgcSubmission('mock-ugc-1', status: 'PENDING', title: 'Mock pending video report'),
+              _mockAdminUgcSubmission('mock-ugc-2', status: 'FLAGGED', title: 'Mock flagged image report'),
+              _mockAdminUgcSubmission('mock-ugc-3', status: 'APPROVED', title: 'Mock approved report'),
             ],
-            "meta": {},
-            "errors": null
+            "count": 3,
+            "next": null,
+            "previous": null,
           },
         ),
       );
     }
+    if (RegExp(r'/admin/api/ugc/submissions/[^/]+/$').hasMatch(options.path) &&
+        (options.method == 'GET' || options.method == 'PATCH')) {
+      final id = options.path.split('/').where((e) => e.isNotEmpty).last;
+      final base = _mockAdminUgcSubmission(id, title: 'Mock submission detail $id');
+      final merged = options.method == 'PATCH' && options.data is Map ? {...base, ...options.data as Map} : base;
+      return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": merged}),
+      );
+    }
+    if (options.path.contains('/api/v1/ugc/admin/submissions/') && options.path.endsWith('/branded-media/')) {
+      final submission = _mockAdminUgcSubmission(_submissionIdFromPath(options.path))
+        ..['branded_media_url'] = 'https://example.com/mock-branded.jpg';
+      return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": submission}),
+      );
+    }
     if (options.path.contains('/admin/api/ugc/submissions/') && options.path.endsWith('/approve/')) {
       return handler.resolve(
-        Response(
-          requestOptions: options,
-          statusCode: 200,
-          data: {"data": {"status": "success"}, "meta": {}, "errors": null},
-        ),
+        Response(requestOptions: options, statusCode: 200, data: {"data": _mockAdminUgcSubmission(_submissionIdFromPath(options.path), status: 'APPROVED')}),
       );
     }
     if (options.path.contains('/admin/api/ugc/submissions/') && options.path.endsWith('/reject/')) {
       return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": _mockAdminUgcSubmission(_submissionIdFromPath(options.path), status: 'REJECTED')}),
+      );
+    }
+    if (options.path.contains('/admin/api/ugc/submissions/') && options.path.endsWith('/flag/')) {
+      return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": _mockAdminUgcSubmission(_submissionIdFromPath(options.path), status: 'FLAGGED')}),
+      );
+    }
+    if (options.path.endsWith('/admin/api/ugc/submissions/bulk-action/')) {
+      final ids = (options.data is Map ? options.data['ids'] : null) as List? ?? [];
+      return handler.resolve(
         Response(
           requestOptions: options,
           statusCode: 200,
-          data: {"data": {"status": "success"}, "meta": {}, "errors": null},
+          data: {"data": {"success_count": ids.length, "failed_count": 0, "errors": []}},
+        ),
+      );
+    }
+    if (options.path.contains('/admin/api/ugc/submissions/') &&
+        (options.path.endsWith('/block-uploader/') ||
+            options.path.endsWith('/unblock-uploader/') ||
+            options.path.endsWith('/increase-trust/') ||
+            options.path.endsWith('/decrease-trust/'))) {
+      return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": {"status": "success"}}),
+      );
+    }
+    if (options.path.endsWith('/admin/api/ugc/moderation-logs/')) {
+      return handler.resolve(
+        Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: {
+            "items": [
+              {
+                "id": "mock-log-1",
+                "action": "APPROVE",
+                "submission_id": "mock-ugc-3",
+                "submission_title": "Mock approved report",
+                "old_status": "PENDING",
+                "new_status": "APPROVED",
+                "notes": "Verified by editor.",
+                "admin_email": "editor@varadhi.example.com",
+                "created_at": DateTime.now().toIso8601String(),
+              },
+            ],
+            "count": 1,
+            "next": null,
+            "previous": null,
+          },
+        ),
+      );
+    }
+    if (options.path.endsWith('/admin/api/ugc/reports/')) {
+      return handler.resolve(
+        Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: {
+            "items": [
+              {
+                "id": "mock-report-1",
+                "status": "PENDING",
+                "reason": "spam",
+                "target": {"id": "mock-ugc-2", "title": "Mock flagged image report"},
+                "reporter_note": "This looks fake.",
+                "reporter_email": "user@example.com",
+                "created_at": DateTime.now().toIso8601String(),
+              },
+            ],
+            "count": 1,
+            "next": null,
+            "previous": null,
+          },
+        ),
+      );
+    }
+    if (options.path.contains('/admin/api/ugc/reports/') && (options.path.endsWith('/review/') || options.path.endsWith('/dismiss/'))) {
+      return handler.resolve(
+        Response(requestOptions: options, statusCode: 200, data: {"data": {"status": "success"}}),
+      );
+    }
+    if (options.path.contains('/admin/api/ugc/reporters/')) {
+      return handler.resolve(
+        Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: {
+            "data": {
+              "id": "mock-reporter-1",
+              "name": "Jane Doe",
+              "email": "jane@example.com",
+              "mobile": "9876543210",
+              "trust_level": "TRUSTED_REPORTER",
+              "trust_score": 70,
+              "submissions_count": 12,
+              "daily_uploads_count": 1,
+              "is_blocked": false,
+              "recent_submissions": [
+                {"id": "mock-ugc-1", "title": "Mock pending video report", "status": "PENDING"},
+              ],
+            },
+          },
+        ),
+      );
+    }
+    if (options.path.endsWith('/admin/api/ugc/otp-deliveries/')) {
+      return handler.resolve(
+        Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: {
+            "items": [
+              {
+                "id": "mock-otp-1",
+                "mobile": "9876543210",
+                "provider": "MSG91",
+                "status": "DELIVERED",
+                "failure_reason": "",
+                "created_at": DateTime.now().toIso8601String(),
+              },
+            ],
+            "count": 1,
+            "next": null,
+            "previous": null,
+          },
         ),
       );
     }
@@ -1453,42 +1659,7 @@ class MockInterceptor extends Interceptor {
       );
     }
 
-    // --- Bookmarks ---
-    if (options.path.contains('/api/v1/bookmarks/toggle/')) {
-      final id = options.data['article'];
-      if (id != null) {
-        AppState.instance.toggleBookmark(id);
-      }
-      return handler.resolve(
-        Response(
-          requestOptions: options,
-          statusCode: 200,
-          data: {
-            "data": {"status": "success", "message": "Bookmark toggled"},
-            "meta": {},
-            "errors": null
-          },
-        ),
-      );
-    }
 
-    if (options.path.endsWith('/api/v1/bookmarks/')) {
-      final allArticles = mockArticles;
-      return handler.resolve(
-        Response(
-          requestOptions: options,
-          statusCode: 200,
-          data: {
-            "data": allArticles
-                .where((a) => AppState.instance.isBookmarked(a.id))
-                .map((a) => a.toJson())
-                .toList(),
-            "meta": {},
-            "errors": null
-          },
-        ),
-      );
-    }
 
     // Pass through unmocked requests
     handler.next(options);

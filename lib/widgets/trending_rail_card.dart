@@ -48,7 +48,7 @@ class TrendingRailCard extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => NewsDetailScreen(article: article),
+                        builder: (_) => NewsDetailScreen(article: article, slug: article.slug),
                       ),
                     );
                   },

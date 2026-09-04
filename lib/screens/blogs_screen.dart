@@ -33,16 +33,22 @@ class _BlogsScreenState extends State<BlogsScreen> {
     if (_isLoading || !_hasMore) return;
     setState(() => _isLoading = true);
 
-    final response = await ApiService.instance.getBlogsFeed(cursor: _nextCursor);
+    try {
+      final response = await ApiService.instance.getBlogsFeed(cursor: _nextCursor);
 
-    if (!mounted) return;
-    setState(() {
+      if (!mounted) return;
       final newArticles = response.data ?? [];
-      _blogs.addAll(newArticles);
-      _nextCursor = response.nextCursor;
-      _hasMore = _nextCursor != null;
-      _isLoading = false;
-    });
+      setState(() {
+        _blogs.addAll(newArticles);
+        _nextCursor = response.nextCursor;
+        _hasMore = response.nextCursor != null;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   @override
@@ -83,7 +89,7 @@ class _BlogsScreenState extends State<BlogsScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => NewsDetailScreen(article: blog),
+                        builder: (_) => NewsDetailScreen(article: blog, slug: blog.slug),
                       ),
                     );
                   },

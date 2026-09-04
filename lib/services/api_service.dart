@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
 import '../models/live_news.dart';
-import '../models/feed_item.dart';
 import '../models/video_item.dart';
 import '../models/category.dart';
 import '../models/unified_feed_item.dart';
@@ -11,6 +11,8 @@ import '../models/ad_banner.dart';
 import '../models/reporter_post.dart';
 import '../models/poll.dart';
 import 'dio_client.dart';
+import 'location_service.dart';
+import '../state/app_state.dart';
 
 class ApiService {
   ApiService._internal();
@@ -116,8 +118,56 @@ class ApiService {
   */
 
   // --- Location & Preferences ---
+  /// Syncs user location with backend if logged in.
+  /// If the user is a guest, POST /api/v1/user/location/ MUST NOT be called.
   Future<void> updateUserLocation(Map<String, dynamic> locationData) async {
+    if (!AppState.instance.isLoggedIn || AppState.instance.authToken == null || AppState.instance.authToken!.isEmpty) {
+      debugPrint('Guest mode: Skipping POST /api/v1/user/location/');
+      return;
+    }
     await _dio.post('/api/v1/user/location/', data: locationData);
+  }
+
+  Future<void> updateUserLocationDevice(DeviceLocation location) async {
+    if (!AppState.instance.isLoggedIn || AppState.instance.authToken == null || AppState.instance.authToken!.isEmpty) {
+      debugPrint('Guest mode: Skipping POST /api/v1/user/location/');
+      return;
+    }
+    await updateUserLocation({
+      'lat': location.latitude,
+      'lon': location.longitude,
+      'city': location.city,
+      'district': location.district,
+      'subdistrict': location.subdistrict ?? location.district,
+      'village': location.village ?? '',
+      'state': location.state,
+      'country': location.country,
+      'location_source': location.source,
+      'accuracy_meters': location.accuracyMeters,
+    });
+  }
+
+  /// Helper to sync current AppState location to backend for logged-in users.
+  Future<void> syncUserLocation() async {
+    if (!AppState.instance.isLoggedIn || AppState.instance.authToken == null || AppState.instance.authToken!.isEmpty) {
+      debugPrint('Guest mode: Skipping syncUserLocation');
+      return;
+    }
+    try {
+      await updateUserLocation({
+        'lat': AppState.instance.latitude,
+        'lon': AppState.instance.longitude,
+        'city': AppState.instance.city,
+        'district': AppState.instance.district,
+        'subdistrict': AppState.instance.subdistrict,
+        'village': AppState.instance.village,
+        'state': AppState.instance.stateName,
+        'country': AppState.instance.country,
+        'location_source': 'gps',
+      });
+    } catch (e) {
+      debugPrint('Failed to sync location to server: $e');
+    }
   }
 
   Future<Map<String, dynamic>> updateCategoryPreferences(Map<String, double> categoryWeights) async {
@@ -130,7 +180,17 @@ class ApiService {
   // --- Feeds ---
   Future<NewsArticle> getArticleDetail(String slug) async {
     final response = await _dio.get('/api/v1/articles/$slug/');
-    return NewsArticle.fromJson(response.data['data']);
+    final payload = response.data is Map
+        ? ((response.data as Map<String, dynamic>)['data'] ?? response.data)
+        : response.data;
+
+    debugPrint('Article detail payload for slug "$slug": $payload');
+
+    if (payload is! Map<String, dynamic>) {
+      throw Exception('Unexpected detail payload format for article $slug');
+    }
+
+    return NewsArticle.fromJson(payload);
   }
 
   Future<List<NewsArticle>> getFeaturedArticles({String? lang}) async {
@@ -198,6 +258,22 @@ class ApiService {
     }
   }
 
+  /// Post a like/dislike/none reaction for an article.
+  /// The backend is expected to accept `article_id` and `reaction` ('like'|'dislike'|'none')
+  Future<Map<String, dynamic>> postArticleReaction(String articleId, Object reaction) async {
+    // Accept either a String ('like'|'dislike'|'none') or an enum/other whose
+    // toString() ends with the value (e.g. 'Reaction.like'). This avoids
+    // importing UI enums into the service layer.
+    final String r = reaction is String
+        ? reaction
+        : reaction.toString().split('.').last;
+    final response = await _dio.post('/api/v1/articles/reaction/', data: {
+      'article_id': articleId,
+      'reaction': r,
+    });
+    return response.data['data'] as Map<String, dynamic>;
+  }
+
   // --- Feeds ---
   Future<ApiResponse<List<UnifiedFeedItem>>> getUnifiedFeed({
     String? cursor,
@@ -236,6 +312,7 @@ class ApiService {
   Future<ApiResponse<List<NewsArticle>>> getNewsFeed({
     String? cursor,
     int? pageSize,
+    String? scope,
     String? lang,
     String? category,
     bool? breaking,
@@ -248,8 +325,9 @@ class ApiService {
     double? longitude,
   }) async {
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
-      if (cursor != null) 'cursor': cursor,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       if (pageSize != null) 'page_size': pageSize,
+      if (scope != null) 'scope': scope,
       if (lang != null) 'lang': lang,
       if (category != null && category != 'For You' && category != 'Trending') 'category': category.toLowerCase(),
       if (breaking != null) 'breaking': breaking,
@@ -258,19 +336,24 @@ class ApiService {
       if (city != null) 'city': city,
       if (subdistrict != null) 'subdistrict': subdistrict,
       if (village != null) 'village': village,
-      if (latitude != null) 'latitude': latitude,
-      if (longitude != null) 'longitude': longitude,
+      if (latitude != null) ...{
+        'latitude': latitude,
+        'lat': latitude,
+      },
+      if (longitude != null) ...{
+        'longitude': longitude,
+        'lng': longitude,
+        'lon': longitude,
+      },
     });
     return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
       return (json as List).map((i) => NewsArticle.fromJson(i)).toList();
     });
   }
 
-
-
   Future<ApiResponse<List<NewsArticle>>> getBlogsFeed({String? cursor}) async {
     final response = await _dio.get('/api/v1/articles/blogs/', queryParameters: {
-      if (cursor != null) 'cursor': cursor,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     });
     return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
       return (json as List).map((i) => NewsArticle.fromJson(i)).toList();
@@ -312,7 +395,7 @@ class ApiService {
     String? village,
   }) async {
     final response = await _dio.get('/api/v1/articles/video-feed/', queryParameters: {
-      if (cursor != null) 'cursor': cursor,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       if (pageSize != null) 'page_size': pageSize,
       if (lang != null) 'lang': lang,
       if (scope != null) 'scope': scope,
@@ -649,35 +732,22 @@ class ApiService {
   }
 
   // --- Admin Moderation ---
-  Future<List<ReporterPost>> getModerationQueue() async {
-    try {
-      final response = await _dio.get('/api/v1/ugc/moderation/queue/');
-      final List data = response.data['data'] ?? [];
-      return data.map((json) => ReporterPost(
-        id: json['id'] ?? '',
-        reporterName: json['uploader'] ?? 'Reporter',
-        type: json['content_type'] == 'video' ? PostType.video : PostType.image,
-        caption: json['title'] ?? '',
-        category: json['category'] ?? 'local',
-        mediaUrl: json['thumbnail_url'] ?? json['media_url'] ?? '',
-        status: PostStatus.pending,
-        submittedAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
-      )).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<bool> approveUgcSubmission(String submissionId) async {
-    final response = await _dio.post('/admin/api/ugc/submissions/$submissionId/approve/');
+  // Note: UGC submission moderation (queue/approve/reject/flag/bulk-action/
+  // trust/block) now lives entirely in lib/features/admin/ against the
+  // real /admin/api/ugc/... endpoints. Only the unrelated article
+  // moderation calls below remain here.
+  Future<bool> approveArticle(String articleId) async {
+    final response = await _dio.post('/admin/api/articles/$articleId/approve/');
     return response.statusCode == 200 || response.statusCode == 201;
   }
 
-  Future<bool> rejectUgcSubmission(String submissionId, String? reason) async {
-    final data = reason != null && reason.isNotEmpty ? {'reason': reason} : {};
-    final response = await _dio.post('/admin/api/ugc/submissions/$submissionId/reject/', data: data);
+  Future<bool> rejectArticle(String articleId, String? reason) async {
+    final data = reason != null && reason.isNotEmpty ? {'status': 'rejected', 'reason': reason} : {'status': 'rejected'};
+    final response = await _dio.post('/admin/api/articles/$articleId/reject/', data: data);
     return response.statusCode == 200 || response.statusCode == 201;
   }
+
+
 
   // --- Posters ---
   Future<List<dynamic>> getPosters({

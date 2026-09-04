@@ -4,6 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/news_article.dart';
 import '../models/redeem_request.dart';
 import '../models/reporter_post.dart';
+import '../models/app_notification.dart';
+import '../services/api_service.dart';
+import '../services/location_service.dart';
 
 /// Simple app-wide state singleton. Scalar fields (onboarding completion,
 /// language, location, coins, login, reporter status) survive app restarts
@@ -29,6 +32,12 @@ class AppState extends ChangeNotifier {
   String language = 'English';
   String stateName = 'Telangana';
   String district = 'Hyderabad';
+  String city = 'Hyderabad';
+  String subdistrict = '';
+  String village = '';
+  String country = 'India';
+  double? latitude;
+  double? longitude;
   bool isLoggedIn = false;
 
   /// Never persisted via SharedPreferences. See init()/setAuthToken()/
@@ -40,10 +49,15 @@ class AppState extends ChangeNotifier {
   /// server-side against the token, since a locally-stored bool can always
   /// be flipped on a rooted/jailbroken device.
   bool isAdmin = false;
+
+  /// Same UI-convenience caveat as isAdmin above. Gates the Admin UGC
+  /// Moderation console alongside isAdmin (isAdmin || isContributor).
+  bool isContributor = false;
   String userName = 'Guest User';
   String userPhone = '';
+  String? profileImagePath;
   String? fcmToken;
-  ThemeMode themeMode = ThemeMode.system;
+  ThemeMode themeMode = ThemeMode.light;
 
   List<String> preferredCategories = [];
   bool hasPromptedPreferences = false;
@@ -61,6 +75,10 @@ class AppState extends ChangeNotifier {
 
   /// True if the user has push notifications enabled globally in their profile
   bool pushNotificationsEnabled = true;
+
+  // ---- Notifications state ----
+  List<AppNotification> notifications = [];
+  int get unreadNotificationsCount => notifications.where((n) => !n.isRead).length;
 
   // ---- Comments state ----
   final Map<String, List<Comment>> articleComments = {};
@@ -93,10 +111,18 @@ class AppState extends ChangeNotifier {
     language = prefs.getString('language') ?? language;
     stateName = prefs.getString('stateName') ?? stateName;
     district = prefs.getString('district') ?? district;
+    city = prefs.getString('city') ?? city;
+    subdistrict = prefs.getString('subdistrict') ?? subdistrict;
+    village = prefs.getString('village') ?? village;
+    country = prefs.getString('country') ?? country;
+    latitude = prefs.getDouble('latitude');
+    longitude = prefs.getDouble('longitude');
     isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
     isAdmin = prefs.getBool('isAdmin') ?? false;
+    isContributor = prefs.getBool('isContributor') ?? false;
     userName = prefs.getString('userName') ?? userName;
     userPhone = prefs.getString('userPhone') ?? userPhone;
+    profileImagePath = prefs.getString('profileImagePath');
     isReporter = prefs.getBool('isReporter') ?? false;
     uploadVerified = prefs.getBool('uploadVerified') ?? false;
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
@@ -109,12 +135,12 @@ class AppState extends ChangeNotifier {
     }
 
     final themeStr = prefs.getString('themeMode');
-    if (themeStr == 'light') {
-      themeMode = ThemeMode.light;
-    } else if (themeStr == 'dark') {
+    if (themeStr == 'dark') {
       themeMode = ThemeMode.dark;
-    } else {
+    } else if (themeStr == 'system') {
       themeMode = ThemeMode.system;
+    } else {
+      themeMode = ThemeMode.light;
     }
 
     preferredCategories = prefs.getStringList('preferredCategories') ?? [];
@@ -133,10 +159,22 @@ class AppState extends ChangeNotifier {
     await prefs.setString('language', language);
     await prefs.setString('stateName', stateName);
     await prefs.setString('district', district);
+    await prefs.setString('city', city);
+    await prefs.setString('subdistrict', subdistrict);
+    await prefs.setString('village', village);
+    await prefs.setString('country', country);
+    if (latitude != null) await prefs.setDouble('latitude', latitude!);
+    if (longitude != null) await prefs.setDouble('longitude', longitude!);
     await prefs.setBool('isLoggedIn', isLoggedIn);
     await prefs.setBool('isAdmin', isAdmin);
+    await prefs.setBool('isContributor', isContributor);
     await prefs.setString('userName', userName);
     await prefs.setString('userPhone', userPhone);
+    if (profileImagePath != null) {
+      await prefs.setString('profileImagePath', profileImagePath!);
+    } else {
+      await prefs.remove('profileImagePath');
+    }
     await prefs.setString('themeMode', themeMode.name);
     await prefs.setStringList('preferredCategories', preferredCategories);
     await prefs.setBool('hasPromptedPreferences', hasPromptedPreferences);
@@ -164,6 +202,53 @@ class AppState extends ChangeNotifier {
   Future<void> _clearAuthToken() async {
     authToken = null;
     await _secureStorage.delete(key: _authTokenKey);
+  }
+
+  /// Real gate for the Admin UGC Moderation console: fetches /auth/me/ and
+  /// defensively derives isAdmin/isContributor from whichever role signals
+  /// the backend actually sends. Never throws — a failed refresh just
+  /// leaves the existing flags untouched, so it's safe to fire-and-forget
+  /// from login/signup/app-startup without risking those flows.
+  Future<void> refreshRolesFromServer() async {
+    try {
+      final me = await ApiService.instance.getMe();
+      isAdmin = _hasAdminSignal(me);
+      isContributor = isAdmin || _hasContributorSignal(me);
+      notifyListeners();
+      await _persist();
+    } catch (e) {
+      debugPrint('refreshRolesFromServer failed, keeping existing role flags: $e');
+    }
+  }
+
+  static bool _matchesKeyword(dynamic value, List<String> keywords) {
+    if (value == null) return false;
+    if (value is String) {
+      final lower = value.toLowerCase();
+      return keywords.any(lower.contains);
+    }
+    if (value is List) {
+      return value.any((e) => _matchesKeyword(e, keywords));
+    }
+    return false;
+  }
+
+  static bool _hasAdminSignal(Map<String, dynamic> me) {
+    if (me['is_admin'] == true || me['is_staff'] == true || me['is_superuser'] == true) return true;
+    const keywords = ['admin', 'staff', 'superuser'];
+    return _matchesKeyword(me['role'], keywords) ||
+        _matchesKeyword(me['roles'], keywords) ||
+        _matchesKeyword(me['groups'], keywords) ||
+        _matchesKeyword(me['permissions'], keywords);
+  }
+
+  static bool _hasContributorSignal(Map<String, dynamic> me) {
+    if (me['is_contributor'] == true) return true;
+    const keywords = ['contributor', 'reporter'];
+    return _matchesKeyword(me['role'], keywords) ||
+        _matchesKeyword(me['roles'], keywords) ||
+        _matchesKeyword(me['groups'], keywords) ||
+        _matchesKeyword(me['permissions'], keywords);
   }
 
   /// Marks onboarding (language + location) as done. Login stays optional/
@@ -202,13 +287,52 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  void setLocation(String state, String district) {
+  String get displayLocation {
+    if (city.isNotEmpty && district.isNotEmpty && city != district) {
+      return '$city, $district';
+    } else if (city.isNotEmpty) {
+      return '$city, $stateName';
+    } else if (district.isNotEmpty) {
+      return '$district, $stateName';
+    }
+    return stateName;
+  }
+
+  void setLocation(
+    String state,
+    String district, {
+    String? city,
+    String? subdistrict,
+    String? village,
+    String? country,
+    double? latitude,
+    double? longitude,
+  }) {
     stateName = state;
     this.district = district;
+    this.city = city ?? (district.isNotEmpty ? district : state);
+    this.subdistrict = subdistrict ?? '';
+    this.village = village ?? '';
+    this.country = country ?? 'India';
+    this.latitude = latitude;
+    this.longitude = longitude;
     hasOnboarded = true;
     hasValidLocation = true;
     notifyListeners();
     _persist();
+  }
+
+  void setDeviceLocation(DeviceLocation loc) {
+    setLocation(
+      loc.state,
+      loc.district,
+      city: loc.city,
+      subdistrict: loc.subdistrict ?? loc.district,
+      village: loc.village ?? '',
+      country: loc.country,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+    );
   }
 
   void setPreferredCategories(List<String> categories) {
@@ -288,6 +412,32 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
+  void markNotificationRead(String id) {
+    final index = notifications.indexWhere((n) => n.id == id);
+    if (index != -1 && !notifications[index].isRead) {
+      notifications[index].isRead = true;
+      notifyListeners();
+    }
+  }
+
+  void markAllNotificationsRead() {
+    bool changed = false;
+    for (var n in notifications) {
+      if (!n.isRead) {
+        n.isRead = true;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  void updateProfile({required String name, String? imagePath}) {
+    userName = name;
+    profileImagePath = imagePath;
+    notifyListeners();
+    _persist();
+  }
+
   Future<void> logout() async {
     /*
     // TODO: Uncomment when ready to integrate backend session revocation
@@ -300,6 +450,7 @@ class AppState extends ChangeNotifier {
 
     isLoggedIn = false;
     isAdmin = false;
+    isContributor = false;
     userName = 'Guest User';
     userPhone = '';
     await _clearAuthToken();
@@ -324,50 +475,7 @@ class AppState extends ChangeNotifier {
   final Map<String, int> userAddedComments = {};
 
   List<Comment> getComments(String articleId) {
-    if (!articleComments.containsKey(articleId)) {
-      _seedMockComments(articleId);
-    }
-    return articleComments[articleId]!;
-  }
-
-  void _seedMockComments(String articleId) {
-    final mockTexts = [
-      "Very informative article, thanks for sharing!",
-      "I totally agree with this.",
-      "This is a big issue in our area right now.",
-      "Can we get more coverage on this topic?",
-      "Excellent reporting.",
-      "Hope the authorities take action soon.",
-      "Superb! Great work by the team.",
-      "This needs more attention from the government.",
-      "Informative piece. Please keep us updated.",
-      "Very sad to see this happen."
-    ];
-    final mockNames = [
-      "Ravi Kumar", "Srinivas", "Priya", "Krishna", "Venkatesh", 
-      "Suresh", "Ramesh", "Anitha", "Lakshmi", "Karthik"
-    ];
-    
-    mockTexts.shuffle();
-    mockNames.shuffle();
-    
-    final commentsList = <Comment>[];
-    // Generate 4 to 8 mock comments based on articleId hash
-    final count = 4 + (articleId.hashCode.abs() % 5); 
-    for (int i = 0; i < count; i++) {
-      final name = mockNames[i % mockNames.length];
-      commentsList.add(
-        Comment(
-          id: 'mock_c_${articleId}_$i',
-          username: name,
-          avatarUrl: 'https://i.pravatar.cc/150?u=${name.hashCode}',
-          text: mockTexts[i % mockTexts.length],
-          postedAt: DateTime.now().subtract(Duration(minutes: (i + 1) * 15)),
-          likes: (i * 7) % 25,
-        ),
-      );
-    }
-    articleComments[articleId] = commentsList;
+    return articleComments[articleId] ?? [];
   }
 
   int getDisplayCommentCount(String articleId, int baseCount) {
@@ -375,13 +483,12 @@ class AppState extends ChangeNotifier {
   }
 
   int getCommentCount(String articleId) {
-    // Kept for backward compatibility if needed, but getDisplayCommentCount is preferred
     return getDisplayCommentCount(articleId, 0);
   }
 
   void addComment(String articleId, String text) {
     if (!articleComments.containsKey(articleId)) {
-      _seedMockComments(articleId);
+      articleComments[articleId] = [];
     }
     
     final newComment = Comment(
@@ -407,7 +514,7 @@ class AppState extends ChangeNotifier {
 
   void addReply(String articleId, String parentCommentId, String text) {
     if (!articleComments.containsKey(articleId)) {
-      _seedMockComments(articleId);
+      articleComments[articleId] = [];
     }
     final comments = articleComments[articleId]!;
 

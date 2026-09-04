@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../widgets/bottom_nav_bar.dart';
 import '../state/app_state.dart';
 import 'local_news_tab.dart';

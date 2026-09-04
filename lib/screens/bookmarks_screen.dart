@@ -95,7 +95,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => NewsDetailScreen(article: article),
+                  builder: (_) => NewsDetailScreen(article: article, slug: article.slug),
                 ),
               ).then((_) => _fetchBookmarks());
             },

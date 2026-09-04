@@ -193,7 +193,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 8),
-                    Text(
+                    const Text(
                       'One-time check for your first post. After this, you can post news anytime without OTP.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5),
@@ -225,7 +225,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         counterText: '',
                         hintText: '••••',
                         filled: true,
-                        fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.02),
+                        fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.02),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5),
@@ -314,23 +314,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final submissionId = ugcResponse['submission_id'] ?? ugcResponse['id'] ?? 'mock-uuid-123';
       
       // 2. Upload media tied to submission_id
-      if (_type == PostType.image && _selectedImages.isNotEmpty) {
-        await ApiService.instance.uploadMedia(
-          submissionId: submissionId.toString(),
-          mobile: mobile,
-          mediaType: contentType,
-          filePath: _selectedImages.first.path,
+        if (_type == PostType.image && _selectedImages.isNotEmpty) {
+          await ApiService.instance.uploadMedia(
+            submissionId: submissionId.toString(),
+            mobile: mobile,
+            mediaType: contentType,
+            filePath: _selectedImages.first.path,
+          );
+        } else if (_type == PostType.video && _selectedVideo != null) {
+          await ApiService.instance.uploadMedia(
+            submissionId: submissionId.toString(),
+            mobile: mobile,
+            mediaType: contentType,
+            filePath: _selectedVideo!.path,
+          );
+        }
+        
+        // Register the post locally to reflect in the Reporter Dashboard
+        AppState.instance.submitReporterPost(
+          type: _type,
+          caption: _titleController.text.trim(),
+          category: _category,
+          mediaUrl: _type == PostType.image && _selectedImages.isNotEmpty 
+              ? _selectedImages.first.path 
+              : (_selectedVideo?.path ?? ''),
         );
-      } else if (_type == PostType.video && _selectedVideo != null) {
-        await ApiService.instance.uploadMedia(
-          submissionId: submissionId.toString(),
-          mobile: mobile,
-          mediaType: contentType,
-          filePath: _selectedVideo!.path,
-        );
-      }
-      
-      if (mounted) {
+        
+        if (mounted) {
         setState(() {
           _submitting = false;
           _titleController.clear();
@@ -497,11 +507,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Column(
+        title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Post News', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
-            const Text('Share what\'s happening around you', style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.normal)),
+            Text('Post News', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+            Text('Share what\'s happening around you', style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.normal)),
           ],
         ),
         titleSpacing: 0,
@@ -548,7 +558,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   height: 150,
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: hasMedia ? Colors.black : (isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFFBFBFC)),
+                    color: hasMedia ? Colors.black : (isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFFBFBFC)),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: isDark ? Colors.white24 : const Color(0xFFD6D9E0), 
@@ -559,7 +569,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         ? DecorationImage(
                             image: FileImage(File(_selectedImages.first.path)),
                             fit: BoxFit.cover,
-                            colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.3), BlendMode.darken),
+                            colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.3), BlendMode.darken),
                           )
                         : null,
                   ),
@@ -764,7 +774,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     elevation: 8,
-                    shadowColor: AppColors.primary.withOpacity(0.4),
+                    shadowColor: AppColors.primary.withValues(alpha: 0.4),
                   ),
                   onPressed: _submitting ? null : _onSubmitPressed,
                   child: _submitting
@@ -793,7 +803,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withOpacity(0.1) : Theme.of(context).cardColor,
+          color: selected ? AppColors.primary.withValues(alpha: 0.1) : Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? AppColors.primary : (isDark ? Colors.white24 : const Color(0xFFE7E9EE)),

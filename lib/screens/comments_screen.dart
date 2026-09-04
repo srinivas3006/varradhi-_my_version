@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/news_article.dart';
-import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../localization/app_translations.dart';

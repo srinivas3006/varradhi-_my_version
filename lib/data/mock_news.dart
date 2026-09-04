@@ -35,7 +35,11 @@ final List<NewsArticle> _mockArticlesEnglish = [
     summary: 'The new IT hub in the eastern corridor promises to bring thousands of jobs.',
     body: 'The Telangana government has announced an accelerated expansion of the IT corridor towards the eastern part of Hyderabad. This monumental project aims to decongest the western IT hubs like Hitec City and Gachibowli. Industry leaders have lauded the move, expecting a surge of over 50,000 new tech jobs within the next three years as multinational corporations express immediate interest in setting up large campuses.',
     imageUrl: 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
-    imageUrls: ['https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800'],
+    imageUrls: [
+      'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
+      'https://images.unsplash.com/photo-1573164713988-8665fc963095?w=800',
+      'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800',
+    ],
     source: 'Deccan Chronicle',
     category: 'Telangana',
     publishedAt: DateTime.now().subtract(const Duration(minutes: 10)),

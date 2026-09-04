@@ -32,16 +32,22 @@ class _VideoTabState extends State<VideoTab> {
 
   Future<void> _loadVideos() async {
     if (!_hasMore) return;
-    
-    final response = await ApiService.instance.getVideoFeed(cursor: _nextCursor);
-    if (!mounted) return;
-    
-    setState(() {
-      _videos.addAll(response.data ?? []);
-      _nextCursor = response.nextCursor;
-      _hasMore = _nextCursor != null;
-      _isLoading = false;
-    });
+
+    try {
+      final response = await ApiService.instance.getVideoFeed(cursor: _nextCursor);
+      if (!mounted) return;
+
+      setState(() {
+        _videos.addAll(response.data ?? []);
+        _nextCursor = response.nextCursor;
+        _hasMore = response.nextCursor != null;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   void _onPageChanged(int index) {
@@ -81,13 +87,17 @@ class _VideoTabState extends State<VideoTab> {
       body: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
+        physics: const BouncingScrollPhysics(),
         itemCount: _videos.length,
         onPageChanged: _onPageChanged,
         itemBuilder: (context, index) {
           final isFocused = index == _focusedIndex;
+          final isNext = index == _focusedIndex + 1;
           return VideoCardItem(
+            key: ValueKey(_videos[index].id),
             video: _videos[index],
             isFocused: isFocused,
+            isNext: isNext,
           );
         },
       ),
@@ -99,11 +109,13 @@ class _VideoTabState extends State<VideoTab> {
 class VideoCardItem extends StatefulWidget {
   final VideoItem video;
   final bool isFocused;
+  final bool isNext;
 
   const VideoCardItem({
     super.key,
     required this.video,
     required this.isFocused,
+    this.isNext = false,
   });
 
   @override
@@ -134,10 +146,21 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
       CurvedAnimation(parent: _heartAnimController, curve: Curves.elasticOut),
     );
 
-    _initializeVideo();
+    if (widget.isFocused) {
+      _initializeVideo();
+    }
+  }
+
+  void _disposeControllers() {
+    _videoController?.dispose();
+    _videoController = null;
+    _ytController?.close();
+    _ytController = null;
+    _isInitialized = false;
   }
 
   Future<void> _initializeVideo() async {
+    if (_isInitialized) return;
     final video = widget.video;
     
     if (video.youtubeVideoId != null && video.youtubeVideoId!.isNotEmpty) {
@@ -186,23 +209,25 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
   @override
   void didUpdateWidget(covariant VideoCardItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isFocused != widget.isFocused && _isInitialized) {
-      if (widget.isFocused) {
-        _videoController?.play();
-        _ytController?.playVideo();
-        setState(() => _isPlaying = true);
-      } else {
-        _videoController?.pause();
-        _ytController?.pauseVideo();
+    if (widget.isFocused && !_isInitialized) {
+      _initializeVideo();
+    } else if (!widget.isFocused && oldWidget.isFocused) {
+      _disposeControllers();
+      if (mounted) {
         setState(() => _isPlaying = false);
+      }
+    } else if (widget.isFocused && _isInitialized) {
+      _videoController?.play();
+      _ytController?.playVideo();
+      if (mounted) {
+        setState(() => _isPlaying = true);
       }
     }
   }
 
   @override
   void dispose() {
-    _videoController?.dispose();
-    _ytController?.close();
+    _disposeControllers();
     _heartAnimController.dispose();
     super.dispose();
   }
@@ -246,7 +271,7 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
     final link = widget.video.youtubeVideoId != null 
         ? 'https://youtube.com/watch?v=${widget.video.youtubeVideoId}' 
         : (widget.video.videoUrl ?? '');
-    Share.share('Check out this news video on Vaaradhi: ${widget.video.title}\n$link');
+    SharePlus.instance.share(ShareParams(text: 'Check out this news video on Vaaradhi: ${widget.video.title}\n$link'));
   }
 
   void _openCommentsBottomSheet() {
@@ -293,10 +318,10 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
             if (_isInitialized && !_isPlaying)
               Center(
                 child: IgnorePointer( // Let taps pass through to the detector
-                  child: Container(
+                    child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.5),
+                      color: Colors.black.withValues(alpha: 0.5),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
@@ -415,6 +440,7 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
           child: IgnorePointer(
             child: YoutubePlayer(
               controller: _ytController!,
+              aspectRatio: 9 / 16,
             ),
           ),
         ),
@@ -441,9 +467,9 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.white.withOpacity(0.15)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -633,7 +659,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                       hintText: 'Add a comment...',
                       hintStyle: const TextStyle(color: Colors.white30),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.06),
+                      fillColor: Colors.white.withValues(alpha: 0.06),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(20),

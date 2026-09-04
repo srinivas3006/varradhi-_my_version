@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart' as geo;
+import '../../services/api_service.dart';
+import '../../services/location_service.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
 
@@ -33,52 +33,30 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
 
   Future<void> _detectLocation() async {
     setState(() => _isLoading = true);
-    _rippleController.duration = const Duration(milliseconds: 800); // Speed up on click
+    _rippleController.duration = const Duration(milliseconds: 800);
     _rippleController.repeat();
 
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      _showError('Location services are disabled. Please enable GPS.');
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        _showError('Location permissions are denied.');
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      _showError('Permissions are permanently denied in settings.');
-      return;
-    }
-
     try {
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 10),
-        ),
-      );
-      
-      List<geo.Placemark> placemarks = await geo.Geocoding().placemarkFromCoordinates(position.latitude, position.longitude);
-      
-      if (placemarks.isNotEmpty) {
-        geo.Placemark place = placemarks[0];
-        String stateName = place.administrativeArea ?? 'Unknown State';
-        String district = place.locality ?? place.subAdministrativeArea ?? 'Unknown District';
-        
-        AppState.instance.setLocation(stateName, district);
-        if (mounted) Navigator.pop(context, true); // Success
-      } else {
-        _showError('Could not determine exact location.');
+      final deviceLocation = await LocationService.detectLocation();
+      AppState.instance.setDeviceLocation(deviceLocation);
+
+      if (AppState.instance.isLoggedIn) {
+        try {
+          await ApiService.instance.updateUserLocationDevice(deviceLocation);
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Location detected but failed to sync with server.')),
+            );
+          }
+        }
       }
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } on LocationException catch (exception) {
+      _showError(exception.message);
     } catch (e) {
       _showError('Failed to get location: $e');
     }

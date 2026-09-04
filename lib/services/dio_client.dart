@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:dio/dio.dart';
 import '../state/app_state.dart';
 import 'mock_interceptor.dart';
 
-// Toggle this to false to connect to the real backend
-const bool useMockBackend = true;
+// Enable mock backend via compile-time flag. In production leave undefined.
+// To enable locally: `flutter run --dart-define=USE_MOCK_BACKEND=true`
+const bool useMockBackend = bool.fromEnvironment('USE_MOCK_BACKEND', defaultValue: false);
 
 class DioClient {
   static final DioClient _instance = DioClient._internal();
@@ -35,18 +37,19 @@ class DioClient {
           final token = AppState.instance.authToken;
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
+          } else {
+            options.headers.remove('Authorization');
           }
           return handler.next(options);
         },
         onResponse: (response, handler) {
-          // The backend returns {"data": ..., "meta": ..., "errors": ...}
-          // We unwrap the data here if the request was successful
-          // For simplicity in pagination, we might also want to pass meta,
-          // but typically we can just return the entire response data map.
           return handler.next(response);
         },
-        onError: (DioException e, handler) {
-          // Handle global errors, e.g., token expiration
+        onError: (DioException e, handler) async {
+          if (e.response?.statusCode == 401) {
+            debugPrint('401 Unauthorized encountered for ${e.requestOptions.path}. Logging out and falling back to guest mode.');
+            await AppState.instance.logout();
+          }
           return handler.next(e);
         },
       ),

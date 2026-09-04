@@ -29,6 +29,12 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     _fetchPricing();
   }
 
+  @override
+  void dispose() {
+    _businessController.dispose();
+    super.dispose();
+  }
+
   Future<void> _fetchPricing() async {
     setState(() {
       _isFetchingPrice = true;
@@ -51,6 +57,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         setState(() {
           _quotedPrice = null;
           _isFetchingPrice = false;
+          _error = 'Failed to fetch pricing. Please try again.';
         });
       }
     }
@@ -58,7 +65,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
   Future<void> _submitBooking() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_quotedPrice == null) {
+    if (_quotedPrice == null && !_isFetchingPrice) {
       setState(() => _error = 'Please wait for price calculation.');
       return;
     }
@@ -75,21 +82,32 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         'duration_days': _durationDays,
       };
 
-      final data = await ApiService.instance.submitAdBooking(payload);
-      final url = data['whatsapp_url'] as String?;
-      
-      if (url != null && url.isNotEmpty) {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          if (mounted) Navigator.pop(context); // Close on success
+      // Store booking in backend first
+      await ApiService.instance.submitAdBooking(payload);
+
+      // WhatsApp Redirect using production-safe wa.me link
+      const String phone = "916281732036";
+      final String text = Uri.encodeComponent(
+        "Hello, I am interested in booking an ad for '${_businessController.text.trim()}'. "
+        "Ad Type: $_adType, Duration: $_durationDays days. Please provide more details."
+      );
+      final Uri waUri = Uri.parse("https://wa.me/$phone?text=$text");
+
+      if (await canLaunchUrl(waUri)) {
+        await launchUrl(waUri, mode: LaunchMode.externalApplication);
+        if (mounted) Navigator.pop(context);
+      } else {
+        final Uri fallbackUri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$text");
+        if (await canLaunchUrl(fallbackUri)) {
+          await launchUrl(fallbackUri, mode: LaunchMode.inAppBrowserView);
+          if (mounted) Navigator.pop(context);
         } else {
           throw Exception('Could not launch WhatsApp');
         }
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _error = 'Failed to submit booking. Please try again.');
+        setState(() => _error = 'Failed to submit booking. Please make sure WhatsApp is installed.');
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -131,7 +149,15 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   hintText: 'Enter your business name',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                validator: (v) => v == null || v.isEmpty ? 'Please enter your business name' : null,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return 'Please enter your business name';
+                  }
+                  if (v.trim().length < 3) {
+                    return 'Please enter a valid business name (at least 3 characters)';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 24),
               
@@ -139,7 +165,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               const Text('Ad Visibility', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                value: _adType,
+                initialValue: _adType,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -160,7 +186,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               const Text('Duration', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
-                value: _durationDays,
+                initialValue: _durationDays,
                 decoration: InputDecoration(
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -217,9 +243,17 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  icon: const Icon(Icons.chat_bubble_outline),
-                  label: const Text('Contact Admin on WhatsApp', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  onPressed: _isSubmitting ? null : _submitBooking,
+                  icon: _isSubmitting
+                      ? const SizedBox.shrink()
+                      : const Icon(Icons.chat_bubble_outline),
+                  label: _isSubmitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Text('Contact Admin', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  onPressed: (_isSubmitting || _isFetchingPrice) ? null : _submitBooking,
                 ),
               ),
               const SizedBox(height: 24),
@@ -228,11 +262,5 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _businessController.dispose();
-    super.dispose();
   }
 }

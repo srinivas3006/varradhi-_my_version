@@ -1,16 +1,17 @@
-import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import '../state/app_state.dart';
 import '../models/reporter_post.dart';
 import 'account_login_screen.dart';
 import 'reporter_intro_screen.dart';
-import 'admin_panel_screen.dart';
+import '../features/admin/presentation/screens/admin_ugc_screen.dart';
 import 'bookmarks_screen.dart';
 import 'preferences_screen.dart';
 import 'about_screen.dart';
 import 'privacy_policy_screen.dart';
-import 'my_posts_screen.dart';
+import 'notifications_screen.dart';
 import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
@@ -117,7 +118,8 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
           backgroundColor: bgColor,
           body: SafeArea(
             child: ListView(
-              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 100),
+              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 40),
               children: [
                 // 1. Identity Header Card
                 _buildIdentityCard(state, isDark),
@@ -127,13 +129,13 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 if (state.isLoggedIn && !state.isReporter) ...[
                   _buildBecomeReporterCard(),
                   const SizedBox(height: 16),
-                ] else if (state.isReporter) ...[
+                ] else if (state.isLoggedIn && state.isReporter) ...[
                   _buildReporterDashboardCard(state, isDark),
                   const SizedBox(height: 16),
                 ],
 
                 // 3. Admin Access Badge (Conditional)
-                if (state.isAdmin) ...[
+                if (state.isAdmin || state.isContributor) ...[
                   _buildAdminCard(isDark),
                   const SizedBox(height: 16),
                 ],
@@ -159,7 +161,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const AdBookingScreen()));
                     },
                   ),
-                  if (state.isReporter)
+                  if (state.isLoggedIn && state.isReporter)
                     _buildListTile(
                       isDark: isDark,
                       icon: Icons.account_balance_wallet_rounded,
@@ -191,19 +193,31 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen())),
                   ),
                   // Push Notifications Toggle
+                  // Premium Notifications Tile
                   _buildListTile(
                     isDark: isDark,
                     icon: Icons.notifications_none_rounded,
-                    title: tr('push_notifications'),
-                    trailing: Switch.adaptive(
-                      value: state.pushNotificationsEnabled,
-                      activeColor: Colors.redAccent,
-                      onChanged: (val) {
+                    title: tr('notifications'),
+                    badgeCount: state.unreadNotificationsCount,
+                    trailing: GestureDetector(
+                      onTap: () {
                         HapticFeedback.selectionClick();
-                        state.togglePushNotifications(val);
+                        state.togglePushNotifications(!state.pushNotificationsEnabled);
                       },
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+                        child: Icon(
+                          state.pushNotificationsEnabled ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
+                          key: ValueKey(state.pushNotificationsEnabled),
+                          color: state.pushNotificationsEnabled ? Colors.redAccent : (isDark ? Colors.white38 : Colors.black38),
+                          size: 24,
+                        ),
+                      ),
                     ),
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                    },
                   ),
                   // Animated Theme Switch Tile
                   _buildListTile(
@@ -217,7 +231,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.white.withOpacity(0.1) : Colors.amber.withOpacity(0.2),
+                            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.amber.withValues(alpha: 0.2),
                             shape: BoxShape.circle,
                           ),
                           child: Text(
@@ -296,42 +310,61 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05)),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05)),
       ),
       child: Row(
         children: [
           Stack(
             children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: Colors.redAccent,
-                child: Text(
-                  !state.isLoggedIn ? 'G' : (state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U'),
-                  style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+              GestureDetector(
+                onTap: () {
+                  if (state.isLoggedIn) {
+                    HapticFeedback.lightImpact();
+                    _showEditProfilePopup(state, isDark);
+                  }
+                },
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundColor: Colors.redAccent,
+                  backgroundImage: state.profileImagePath != null && state.profileImagePath!.isNotEmpty
+                      ? FileImage(File(state.profileImagePath!))
+                      : null,
+                  child: state.profileImagePath == null || state.profileImagePath!.isEmpty
+                      ? Text(
+                          !state.isLoggedIn ? 'G' : (state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U'),
+                          style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                        )
+                      : null,
                 ),
               ),
               if (state.isLoggedIn)
                 Positioned(
                   bottom: 0,
                   right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey.shade800 : Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
-                        width: 1.5,
+                    child: GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        _showEditProfilePopup(state, isDark);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.grey.shade800 : Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.edit_rounded,
+                          size: 12,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
                       ),
                     ),
-                    child: Icon(
-                      Icons.edit_rounded,
-                      size: 12,
-                      color: isDark ? Colors.white70 : Colors.black87,
-                    ),
-                  ),
                 ),
             ],
           ),
@@ -340,9 +373,27 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  !state.isLoggedIn ? tr('guest_user') : state.userName,
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        !state.isLoggedIn ? tr('guest_user') : state.userName,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    if (state.isAdmin) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                        child: const Text(
+                          'అడ్మిన్ (Admin)',
+                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -382,7 +433,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.redAccent.withOpacity(0.3),
+            color: Colors.redAccent.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -443,9 +494,9 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
           boxShadow: isDark ? [] : [
-            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
           ],
         ),
         child: Column(
@@ -495,7 +546,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
           ),
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: const Color(0xFFF5A623).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))
+            BoxShadow(color: const Color(0xFFF5A623).withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))
           ],
         ),
         child: Row(
@@ -506,7 +557,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.account_balance_wallet_rounded, color: Colors.white, size: 20),
@@ -539,14 +590,14 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
   Widget _buildAdminCard(bool isDark) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPanelScreen()));
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminUgcScreen()));
       },
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.purple.withOpacity(0.15),
+          color: Colors.purple.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.purple.withOpacity(0.4)),
+          border: Border.all(color: Colors.purple.withValues(alpha: 0.4)),
         ),
         child: Row(
           children: [
@@ -581,9 +632,9 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
   Widget _buildSettingsGroup(bool isDark, List<Widget> tiles) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.02),
+        color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05)),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05)),
       ),
       child: Column(
         children: tiles,
@@ -597,43 +648,256 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     required String title,
     required Widget trailing,
     required VoidCallback onTap,
+    int badgeCount = 0,
   }) {
     return ListTile(
       onTap: onTap,
-      leading: Icon(icon, color: isDark ? Colors.white70 : Colors.black87, size: 22),
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Icon(icon, color: isDark ? Colors.white70 : Colors.black87, size: 22),
+          if (badgeCount > 0)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Colors.redAccent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
       title: Text(title, style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 15, fontWeight: FontWeight.w500)),
       trailing: trailing,
     );
   }
 
-  void _showLanguagePicker(AppState state, bool isDark) {
+    void _showEditProfilePopup(AppState state, bool isDark) {
+      final TextEditingController nameController = TextEditingController(text: state.userName);
+      String? tempImagePath = state.profileImagePath;
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              return Container(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 20)
+                  ],
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white24 : Colors.black12,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        Text(
+                          'Edit Profile',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        GestureDetector(
+                          onTap: () async {
+                            final picker = ImagePicker();
+                            final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                            if (pickedFile != null) {
+                              setModalState(() {
+                                tempImagePath = pickedFile.path;
+                              });
+                            }
+                          },
+                          child: Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              CircleAvatar(
+                                radius: 46,
+                                backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+                                backgroundImage: tempImagePath != null && tempImagePath!.isNotEmpty
+                                    ? FileImage(File(tempImagePath!))
+                                    : null,
+                                child: tempImagePath == null || tempImagePath!.isEmpty
+                                    ? Icon(Icons.person, size: 40, color: isDark ? Colors.white54 : Colors.black54)
+                                    : null,
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.redAccent,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: isDark ? const Color(0xFF1E1E1E) : Colors.white, width: 2),
+                                ),
+                                child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        TextField(
+                          controller: nameController,
+                          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                          decoration: InputDecoration(
+                            labelText: 'Full Name',
+                            labelStyle: TextStyle(color: isDark ? Colors.white54 : Colors.black54),
+                            filled: true,
+                            fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              elevation: 0,
+                            ),
+                            onPressed: () {
+                              state.updateProfile(name: nameController.text.trim(), imagePath: tempImagePath);
+                              Navigator.pop(context);
+                            },
+                            child: const Text('Save Changes', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      );
+    }
+  
+    void _showLanguagePicker(AppState state, bool isDark) {
     showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 16),
-          Text('Select Language', style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          _buildLangOption(state, isDark, 'English'),
-          _buildLangOption(state, isDark, 'Telugu'),
-
-          const SizedBox(height: 16),
-        ],
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag Handle
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 8, bottom: 20),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                'Select Language',
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 20),
+              _buildLangOption(state, isDark, 'English', 'en'),
+              const SizedBox(height: 12),
+              _buildLangOption(state, isDark, 'Telugu', 'te'),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildLangOption(AppState state, bool isDark, String lang) {
-    return ListTile(
-      title: Text(lang, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
-      trailing: state.language == lang ? const Icon(Icons.check_rounded, color: Colors.redAccent) : null,
+  Widget _buildLangOption(AppState state, bool isDark, String lang, String code) {
+    final isSelected = state.language == lang;
+    return GestureDetector(
       onTap: () {
+        HapticFeedback.lightImpact();
         state.setLanguage(lang);
         Navigator.of(context).pop();
       },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: isSelected 
+              ? Colors.redAccent.withValues(alpha: 0.1) 
+              : (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02)),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected 
+                ? Colors.redAccent.withValues(alpha: 0.3)
+                : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Text(
+                  lang,
+                  style: TextStyle(
+                    color: isSelected ? Colors.redAccent : (isDark ? Colors.white : Colors.black87),
+                    fontSize: 16,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                  ),
+                ),
+                if (code == 'te') ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '(తెలుగు)',
+                    style: TextStyle(
+                      color: isSelected ? Colors.redAccent.withValues(alpha: 0.8) : Colors.grey,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle_rounded, color: Colors.redAccent, size: 22)
+            else
+              Icon(Icons.circle_outlined, color: isDark ? Colors.white24 : Colors.black26, size: 22),
+          ],
+        ),
+      ),
     );
   }
 }

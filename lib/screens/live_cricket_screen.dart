@@ -1,10 +1,37 @@
 import 'package:flutter/material.dart';
-import '../data/mock_cricket.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 
-class LiveCricketScreen extends StatelessWidget {
+class CricketMatchItem {
+  final String title;
+  final String series;
+  final String status;
+  final String team1;
+  final String score1;
+  final String team2;
+  final String score2;
+
+  CricketMatchItem({
+    required this.title,
+    required this.series,
+    required this.status,
+    required this.team1,
+    required this.score1,
+    required this.team2,
+    required this.score2,
+  });
+}
+
+class LiveCricketScreen extends StatefulWidget {
   const LiveCricketScreen({super.key});
+
+  @override
+  State<LiveCricketScreen> createState() => _LiveCricketScreenState();
+}
+
+class _LiveCricketScreenState extends State<LiveCricketScreen> {
+  final List<CricketMatchItem> _matches = [];
+  final bool _isLoading = false;
 
   Color _statusColor(String status) {
     switch (status) {
@@ -25,18 +52,43 @@ class LiveCricketScreen extends StatelessWidget {
       body: Column(
         children: [
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: mockMatches.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 14),
-              itemBuilder: (context, index) {
-                final match = mockMatches[index];
-                return _MatchCard(
-                  match: match,
-                  statusColor: _statusColor(match.status),
-                );
-              },
-            ),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : _matches.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.sports_cricket_rounded, size: 48, color: AppColors.textMuted),
+                              SizedBox(height: 12),
+                              Text(
+                                'No live matches available',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                              SizedBox(height: 6),
+                              Text(
+                                'Live scores and updates will display when matches are active.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _matches.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 14),
+                        itemBuilder: (context, index) {
+                          final match = _matches[index];
+                          return _MatchCard(
+                            match: match,
+                            statusColor: _statusColor(match.status),
+                          );
+                        },
+                      ),
           ),
           const BannerAdSlot(),
         ],
@@ -46,23 +98,24 @@ class LiveCricketScreen extends StatelessWidget {
 }
 
 class _MatchCard extends StatelessWidget {
-  final CricketMatch match;
+  final CricketMatchItem match;
   final Color statusColor;
 
   const _MatchCard({required this.match, required this.statusColor});
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? Colors.white10 : Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
-            offset: const Offset(0, 3),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -71,72 +124,42 @@ class _MatchCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              Text(
+                match.series,
+                style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (match.status == 'Live')
-                      Container(
-                        width: 6,
-                        height: 6,
-                        margin: const EdgeInsets.only(right: 6),
-                        decoration: BoxDecoration(
-                            color: statusColor, shape: BoxShape.circle),
-                      ),
-                    Text(
-                      match.status.toUpperCase(),
-                      style: TextStyle(
-                        color: statusColor,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  match.status.toUpperCase(),
+                  style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.w800, letterSpacing: 0.5),
                 ),
               ),
-              const Spacer(),
-              Text(match.matchTime,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
             ],
           ),
-          const SizedBox(height: 14),
-          _teamRow(match.team1, match.team1Score),
-          const SizedBox(height: 8),
-          _teamRow(match.team2, match.team2Score),
-          const Divider(height: 24),
-          Text(match.note,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.textDark)),
-          const SizedBox(height: 4),
-          Text(match.venue,
-              style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(match.team1, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(match.score1, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(match.team2, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(match.score2, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            ],
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _teamRow(String team, String score) {
-    return Row(
-      children: [
-        CircleAvatar(
-          radius: 14,
-          backgroundColor: AppColors.chipBg,
-          child: Text(team.isNotEmpty ? team[0] : '?',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(team,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
-        ),
-        Text(score,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-      ],
     );
   }
 }

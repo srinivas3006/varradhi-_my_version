@@ -51,9 +51,14 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
       final user = data['user'] as Map<String, dynamic>?;
       AppState.instance.accountLogin(username: user?['full_name'] ?? user?['username'] ?? 'Reporter');
 
-      // isAdmin (if it exists at all) must come from the decoded token /
-      // user payload returned by the server — never set client-side.
-      AppState.instance.isAdmin = user?['is_admin'] == true;
+      // isAdmin/isContributor must come from the server, never set
+      // client-side — refetch /auth/me/ so every possible role signal
+      // (is_admin, is_staff, role, roles, groups, permissions...) is
+      // considered, not just the login response's bare is_admin field.
+      await AppState.instance.refreshRolesFromServer();
+
+      // Send user's location to backend after login
+      await ApiService.instance.syncUserLocation();
 
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -104,6 +109,8 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               const SizedBox(height: 24),
               TextField(
                 controller: _usernameController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
                 decoration: InputDecoration(
                   labelText: 'Email Address',
                   filled: true,
@@ -118,6 +125,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               TextField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
+                autofillHints: const [AutofillHints.password],
                 decoration: InputDecoration(
                   labelText: 'Password',
                   filled: true,

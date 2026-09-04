@@ -1,8 +1,6 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../models/redeem_request.dart';
 import '../state/app_state.dart';
-import '../theme/app_theme.dart';
 import 'redeem_request_screen.dart';
 
 class ReporterWalletScreen extends StatelessWidget {
@@ -74,7 +72,7 @@ class ReporterWalletScreen extends StatelessWidget {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              const Color(0xFFFFD700).withOpacity(0.15),
+                              const Color(0xFFFFD700).withValues(alpha: 0.15),
                               isDark ? const Color(0xFF1A1A1A) : Colors.white,
                             ],
                           ),
@@ -89,7 +87,7 @@ class ReporterWalletScreen extends StatelessWidget {
                           height: 150,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFFFFD700).withOpacity(0.1),
+                            color: const Color(0xFFFFD700).withValues(alpha: 0.1),
                           ),
                         ),
                       ),
@@ -101,7 +99,7 @@ class ReporterWalletScreen extends StatelessWidget {
                           height: 100,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFFF5A623).withOpacity(0.1),
+                            color: const Color(0xFFF5A623).withValues(alpha: 0.1),
                           ),
                         ),
                       ),
@@ -129,13 +127,13 @@ class ReporterWalletScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFFFFD700).withOpacity(0.15),
+                              color: const Color(0xFFFFD700).withValues(alpha: 0.15),
                               blurRadius: 20,
                               offset: const Offset(0, 10),
                             )
                           ],
                           border: Border.all(
-                            color: const Color(0xFFFFD700).withOpacity(0.3),
+                            color: const Color(0xFFFFD700).withValues(alpha: 0.3),
                             width: 1,
                           ),
                         ),
@@ -148,7 +146,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 Text(
                                   'Total Balance',
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
+                                    color: Colors.white.withValues(alpha: 0.7),
                                     fontSize: 14,
                                     letterSpacing: 1.1,
                                   ),
@@ -156,7 +154,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFFFD700).withOpacity(0.1),
+                                    color: const Color(0xFFFFD700).withValues(alpha: 0.1),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
@@ -181,7 +179,7 @@ class ReporterWalletScreen extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFFFD700).withOpacity(0.15),
+                                color: const Color(0xFFFFD700).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
@@ -216,7 +214,7 @@ class ReporterWalletScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: isDark ? [] : [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Colors.black.withValues(alpha: 0.05),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             )
@@ -270,7 +268,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                       ? Colors.black87 
                                       : (isDark ? Colors.white54 : Colors.black38),
                                   elevation: canRedeem ? 4 : 0,
-                                  shadowColor: const Color(0xFFFFD700).withOpacity(0.5),
+                                  shadowColor: const Color(0xFFFFD700).withValues(alpha: 0.5),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(16),
                                   ),
@@ -348,7 +346,7 @@ class ReporterWalletScreen extends StatelessWidget {
                             ),
                             boxShadow: isDark ? [] : [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.02),
+                                color: Colors.black.withValues(alpha: 0.02),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               )
@@ -407,7 +405,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: _redeemStatusColor(r.status).withOpacity(0.15),
+                                      color: _redeemStatusColor(r.status).withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(

@@ -91,17 +91,7 @@ class BottomNavBar extends StatelessWidget {
                                       color: isActive ? AppColors.primary : AppColors.textMuted,
                                     ),
                                   ),
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 300),
-                                    curve: Curves.easeOutCubic,
-                                    margin: const EdgeInsets.only(top: 4),
-                                    width: isActive ? 4 : 0,
-                                    height: isActive ? 4 : 0,
-                                    decoration: const BoxDecoration(
-                                      color: AppColors.primary,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
+                                  // Removed bottom dot as requested for cleaner UI
                                 ],
                               ),
                             ),

@@ -67,7 +67,8 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         await AppState.instance.setAuthToken(token);
         final user = data['user'] as Map<String, dynamic>?;
         AppState.instance.accountLogin(username: user?['full_name'] ?? user?['email'] ?? name);
-        AppState.instance.isAdmin = user?['is_admin'] == true;
+        await AppState.instance.refreshRolesFromServer();
+        await ApiService.instance.syncUserLocation();
       } else {
         AppState.instance.signup(fullName: name, phone: email, password: password);
       }
@@ -103,6 +104,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
               const SizedBox(height: 24),
               TextField(
                 controller: _nameController,
+                autofillHints: const [AutofillHints.name],
                 decoration: InputDecoration(
                   labelText: 'Full name',
                   filled: true,
@@ -117,6 +119,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
               TextField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
                 decoration: InputDecoration(
                   labelText: 'Email address',
                   filled: true,
@@ -131,6 +134,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
               TextField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
+                autofillHints: const [AutofillHints.newPassword],
                 decoration: InputDecoration(
                   labelText: 'Password',
                   filled: true,

@@ -73,7 +73,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                 decoration: InputDecoration(
                   hintText: 'yourname@bank',
                   filled: true,
-                  fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.02),
+                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.02),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: isDark ? Colors.white24 : const Color(0xFFE7E9EE), width: 1.5),

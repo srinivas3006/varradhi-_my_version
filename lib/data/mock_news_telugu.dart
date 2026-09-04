@@ -7,7 +7,11 @@ final List<NewsArticle> mockArticlesTelugu = [
     summary: 'తూర్పు కారిడార్‌లోని కొత్త ఐటీ హబ్ వేలాది ఉద్యోగాలను తీసుకురానుంది.',
     body: 'తెలంగాణ ప్రభుత్వం హైదరాబాద్ తూర్పు భాగంలో ఐటీ కారిడార్ విస్తరణను వేగవంతం చేస్తున్నట్లు ప్రకటించింది. హైటెక్ సిటీ మరియు గచ్చిబౌలి వంటి పశ్చిమ ఐటీ హబ్‌ల రద్దీని తగ్గించడమే ఈ భారీ ప్రాజెక్ట్ లక్ష్యం. బహుళజాతి కంపెనీలు భారీ క్యాంపస్‌లను ఏర్పాటు చేయడానికి తక్షణ ఆసక్తిని కనబరుస్తుండటంతో, రాబోయే మూడేళ్లలో 50,000 కు పైగా కొత్త టెక్ ఉద్యోగాలు వస్తాయని భావిస్తున్నారు.',
     imageUrl: 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
-    imageUrls: ['https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800'],
+    imageUrls: [
+      'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800',
+      'https://images.unsplash.com/photo-1573164713988-8665fc963095?w=800',
+      'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=800',
+    ],
     source: 'ఈనాడు',
     category: 'Telangana',
     publishedAt: DateTime.now().subtract(const Duration(minutes: 10)),

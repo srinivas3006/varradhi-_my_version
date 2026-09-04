@@ -69,8 +69,9 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
         if (status == AnimationStatus.completed) {
           // Transition fully complete
           setState(() {
-            if (_direction == -1 && _index < widget.itemCount - 1) _index++;
-            else if (_direction == 1 && _index > 0) _index--;
+            if (_direction == -1 && _index < widget.itemCount - 1) {
+              _index++;
+            } else if (_direction == 1 && _index > 0) _index--;
             _direction = 0;
           });
           _dragCtrl.value = 0;

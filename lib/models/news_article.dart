@@ -1,6 +1,7 @@
 class NewsArticle {
   final String id;
   final String title;
+  final String slug;
   final String summary;
   final String body;
   final String imageUrl;
@@ -19,12 +20,16 @@ class NewsArticle {
   final bool isBreaking;
   final bool isRegional;
   final List<String>? imageUrls;
+  final String mediaType;
+  final String videoUrl;
+  final int videoDurationSeconds;
   bool isLiked;
   bool isBookmarked;
 
   NewsArticle({
     required this.id,
     required this.title,
+    this.slug = '',
     required this.summary,
     required this.body,
     required this.imageUrl,
@@ -43,16 +48,37 @@ class NewsArticle {
     this.isBreaking = false,
     this.isRegional = false,
     this.imageUrls,
+    this.mediaType = 'image',
+    this.videoUrl = '',
+    this.videoDurationSeconds = 0,
     this.isLiked = false,
     this.isBookmarked = false,
   });
 
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
+    String extractString(List<String> keys) {
+      for (final key in keys) {
+        final value = json[key];
+        if (value != null && value.toString().trim().isNotEmpty) return value.toString();
+      }
+
+      final nested = json['article'];
+      if (nested is Map<String, dynamic>) {
+        for (final key in keys) {
+          final value = nested[key];
+          if (value != null && value.toString().trim().isNotEmpty) return value.toString();
+        }
+      }
+
+      return '';
+    }
+
     return NewsArticle(
       id: json['id']?.toString() ?? '',
       title: json['title'] ?? '',
-      summary: json['summary'] ?? '',
-      body: json['content'] ?? json['body'] ?? '',
+      slug: json['slug']?.toString() ?? '',
+      summary: extractString(['summary', 'description', 'excerpt']),
+      body: extractString(['content', 'body', 'content_html', 'body_html']),
       imageUrl: json['thumbnail_url'] ?? json['image_url'] ?? json['imageUrl'] ?? '',
       source: json['source_name'] ?? json['source'] ?? 'VARADHI Desk',
       category: json['category'] is Map 
@@ -73,9 +99,25 @@ class NewsArticle {
       isBreaking: json['is_breaking'] ?? false,
       isRegional: json['is_regional'] ?? false,
       imageUrls: (json['image_urls'] as List?)?.map((e) => e.toString()).toList(),
+      mediaType: (json['media_type']?.toString().trim().isNotEmpty ?? false)
+          ? json['media_type']!.toString().trim().toLowerCase()
+          : (json['video_url'] != null && json['video_url'].toString().trim().isNotEmpty ? 'video' : 'image'),
+      videoUrl: json['video_url']?.toString() ?? '',
+      videoDurationSeconds: json['video_duration_seconds'] is int 
+          ? json['video_duration_seconds'] 
+          : int.tryParse(json['video_duration_seconds']?.toString() ?? '0') ?? 0,
       isLiked: json['is_liked_by_user'] ?? false,
       isBookmarked: json['is_bookmarked_by_user'] ?? false,
     );
+  }
+
+  bool get isVideo => mediaType == 'video' && videoUrl.isNotEmpty;
+
+  String get formattedVideoDuration {
+    if (videoDurationSeconds <= 0) return '';
+    final minutes = videoDurationSeconds ~/ 60;
+    final seconds = videoDurationSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   String get timeAgo {

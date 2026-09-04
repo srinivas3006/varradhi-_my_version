@@ -1,5 +1,6 @@
 class AdBanner {
   final String id;
+  final String title;
   final String imageUrl;
   final String destinationUrl;
   final String adType;
@@ -10,6 +11,7 @@ class AdBanner {
 
   AdBanner({
     required this.id,
+    this.title = 'Sponsored Promotion',
     required this.imageUrl,
     required this.destinationUrl,
     required this.adType,
@@ -22,6 +24,7 @@ class AdBanner {
   factory AdBanner.fromJson(Map<String, dynamic> json) {
     return AdBanner(
       id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? json['headline'] as String? ?? 'Sponsored Promotion',
       imageUrl: json['image_url'] as String? ?? '',
       destinationUrl: json['destination_url'] as String? ?? '',
       adType: json['ad_type'] as String? ?? 'banner',
