@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import 'home_screen.dart';
 
-/// Signup for the Reporter Program's account system. Deliberately has NO
-/// OTP step — per the feature plan, OTP verification only happens later,
-/// the first time this account tries to submit a reporter post.
+/// Signup / Registration screen.
+/// - API: POST /api/v1/auth/register/
+/// - Fields: email, password, password_confirm, full_name, preferred_language, device_id, device_name, device_type, fcm_token
+/// - Destination: HomeScreen / SpotlightScreen
 class AccountSignupScreen extends StatefulWidget {
   const AccountSignupScreen({super.key});
 
@@ -17,13 +20,17 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  bool _submitting = false;
   String? _error;
 
   Future<void> _submit() async {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
     if (name.isEmpty) {
       setState(() => _error = 'Enter your full name.');
@@ -37,45 +44,116 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
       setState(() => _error = 'Password must be at least 8 characters.');
       return;
     }
+    if (password != confirmPassword) {
+      setState(() => _error = 'Passwords do not match.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
 
     try {
       String langCode = 'en';
       switch (AppState.instance.language) {
-        case 'Telugu': langCode = 'te'; break;
-        case 'Tamil': langCode = 'ta'; break;
-        case 'Kannada': langCode = 'kn'; break;
-        case 'Marathi': langCode = 'mr'; break;
-        case 'Bengali': langCode = 'bn'; break;
-        case 'Malayalam': langCode = 'ml'; break;
+        case 'Telugu':
+          langCode = 'te';
+          break;
+        case 'Hindi':
+          langCode = 'hi';
+          break;
+        case 'Tamil':
+          langCode = 'ta';
+          break;
+        default:
+          langCode = 'en';
       }
 
       final data = await ApiService.instance.register({
         'email': email,
         'password': password,
-        'password_confirm': password,
+        'password_confirm': confirmPassword,
         'full_name': name,
         'preferred_language': langCode,
-        'device_id': 'flutter-app', // In production, grab via device_info_plus
+        'device_id': AppState.instance.deviceId,
         'device_name': 'Mobile Device',
         'device_type': 'android',
-        'fcm_token': AppState.instance.fcmToken ?? 'dummy-token'
+        'fcm_token': AppState.instance.fcmToken ?? 'device-fcm-token',
       });
-      
-      // Auto-login since register returns the auth tokens and user data
+
+      // Auto-login from returned access & refresh tokens
       final token = data['access'] ?? data['token'];
       if (token != null) {
-        await AppState.instance.setAuthToken(token);
+        await AppState.instance.setAuthToken(
+          token,
+          refresh: data['refresh'] as String?,
+        );
+        final sessionId = data['session_id']?.toString() ?? data['session']?['id']?.toString();
+        if (sessionId != null && sessionId.isNotEmpty) {
+          await AppState.instance.setSessionId(sessionId);
+        }
+
         final user = data['user'] as Map<String, dynamic>?;
-        AppState.instance.accountLogin(username: user?['full_name'] ?? user?['email'] ?? name);
+        AppState.instance.accountLogin(
+          username: user?['full_name'] ?? user?['email'] ?? name,
+        );
         await AppState.instance.refreshRolesFromServer();
+
+        // Handoff device token to registered user (Backend Flow 2)
+        if (AppState.instance.fcmToken != null) {
+          await ApiService.instance.handoffDeviceToken(
+            sessionId: sessionId,
+            fcmToken: AppState.instance.fcmToken,
+            installationSecret: AppState.instance.installationSecret,
+          );
+        }
+
         await ApiService.instance.syncUserLocation();
-      } else {
-        AppState.instance.signup(fullName: name, phone: email, password: password);
       }
-      
-      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+
+      if (!mounted) return;
+
+      // Navigate to HomeScreen
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
+      );
     } catch (e) {
-      setState(() => _error = 'Registration failed. Email might be in use.');
+      if (mounted) {
+        String errorMsg = 'Registration failed. Please try again.';
+        if (e is DioException) {
+          if (e.response?.statusCode == 429) {
+            errorMsg = 'Too many attempts. Please wait and try again.';
+          } else if (e.response?.data is Map) {
+            final resp = e.response!.data as Map;
+            if (resp['errors'] is Map) {
+              final errMap = resp['errors'] as Map;
+              if (errMap['message'] != null) {
+                errorMsg = errMap['message'].toString();
+              } else if (errMap['details'] is Map) {
+                final details = errMap['details'] as Map;
+                if (details['email'] != null) {
+                  errorMsg = (details['email'] is List)
+                      ? (details['email'] as List).first.toString()
+                      : details['email'].toString();
+                } else if (details['password'] != null) {
+                  errorMsg = (details['password'] is List)
+                      ? (details['password'] as List).first.toString()
+                      : details['password'].toString();
+                }
+              }
+            } else if (resp['message'] != null) {
+              errorMsg = resp['message'].toString();
+            }
+          }
+        }
+        setState(() => _error = errorMsg);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -86,19 +164,22 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Create Account')),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Join as a reader',
+                'Create your account',
                 style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800, color: Theme.of(context).textTheme.bodyLarge?.color),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).textTheme.bodyLarge?.color,
+                ),
               ),
               const SizedBox(height: 4),
               const Text(
-                'You can register as a Reporter afterwards from your profile.',
+                'Sign up to customize news topics, save stories, and engage.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -136,7 +217,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                 obscureText: _obscurePassword,
                 autofillHints: const [AutofillHints.newPassword],
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: 'Password (min 8 characters)',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -152,12 +233,36 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _confirmPasswordController,
+                obscureText: _obscureConfirmPassword,
+                decoration: InputDecoration(
+                  labelText: 'Confirm password',
+                  filled: true,
+                  fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscureConfirmPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined),
+                    onPressed: () => setState(
+                        () => _obscureConfirmPassword = !_obscureConfirmPassword),
+                  ),
+                ),
+              ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
-                Text(_error!,
-                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
+                Text(
+                  _error!,
+                  style:
+                      const TextStyle(color: AppColors.primary, fontSize: 12.5),
+                ),
               ],
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 52,
@@ -166,12 +271,48 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     elevation: 0,
                   ),
-                  onPressed: _submit,
-                  child: const Text('Submit',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  onPressed: _submitting ? null : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'Create Account',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text.rich(
+                    TextSpan(
+                      text: 'Already have an account? ',
+                      style: TextStyle(color: AppColors.textMuted),
+                      children: [
+                        TextSpan(
+                          text: 'Log In',
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -186,6 +327,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 }

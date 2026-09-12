@@ -9,15 +9,26 @@ typedef ParallaxPageFlipBuilder = Widget Function(
   double matchCutProgress,
 );
 
+class ParallaxPageFlipController {
+  _ParallaxPageFlipState? _state;
+  void _attach(_ParallaxPageFlipState state) => _state = state;
+  void _detach() => _state = null;
+  void next() => _state?.next();
+  void previous() => _state?.previous();
+  int get currentIndex => _state?._index ?? 0;
+}
+
 class ParallaxPageFlip extends StatefulWidget {
   final int itemCount;
   final ParallaxPageFlipBuilder itemBuilder;
   final int initialIndex;
   final ValueChanged<int>? onPageChanged;
+  final VoidCallback? onTap;
   final Duration flingDuration;
   final Duration matchCutDuration;
   final double commitThreshold;
   final double flingVelocity;
+  final ParallaxPageFlipController? controller;
 
   const ParallaxPageFlip({
     super.key,
@@ -25,10 +36,12 @@ class ParallaxPageFlip extends StatefulWidget {
     required this.itemBuilder,
     this.initialIndex = 0,
     this.onPageChanged,
+    this.onTap,
     this.flingDuration = const Duration(milliseconds: 300),
     this.matchCutDuration = const Duration(milliseconds: 200),
     this.commitThreshold = 0.35,
     this.flingVelocity = 800.0,
+    this.controller,
   });
 
   @override
@@ -47,6 +60,7 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
     _index = widget.initialIndex;
     
     _dragCtrl = AnimationController(vsync: this, duration: widget.flingDuration)
@@ -71,7 +85,9 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
           setState(() {
             if (_direction == -1 && _index < widget.itemCount - 1) {
               _index++;
-            } else if (_direction == 1 && _index > 0) _index--;
+            } else if (_direction == 1 && _index > 0) {
+              _index--;
+            }
             _direction = 0;
           });
           _dragCtrl.value = 0;
@@ -82,10 +98,34 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
   }
 
   @override
+  void didUpdateWidget(ParallaxPageFlip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach();
+      widget.controller?._attach(this);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller?._detach();
     _dragCtrl.dispose();
     _matchCutCtrl.dispose();
     super.dispose();
+  }
+
+  void next() {
+    if (_index < widget.itemCount - 1 && !_dragCtrl.isAnimating && !_matchCutCtrl.isAnimating) {
+      _direction = -1;
+      _dragCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
+    }
+  }
+
+  void previous() {
+    if (_index > 0 && !_dragCtrl.isAnimating && !_matchCutCtrl.isAnimating) {
+      _direction = 1;
+      _dragCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
+    }
   }
 
   void _onDragStart(DragStartDetails d) {
@@ -186,6 +226,7 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
           onVerticalDragStart: _onDragStart,
           onVerticalDragUpdate: _onDragUpdate,
           onVerticalDragEnd: _onDragEnd,

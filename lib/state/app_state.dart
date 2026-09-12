@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,8 @@ import '../models/reporter_post.dart';
 import '../models/app_notification.dart';
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import '../services/notification_service.dart';
+import '../repositories/ad_repository.dart';
 
 /// Simple app-wide state singleton. Scalar fields (onboarding completion,
 /// language, location, coins, login, reporter status) survive app restarts
@@ -17,9 +20,23 @@ import '../services/location_service.dart';
 /// Keystore on Android.
 /// Lists (posts, redeem requests) are kept in-memory only for this demo —
 /// a real backend would own them.
+/// Dedicated notifier for theme and locale changes.
+/// Listening to this instead of AppState prevents the entire MaterialApp
+/// and heavy UI widgets from rebuilding whenever coins, likes, bookmarks,
+/// or profile data change.
+class ThemeAndLocaleNotifier extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
 class AppState extends ChangeNotifier {
   static const _secureStorage = FlutterSecureStorage();
   static const _authTokenKey = 'authToken';
+  static const _refreshTokenKey = 'refreshToken';
+  static const _installationSecretKey = 'installation_secret';
+  static const _sessionIdKey = 'session_id';
+
+  /// Scoped notifier for themeMode and language updates.
+  final ThemeAndLocaleNotifier themeAndLocaleNotifier = ThemeAndLocaleNotifier();
 
   // Local persistence for likes/comments until backend supports it
   Set<String> likedItemIds = {};
@@ -29,13 +46,18 @@ class AppState extends ChangeNotifier {
   AppState._internal();
   static final AppState instance = AppState._internal();
 
-  String language = 'English';
+  String language = 'Telugu';
+  String get contentLanguage => language == 'English' ? 'en' : 'te';
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
   String subdistrict = '';
   String village = '';
   String country = 'India';
+  String? stateId;
+  String? districtId;
+  String? subdistrictId;
+  String? villageId;
   double? latitude;
   double? longitude;
   bool isLoggedIn = false;
@@ -43,6 +65,12 @@ class AppState extends ChangeNotifier {
   /// Never persisted via SharedPreferences. See init()/setAuthToken()/
   /// _clearAuthToken() — this is loaded from and written to secure storage.
   String? authToken;
+
+  /// The refresh token backing [authToken]. Same secure-storage treatment
+  /// as authToken. Needed so the app can silently refresh the short-lived
+  /// (15 min) access token instead of forcing a re-login, and so logout()
+  /// can actually invalidate the session server-side.
+  String? refreshToken;
 
   /// NOTE: this is a UI convenience flag only. It must never be trusted for
   /// authorization decisions — any admin-only API call must be re-checked
@@ -53,10 +81,49 @@ class AppState extends ChangeNotifier {
   /// Same UI-convenience caveat as isAdmin above. Gates the Admin UGC
   /// Moderation console alongside isAdmin (isAdmin || isContributor).
   bool isContributor = false;
+  String? userId;
   String userName = 'Guest User';
   String userPhone = '';
+  String? userEmail;
   String? profileImagePath;
+
+  void setUserName(String name) {
+    userName = name;
+    notifyListeners();
+  }
   String? fcmToken;
+  String deviceId = '';
+  String? installationSecret;
+  String? sessionId;
+
+  Future<void> setInstallationSecret(String? secret) async {
+    installationSecret = secret;
+    try {
+      if (secret != null && secret.isNotEmpty) {
+        await _secureStorage.write(key: _installationSecretKey, value: secret);
+      } else {
+        await _secureStorage.delete(key: _installationSecretKey);
+      }
+    } catch (e) {
+      debugPrint('[AppState] Failed to persist installation secret: $e');
+    }
+    notifyListeners();
+  }
+
+  Future<void> setSessionId(String? id) async {
+    sessionId = id;
+    try {
+      if (id != null && id.isNotEmpty) {
+        await _secureStorage.write(key: _sessionIdKey, value: id);
+      } else {
+        await _secureStorage.delete(key: _sessionIdKey);
+      }
+    } catch (e) {
+      debugPrint('[AppState] Failed to persist session ID: $e');
+    }
+    notifyListeners();
+  }
+
   ThemeMode themeMode = ThemeMode.light;
 
   List<String> preferredCategories = [];
@@ -108,13 +175,18 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-    language = prefs.getString('language') ?? language;
+    language = 'Telugu';
+    await prefs.setString('language', 'Telugu');
     stateName = prefs.getString('stateName') ?? stateName;
     district = prefs.getString('district') ?? district;
     city = prefs.getString('city') ?? city;
     subdistrict = prefs.getString('subdistrict') ?? subdistrict;
     village = prefs.getString('village') ?? village;
     country = prefs.getString('country') ?? country;
+    stateId = prefs.getString('stateId');
+    districtId = prefs.getString('districtId');
+    subdistrictId = prefs.getString('subdistrictId');
+    villageId = prefs.getString('villageId');
     latitude = prefs.getDouble('latitude');
     longitude = prefs.getDouble('longitude');
     isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
@@ -127,8 +199,29 @@ class AppState extends ChangeNotifier {
     uploadVerified = prefs.getBool('uploadVerified') ?? false;
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
 
-    // Auth token comes from secure storage, not shared_preferences.
-    authToken = await _secureStorage.read(key: _authTokenKey);
+    deviceId = prefs.getString('deviceId') ?? '';
+    if (deviceId.isEmpty) {
+      deviceId = 'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
+      await prefs.setString('deviceId', deviceId);
+    }
+
+    // Auth tokens come from secure storage, not shared_preferences.
+    try {
+      authToken = await _secureStorage.read(key: _authTokenKey);
+      refreshToken = await _secureStorage.read(key: _refreshTokenKey);
+      installationSecret = await _secureStorage.read(key: _installationSecretKey);
+      sessionId = await _secureStorage.read(key: _sessionIdKey);
+    } catch (e) {
+      debugPrint('[AppState] Secure storage read failed (keystore reset or corrupted): $e');
+      try {
+        await _secureStorage.deleteAll();
+      } catch (_) {}
+      authToken = null;
+      refreshToken = null;
+      installationSecret = null;
+      sessionId = null;
+    }
+
     // If we don't actually have a token, don't trust a stale isLoggedIn flag.
     if (authToken == null) {
       isLoggedIn = false;
@@ -163,6 +256,26 @@ class AppState extends ChangeNotifier {
     await prefs.setString('subdistrict', subdistrict);
     await prefs.setString('village', village);
     await prefs.setString('country', country);
+    if (stateId != null) {
+      await prefs.setString('stateId', stateId!);
+    } else {
+      await prefs.remove('stateId');
+    }
+    if (districtId != null) {
+      await prefs.setString('districtId', districtId!);
+    } else {
+      await prefs.remove('districtId');
+    }
+    if (subdistrictId != null) {
+      await prefs.setString('subdistrictId', subdistrictId!);
+    } else {
+      await prefs.remove('subdistrictId');
+    }
+    if (villageId != null) {
+      await prefs.setString('villageId', villageId!);
+    } else {
+      await prefs.remove('villageId');
+    }
     if (latitude != null) await prefs.setDouble('latitude', latitude!);
     if (longitude != null) await prefs.setDouble('longitude', longitude!);
     await prefs.setBool('isLoggedIn', isLoggedIn);
@@ -189,19 +302,50 @@ class AppState extends ChangeNotifier {
     // Deliberately no authToken here — see setAuthToken/_clearAuthToken.
   }
 
-  /// Stores a freshly-issued auth token in secure storage and marks the
-  /// user logged in. This is the only path that should ever set authToken.
-  Future<void> setAuthToken(String token) async {
+  /// Stores a freshly-issued auth token (and, when available, its paired
+  /// refresh token) in secure storage and marks the user logged in. This is
+  /// the only path that should ever set authToken after login/register.
+  Future<void> setAuthToken(String token, {String? refresh}) async {
     authToken = token;
     isLoggedIn = true;
-    await _secureStorage.write(key: _authTokenKey, value: token);
+    try {
+      await _secureStorage.write(key: _authTokenKey, value: token);
+      if (refresh != null && refresh.isNotEmpty) {
+        refreshToken = refresh;
+        await _secureStorage.write(key: _refreshTokenKey, value: refresh);
+      }
+    } catch (e) {
+      debugPrint('[AppState] Failed to persist auth tokens: $e');
+    }
     notifyListeners();
     await _persist();
   }
 
+  /// Called by the Dio interceptor after a successful silent token refresh.
+  /// Refresh token rotation means the backend issues a new refresh token on
+  /// every refresh call, so both values are re-persisted.
+  Future<void> updateTokensAfterRefresh(String access, String? refresh) async {
+    authToken = access;
+    try {
+      await _secureStorage.write(key: _authTokenKey, value: access);
+      if (refresh != null && refresh.isNotEmpty) {
+        refreshToken = refresh;
+        await _secureStorage.write(key: _refreshTokenKey, value: refresh);
+      }
+    } catch (e) {
+      debugPrint('[AppState] Failed to persist refreshed tokens: $e');
+    }
+  }
+
   Future<void> _clearAuthToken() async {
     authToken = null;
-    await _secureStorage.delete(key: _authTokenKey);
+    refreshToken = null;
+    try {
+      await _secureStorage.delete(key: _authTokenKey);
+      await _secureStorage.delete(key: _refreshTokenKey);
+    } catch (e) {
+      debugPrint('[AppState] Failed to clear auth tokens: $e');
+    }
   }
 
   /// Real gate for the Admin UGC Moderation console: fetches /auth/me/ and
@@ -214,10 +358,21 @@ class AppState extends ChangeNotifier {
       final me = await ApiService.instance.getMe();
       isAdmin = _hasAdminSignal(me);
       isContributor = isAdmin || _hasContributorSignal(me);
+      if (me['name'] != null && me['name'].toString().isNotEmpty) {
+        userName = me['name'].toString();
+      } else if (me['username'] != null && me['username'].toString().isNotEmpty) {
+        userName = me['username'].toString();
+      } else if (me['email'] != null && me['email'].toString().isNotEmpty) {
+        userName = me['email'].toString();
+      }
+      if (me['phone'] != null) userPhone = me['phone'].toString();
+      if (me['id'] != null) userId = me['id'].toString();
+      if (me['is_reporter'] == true) isReporter = true;
+      if (me['tokens'] != null) reporterTokens = int.tryParse(me['tokens'].toString()) ?? reporterTokens;
       notifyListeners();
       await _persist();
     } catch (e) {
-      debugPrint('refreshRolesFromServer failed, keeping existing role flags: $e');
+      debugPrint('refreshRolesFromServer: $e');
     }
   }
 
@@ -258,6 +413,7 @@ class AppState extends ChangeNotifier {
     hasOnboarded = true;
     if (defaultLang != null) {
       language = defaultLang;
+      themeAndLocaleNotifier.notify();
     }
     notifyListeners();
     _persist();
@@ -271,14 +427,55 @@ class AppState extends ChangeNotifier {
 
   void setLanguage(String lang) {
     language = lang;
+    themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
+    _syncProfileToBackend(preferredLanguage: _contentLanguageCode(lang));
   }
 
   void setThemeMode(ThemeMode mode) {
     themeMode = mode;
+    themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
+    _syncProfileToBackend(theme: mode.name);
+  }
+
+  /// Maps the UI's display language name to the backend's
+  /// `preferred_language` enum (en, hi, te, ta, ar, ur). Only English and
+  /// Telugu are currently selectable in the UI; anything else falls back
+  /// to English rather than sending a code the backend would reject.
+  static String _contentLanguageCode(String lang) {
+    switch (lang) {
+      case 'Telugu':
+        return 'te';
+      case 'Hindi':
+        return 'hi';
+      case 'Tamil':
+        return 'ta';
+      case 'Arabic':
+        return 'ar';
+      case 'Urdu':
+        return 'ur';
+      default:
+        return 'en';
+    }
+  }
+
+  /// Best-effort sync of profile-level preferences to the backend. Never
+  /// throws — a failed sync just leaves the change local-only until the
+  /// next successful call, matching setPreferredCategories' pattern.
+  Future<void> _syncProfileToBackend({String? preferredLanguage, String? theme, String? fullName}) async {
+    if (!isLoggedIn) return;
+    try {
+      await ApiService.instance.updateProfile({
+        if (fullName != null) 'full_name': fullName,
+        if (preferredLanguage != null) 'preferred_language': preferredLanguage,
+        if (theme != null) 'theme': theme,
+      });
+    } catch (e) {
+      debugPrint('Failed to sync profile preferences to backend: $e');
+    }
   }
 
   void togglePushNotifications(bool value) {
@@ -288,12 +485,14 @@ class AppState extends ChangeNotifier {
   }
 
   String get displayLocation {
-    if (city.isNotEmpty && district.isNotEmpty && city != district) {
+    if (subdistrict.isNotEmpty && district.isNotEmpty && subdistrict != district) {
+      return '$subdistrict, $district';
+    } else if (city.isNotEmpty && district.isNotEmpty && city != district) {
       return '$city, $district';
-    } else if (city.isNotEmpty) {
-      return '$city, $stateName';
     } else if (district.isNotEmpty) {
       return '$district, $stateName';
+    } else if (city.isNotEmpty) {
+      return '$city, $stateName';
     }
     return stateName;
   }
@@ -307,6 +506,10 @@ class AppState extends ChangeNotifier {
     String? country,
     double? latitude,
     double? longitude,
+    String? stateId,
+    String? districtId,
+    String? subdistrictId,
+    String? villageId,
   }) {
     stateName = state;
     this.district = district;
@@ -316,13 +519,24 @@ class AppState extends ChangeNotifier {
     this.country = country ?? 'India';
     this.latitude = latitude;
     this.longitude = longitude;
+    if (stateId != null) this.stateId = stateId;
+    if (districtId != null) this.districtId = districtId;
+    if (subdistrictId != null) this.subdistrictId = subdistrictId;
+    if (villageId != null) this.villageId = villageId;
     hasOnboarded = true;
     hasValidLocation = true;
+    AdRepository.instance.clearCache();
     notifyListeners();
     _persist();
   }
 
-  void setDeviceLocation(DeviceLocation loc) {
+  void setDeviceLocation(
+    DeviceLocation loc, {
+    String? stateId,
+    String? districtId,
+    String? subdistrictId,
+    String? villageId,
+  }) {
     setLocation(
       loc.state,
       loc.district,
@@ -332,14 +546,50 @@ class AppState extends ChangeNotifier {
       country: loc.country,
       latitude: loc.latitude,
       longitude: loc.longitude,
+      stateId: stateId,
+      districtId: districtId,
+      subdistrictId: subdistrictId,
+      villageId: villageId,
     );
   }
 
-  void setPreferredCategories(List<String> categories) {
+  Future<void> setPreferredCategories(List<String> categories) async {
     preferredCategories = categories;
     hasPromptedPreferences = true;
     notifyListeners();
-    _persist();
+    await _persist();
+
+    if (isLoggedIn) {
+      try {
+        // The on-device list mixes real content categories with location
+        // and format filters (e.g. "Andhra Pradesh", "Videos") that are not
+        // valid category slugs server-side. Sending an unknown slug makes
+        // the whole PATCH fail validation, so only forward slugs that
+        // actually exist in the backend's active category list.
+        final validSlugs = (await ApiService.instance.getCategories())
+            .map((c) => c.slug)
+            .toSet();
+        final Map<String, double> weights = {};
+        for (var cat in categories) {
+          final slug = _categoryToSlug(cat);
+          if (slug.isNotEmpty && validSlugs.contains(slug)) {
+            weights[slug] = 1.0;
+          }
+        }
+        if (weights.isNotEmpty) {
+          await ApiService.instance.updateCategoryPreferences(weights);
+        }
+      } catch (e) {
+        debugPrint('Failed to sync category preferences to backend: $e');
+      }
+    }
+  }
+
+  static String _categoryToSlug(String cat) {
+    return cat.trim().toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
   }
 
   void markPreferencesPrompted() {
@@ -376,21 +626,13 @@ class AppState extends ChangeNotifier {
     return bookmarkedItemIds.contains(itemId);
   }
 
-  /// Onboarding's quick phone+OTP login (skippable, used at first launch).
-  /// TODO(backend): this still issues a client-side mock token. Once the
-  /// OTP-verify endpoint exists, this should call it and use setAuthToken
-  /// with the real token it returns, same as accountLogin below.
+  /// Onboarding's quick phone login (skippable, used at first launch).
   void login(String phone) {
     userPhone = phone;
-    userName = 'Vasu';
-    setAuthToken('mock_token_${DateTime.now().millisecondsSinceEpoch}');
+    notifyListeners();
+    _persist();
   }
 
-  /// Full account signup — used by the Reporter Program's own auth flow.
-  /// TODO(backend): this is still a frontend-only mock. The real signup
-  /// endpoint must hash the password server-side; the app must never store
-  /// or transmit it except over TLS directly to that endpoint, and must
-  /// never persist it locally in any form.
   void signup({
     required String fullName,
     required String phone,
@@ -398,7 +640,8 @@ class AppState extends ChangeNotifier {
   }) {
     userName = fullName;
     userPhone = phone;
-    setAuthToken('mock_token_${DateTime.now().millisecondsSinceEpoch}');
+    notifyListeners();
+    _persist();
   }
 
   /// Records a full account login. Expects the caller (e.g. the login
@@ -412,11 +655,22 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
+  Future<void> fetchNotifications() async {
+    try {
+      final remote = await ApiService.instance.getNotifications();
+      if (remote.isNotEmpty) {
+        notifications = remote;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
   void markNotificationRead(String id) {
     final index = notifications.indexWhere((n) => n.id == id);
     if (index != -1 && !notifications[index].isRead) {
       notifications[index].isRead = true;
       notifyListeners();
+      ApiService.instance.markNotificationRead(id);
     }
   }
 
@@ -426,6 +680,7 @@ class AppState extends ChangeNotifier {
       if (!n.isRead) {
         n.isRead = true;
         changed = true;
+        ApiService.instance.markNotificationRead(n.id);
       }
     }
     if (changed) notifyListeners();
@@ -436,38 +691,51 @@ class AppState extends ChangeNotifier {
     profileImagePath = imagePath;
     notifyListeners();
     _persist();
+    // Note: profileImagePath is a local file path, not a backend field —
+    // only full_name is part of the /auth/me/ profile contract.
+    _syncProfileToBackend(fullName: name);
   }
 
-  Future<void> logout() async {
-    /*
-    // TODO: Uncomment when ready to integrate backend session revocation
-    try {
-      // In production, fetch the actual refresh token from secure storage
-      final String refreshToken = "stored-refresh-token"; 
-      await ApiService.instance.logout(refreshToken, logoutAllDevices: false);
-    } catch (e) {}
-    */
-
+  /// Clears local session state first. If the backend logout call that
+  /// follows 401s (access token already expired — often why logout() is
+  /// being called in the first place), the Dio interceptor sees
+  /// refreshToken already null and just no-ops instead of recursing back
+  /// into logout().
+  Future<String?> _clearLocalSession() async {
+    final tokenToRevoke = refreshToken;
     isLoggedIn = false;
     isAdmin = false;
     isContributor = false;
+    userId = null;
     userName = 'Guest User';
     userPhone = '';
+    sessionId = null;
+    await _secureStorage.delete(key: _sessionIdKey);
     await _clearAuthToken();
     notifyListeners();
     await _persist();
+    return tokenToRevoke;
   }
 
-  /*
-  // TODO: Uncomment this method when adding the "Logout of all devices" UI button
-  Future<void> logoutAllDevices() async {
-    try {
-      final String refreshToken = "stored-refresh-token"; 
-      await ApiService.instance.logout(refreshToken, logoutAllDevices: true);
-      await logout(); // Clear local state after backend invalidates all sessions
-    } catch (e) {}
+  Future<void> logout() async {
+    final tokenToRevoke = await _clearLocalSession();
+    // Best-effort server-side session revocation. ApiService.logout()
+    // already swallows its own errors, so an unreachable backend never
+    // blocks the local logout above.
+    if (tokenToRevoke != null && tokenToRevoke.isNotEmpty) {
+      await ApiService.instance.logout(tokenToRevoke, logoutAllDevices: false);
+    }
+    // Per Backend Flow 2: Logout -> call logout API, keep device_id + installation_secret, then call guest-device again
+    unawaited(NotificationService.instance.registerAsGuest());
   }
-  */
+
+  Future<void> logoutAllDevices() async {
+    final tokenToRevoke = await _clearLocalSession();
+    if (tokenToRevoke != null && tokenToRevoke.isNotEmpty) {
+      await ApiService.instance.logout(tokenToRevoke, logoutAllDevices: true);
+    }
+    unawaited(NotificationService.instance.registerAsGuest());
+  }
 
 
   // ---- Comments Program methods ----
@@ -592,17 +860,11 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  /// Checks the one-time upload OTP. Mock code is always '1234'. Returns
-  /// true on success and permanently marks the account as upload-verified,
-  /// so this is never asked again for any future post.
-  bool verifyUploadOtp(String code) {
-    if (code.trim() == '1234') {
-      uploadVerified = true;
-      notifyListeners();
-      _persist();
-      return true;
-    }
-    return false;
+  /// Permanently marks the account as upload-verified after successful OTP verification.
+  void markUploadVerified() {
+    uploadVerified = true;
+    notifyListeners();
+    _persist();
   }
 
   /// Creates a new post in "pending review" state. Call only after

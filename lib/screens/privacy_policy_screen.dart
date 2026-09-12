@@ -1,53 +1,151 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 
-class PrivacyPolicyScreen extends StatelessWidget {
+class PrivacyPolicyScreen extends StatefulWidget {
   const PrivacyPolicyScreen({super.key});
+
+  @override
+  State<PrivacyPolicyScreen> createState() => _PrivacyPolicyScreenState();
+}
+
+class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
+  bool _isLoading = true;
+  String? _dynamicTitle;
+  String? _dynamicContent;
+  DateTime? _updatedAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPolicy();
+  }
+
+  Future<void> _loadPolicy() async {
+    setState(() => _isLoading = true);
+    try {
+      final cms = await ApiService.instance.getCmsPage('privacy-policy') ??
+          await ApiService.instance.getCmsPage('privacy');
+
+      if (!mounted) return;
+      if (cms != null && cms['content'] != null) {
+        setState(() {
+          _dynamicTitle = cms['title']?.toString();
+          _dynamicContent = _cleanHtml(cms['content'].toString());
+          if (cms['updated_at'] != null) {
+            _updatedAt = DateTime.tryParse(cms['updated_at'].toString());
+          }
+          _isLoading = false;
+        });
+        return;
+      }
+    } catch (_) {
+      // Gracefully fall back to local content
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  String _cleanHtml(String html) {
+    return html
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n\n')
+        .replaceAll(RegExp(r'</li>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<li>', caseSensitive: false), '• ')
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .trim();
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white70 : Colors.black87;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Privacy & Policies', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          _dynamicTitle ?? 'Privacy & Policies',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
-        foregroundColor: isDark ? Colors.white : Colors.black87,
+        foregroundColor: textColor,
         elevation: 0,
         centerTitle: true,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(24.0),
-        children: [
-          _buildSectionHeader('Privacy Policy', isDark),
-          const SizedBox(height: 12),
-          _buildParagraph(
-            'At Vaaradhi, we take your privacy seriously. This policy describes what personal information we collect and how we use it.',
-            isDark,
-          ),
-          _buildParagraph(
-            '1. Information Collection: We collect information you provide directly to us when you register, such as your name, phone number, and location preferences.',
-            isDark,
-          ),
-          _buildParagraph(
-            '2. Location Data: We use your location to provide hyper-local news. This data is only collected with your explicit consent and is never shared with third-party advertisers.',
-            isDark,
-          ),
-          _buildParagraph(
-            '3. Data Security: We implement industry-standard security measures to protect your personal information from unauthorized access.',
-            isDark,
-          ),
-          const SizedBox(height: 32),
-          _buildSectionHeader('Content Policies', isDark),
-          const SizedBox(height: 12),
-          _buildParagraph(
-            'All content submitted via the Reporter Program must adhere to the following guidelines:',
-            isDark,
-          ),
-          _buildParagraph('• Content must be factually accurate and objective.'),
-          _buildParagraph('• No hate speech, harassment, or inciteful language.'),
-          _buildParagraph('• All media (photos/videos) must be original or appropriately licensed.'),
-          _buildParagraph('Violations of these policies will result in post rejection and potential suspension from the Reporter Program.'),
+      body: RefreshIndicator(
+        onRefresh: _loadPolicy,
+        color: AppColors.primary,
+        child: ListView(
+          padding: const EdgeInsets.all(24.0),
+          children: [
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32.0),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_dynamicContent != null && _dynamicContent!.isNotEmpty) ...[
+              _buildSectionHeader(_dynamicTitle ?? 'Privacy Policy', isDark),
+              if (_updatedAt != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Last updated: ${_updatedAt!.day}/${_updatedAt!.month}/${_updatedAt!.year}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Text(
+                _dynamicContent!,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  height: 1.6,
+                  color: secondaryTextColor,
+                ),
+              ),
+              const SizedBox(height: 32),
+            ] else ...[
+              _buildSectionHeader('Privacy Policy', isDark),
+              const SizedBox(height: 12),
+              _buildParagraph(
+                'At Vaaradhi, we take your privacy seriously. This policy describes what personal information we collect and how we use it.',
+                isDark,
+              ),
+              _buildParagraph(
+                '1. Information Collection: We collect information you provide directly to us when you register, such as your name, phone number, and location preferences.',
+                isDark,
+              ),
+              _buildParagraph(
+                '2. Location Data: We use your location to provide hyper-local news. This data is only collected with your explicit consent and is never shared with third-party advertisers.',
+                isDark,
+              ),
+              _buildParagraph(
+                '3. Data Security: We implement industry-standard security measures to protect your personal information from unauthorized access.',
+                isDark,
+              ),
+              const SizedBox(height: 32),
+              _buildSectionHeader('Content Policies', isDark),
+              const SizedBox(height: 12),
+              _buildParagraph(
+                'All content submitted via the Reporter Program must adhere to the following guidelines:',
+                isDark,
+              ),
+              _buildParagraph('• Content must be factually accurate and objective.', isDark),
+              _buildParagraph('• No hate speech, harassment, or inciteful language.', isDark),
+              _buildParagraph('• All media (photos/videos) must be original or appropriately licensed.', isDark),
+              _buildParagraph('Violations of these policies will result in post rejection and potential suspension from the Reporter Program.', isDark),
+              const SizedBox(height: 32),
+            ],
           const SizedBox(height: 32),
           _buildSectionHeader('Frequently Asked Questions', isDark),
           const SizedBox(height: 16),
@@ -78,8 +176,9 @@ class PrivacyPolicyScreen extends StatelessWidget {
           const SizedBox(height: 40),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSectionHeader(String title, bool isDark) {
     return Text(

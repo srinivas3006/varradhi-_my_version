@@ -1,33 +1,60 @@
 import 'package:flutter/material.dart';
-import '../../theme/app_theme.dart';
+import '../../models/ad_banner.dart';
+import '../../services/ad_manager.dart';
+import 'ad_banner_widget.dart';
 
-/// A mock anchored banner ad slot (~320x50 style), meant to sit above the
-/// bottom nav bar. Swap the child content for a real ad SDK banner
-/// (e.g. google_mobile_ads' AdWidget) when wiring up real monetization.
-class BannerAdSlot extends StatelessWidget {
-  const BannerAdSlot({super.key});
+/// An anchored banner ad slot that dynamically loads real backend banner ads.
+/// If no active banner ads are returned from the backend, it collapses completely
+/// (no dummy/placeholder box).
+class BannerAdSlot extends StatefulWidget {
+  final String placementZone;
+  final double maxHeight;
+
+  const BannerAdSlot({
+    super.key,
+    this.placementZone = 'banner',
+    this.maxHeight = 64,
+  });
+
+  @override
+  State<BannerAdSlot> createState() => _BannerAdSlotState();
+}
+
+class _BannerAdSlotState extends State<BannerAdSlot> {
+  AdBanner? _ad;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBannerAd();
+  }
+
+  Future<void> _loadBannerAd() async {
+    try {
+      final ads = await AdManager.instance.getAdsForZone(widget.placementZone);
+      if (mounted && ads.isNotEmpty) {
+        final selected = AdManager.instance.selectAd(ads, preferType: 'banner');
+        if (mounted && selected != null) {
+          setState(() {
+            _ad = selected;
+          });
+        }
+      }
+    } catch (_) {
+      // Backend unavailable or no banner ad; collapse gracefully
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 50,
-      width: double.infinity,
-      color: const Color(0xFFEDEDEF),
-      alignment: Alignment.center,
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.ads_click, size: 14, color: AppColors.textMuted),
-          SizedBox(width: 6),
-          Text(
-            'Advertisement · 320x50 banner slot',
-            style: TextStyle(
-              fontSize: 11,
-              color: AppColors.textMuted,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+    if (_ad == null) {
+      return const SizedBox.shrink();
+    }
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: widget.maxHeight),
+      child: AdBannerWidget(
+        ad: _ad!,
+        placementZone: widget.placementZone,
       ),
     );
   }

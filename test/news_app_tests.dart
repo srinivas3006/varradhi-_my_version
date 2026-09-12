@@ -1,10 +1,41 @@
+import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/api_response.dart';
+import 'package:way2news_clone/core/network/api_response.dart';
+import 'package:way2news_clone/core/network/dio_client.dart';
 import 'package:way2news_clone/models/news_article.dart';
 import 'package:way2news_clone/repositories/news_article_repository.dart';
 import 'package:way2news_clone/widgets/news_feed_card.dart';
+
+class TestMockAdapter implements HttpClientAdapter {
+  final Future<ResponseBody> Function(RequestOptions options) handler;
+
+  TestMockAdapter(this.handler);
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    return handler(options);
+  }
+
+  @override
+  void close({bool force = false}) {}
+
+  static ResponseBody jsonResponse(dynamic body, int statusCode) {
+    return ResponseBody.fromString(
+      jsonEncode(body),
+      statusCode,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +57,22 @@ void main() {
   group('NewsArticleRepository', () {
     setUp(() {
       NewsArticleRepository.instance.clearCache();
+      ApiClient.instance.dio.httpClientAdapter = TestMockAdapter((options) async {
+        if (options.path.contains('hello-world')) {
+          return TestMockAdapter.jsonResponse({
+            'data': {
+              'id': 'art-hw',
+              'title': 'Hello World Article',
+              'slug': 'hello-world',
+              'summary': 'This is a detailed summary for the mock article.',
+              'content': '<p>full rich-text HTML content here</p>',
+              'category': 'General',
+              'is_video': false,
+            }
+          }, 200);
+        }
+        return TestMockAdapter.jsonResponse({'errors': {'code': 404, 'message': 'Not Found'}}, 404);
+      });
     });
 
     test('fetches article detail from mock backend using slug', () async {

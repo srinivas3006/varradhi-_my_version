@@ -10,9 +10,12 @@ import '../models/unified_feed_item.dart';
 import '../models/ad_banner.dart';
 import '../models/reporter_post.dart';
 import '../models/poll.dart';
+import '../models/app_notification.dart';
 import 'dio_client.dart';
 import 'location_service.dart';
 import '../state/app_state.dart';
+import '../core/utils/date_parser.dart';
+import '../core/errors/app_exception.dart';
 
 class ApiService {
   ApiService._internal();
@@ -20,24 +23,167 @@ class ApiService {
 
   final Dio _dio = DioClient().dio;
 
+  // --- System Bootstrap & Guest Device ---
+  Future<bool> checkHealth() async {
+    try {
+      final response = await _dio.get('/api/v1/health/');
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // --- Auth ---
   Future<Map<String, dynamic>> login(String email, String password, {String? fcmToken}) async {
     final response = await _dio.post('/api/v1/auth/login/', data: {
       'email': email,
       'password': password,
-      'device_id': 'flutter-app',
+      'device_id': AppState.instance.deviceId,
       'device_name': 'Mobile Device',
       'device_type': 'android',
-      'fcm_token': fcmToken ?? 'dummy-token'
+      if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
     });
     return response.data['data'] as Map<String, dynamic>;
   }
 
-  Future<void> updateFcmToken(String token) async {
+  /// 1. APK Guest Notification Flow: POST /api/v1/notifications/guest-device/
+  Future<Map<String, dynamic>?> registerGuestDevice({
+    String? deviceId,
+    String? fcmToken,
+    String? installationSecret,
+  }) async {
+    final devId = deviceId ?? AppState.instance.deviceId;
+    final token = fcmToken ?? AppState.instance.fcmToken;
+    final secret = installationSecret ?? AppState.instance.installationSecret;
+
+    if (token == null || token.isEmpty) return null;
+
     try {
-      await _dio.post('/api/v1/users/fcm-token/', data: {'fcm_token': token});
-    } catch (e) {
-      // Silently fail if not logged in or backend unavailable
+      final response = await _dio.post('/api/v1/notifications/guest-device/', data: {
+        'device_id': devId,
+        'device_name': 'Mobile Device',
+        'device_type': 'android',
+        'app_version': '1.0.0',
+        'fcm_token': token,
+        if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
+        'state': AppState.instance.stateName,
+        'district': AppState.instance.district,
+        'subdistrict': AppState.instance.subdistrict,
+        'village': AppState.instance.village,
+        'country': AppState.instance.country,
+        'preferences': {
+          'enabled': true,
+          'content_language': 'te',
+          'articles': true,
+          'posters': true,
+          'quotes': true,
+          'ugc': true,
+          'breaking_news': true,
+          'local_news': true,
+          'quiet_hours_start': '22:00:00',
+          'quiet_hours_end': '06:00:00',
+          'timezone': 'Asia/Kolkata',
+          'max_per_hour': 5,
+          'max_per_day': 25,
+        },
+      });
+
+      final data = response.data['data'] as Map<String, dynamic>?;
+      if (data != null && data['installation_secret'] != null) {
+        await AppState.instance.setInstallationSecret(data['installation_secret'].toString());
+      }
+      return data;
+    } on DioException catch (dioErr) {
+      if (dioErr.response?.statusCode == 403 ||
+          dioErr.response?.data.toString().contains('Installation') == true ||
+          dioErr.response?.data.toString().contains('upgrade') == true) {
+        await AppState.instance.setInstallationSecret(null);
+        try {
+          final retryResp = await _dio.post('/api/v1/notifications/guest-device/', data: {
+            'device_id': devId,
+            'device_name': 'Mobile Device',
+            'device_type': 'android',
+            'app_version': '1.0.0',
+            'fcm_token': token,
+            'state': AppState.instance.stateName,
+            'district': AppState.instance.district,
+            'subdistrict': AppState.instance.subdistrict,
+            'village': AppState.instance.village,
+            'country': AppState.instance.country,
+            'preferences': {
+              'enabled': true,
+              'content_language': 'te',
+              'articles': true,
+              'posters': true,
+              'quotes': true,
+              'ugc': true,
+              'breaking_news': true,
+              'local_news': true,
+              'quiet_hours_start': '22:00:00',
+              'quiet_hours_end': '06:00:00',
+              'timezone': 'Asia/Kolkata',
+              'max_per_hour': 5,
+              'max_per_day': 25,
+            },
+          });
+          final data = retryResp.data['data'] as Map<String, dynamic>?;
+          if (data != null && data['installation_secret'] != null) {
+            await AppState.instance.setInstallationSecret(data['installation_secret'].toString());
+          }
+          return data;
+        } catch (_) {}
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 2. APK Login Handoff Flow: POST /api/v1/notifications/device-token/
+  Future<Map<String, dynamic>?> handoffDeviceToken({
+    String? sessionId,
+    String? fcmToken,
+    String? installationSecret,
+  }) async {
+    final sessId = sessionId ?? AppState.instance.sessionId;
+    final token = fcmToken ?? AppState.instance.fcmToken;
+    final secret = installationSecret ?? AppState.instance.installationSecret;
+
+    if (token == null || token.isEmpty) return null;
+
+    try {
+      final response = await _dio.post('/api/v1/notifications/device-token/', data: {
+        if (sessId != null && sessId.isNotEmpty) 'session_id': sessId,
+        'fcm_token': token,
+        if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
+      });
+      return response.data['data'] as Map<String, dynamic>?;
+    } on DioException catch (dioErr) {
+      if (dioErr.response?.statusCode == 403) {
+        await registerGuestDevice(fcmToken: token);
+        if (AppState.instance.isLoggedIn) {
+          try {
+            final retryResp = await _dio.post('/api/v1/notifications/device-token/', data: {
+              if (sessId != null && sessId.isNotEmpty) 'session_id': sessId,
+              'fcm_token': token,
+              if (AppState.instance.installationSecret != null)
+                'installation_secret': AppState.instance.installationSecret,
+            });
+            return retryResp.data['data'] as Map<String, dynamic>?;
+          } catch (_) {}
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> updateFcmToken(String token) async {
+    if (AppState.instance.isLoggedIn) {
+      await handoffDeviceToken(fcmToken: token);
+    } else {
+      await registerGuestDevice(fcmToken: token);
     }
   }
 
@@ -49,7 +195,7 @@ class ApiService {
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     final response = await _dio.post('/api/v1/auth/token/refresh/', data: {
       'refresh': refreshToken,
-      'device_id': 'flutter-app',
+      'device_id': AppState.instance.deviceId,
     });
     return response.data['data'] as Map<String, dynamic>;
   }
@@ -105,17 +251,14 @@ class ApiService {
   }
 
   // --- Device Sessions ---
-  /* 
-  // TODO: Uncomment and wire up when building the 'Active Sessions' UI in settings
   Future<List<dynamic>> getDeviceSessions() async {
     final response = await _dio.get('/api/v1/auth/sessions/');
-    return response.data['data'] as List<dynamic>;
+    return response.data['data'] as List<dynamic>? ?? [];
   }
 
   Future<void> revokeDeviceSession(String sessionId) async {
     await _dio.delete('/api/v1/auth/sessions/$sessionId/');
   }
-  */
 
   // --- Location & Preferences ---
   /// Syncs user location with backend if logged in.
@@ -170,6 +313,153 @@ class ApiService {
     }
   }
 
+  /// Resolves the detected GPS location against backend canonical locations (search),
+  /// binds the resulting canonical IDs (district_id, subdistrict_id, etc.) in AppState,
+  /// and updates the backend profile (PATCH /api/v1/auth/locations/profile/ or /guest/).
+  Future<void> resolveAndSyncCanonicalLocation(DeviceLocation location) async {
+    // 1. Telemetry for authenticated users
+    if (AppState.instance.isLoggedIn && AppState.instance.authToken != null && AppState.instance.authToken!.isNotEmpty) {
+      updateUserLocationDevice(location).catchError((e) {
+        debugPrint('Failed to send GPS telemetry: $e');
+      });
+    }
+
+    // 2. Canonical Search to find canonical IDs
+    String? stateId;
+    String? districtId;
+    String? subdistrictId;
+    String? villageId;
+
+    try {
+      final queryTerm = location.subdistrict ?? location.district;
+      final results = await searchLocations(queryTerm);
+      if (results.isNotEmpty) {
+        for (var item in results) {
+          final type = item['type']?.toString().toLowerCase();
+          final id = item['id']?.toString();
+          if (id == null) continue;
+
+          if (type == 'village') {
+            villageId ??= id;
+          } else if (type == 'subdistrict') {
+            subdistrictId ??= id;
+          } else if (type == 'district') {
+            districtId ??= id;
+          } else if (type == 'state') {
+            stateId ??= id;
+          }
+        }
+      }
+
+      // If no district match was found yet, search by district name
+      if (districtId == null && location.district.isNotEmpty) {
+        final distResults = await searchLocations(location.district);
+        for (var item in distResults) {
+          if (item['type']?.toString().toLowerCase() == 'district') {
+            districtId = item['id']?.toString();
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error searching canonical location: $e');
+    }
+
+    // 3. Update AppState with canonical IDs if resolved
+    AppState.instance.setDeviceLocation(
+      location,
+      stateId: stateId,
+      districtId: districtId,
+      subdistrictId: subdistrictId,
+      villageId: villageId,
+    );
+
+    // 4. Canonical Profile PATCH (Both Logged-in and Guest)
+    final patchData = <String, dynamic>{};
+    if (villageId != null) patchData['village_id'] = villageId;
+    if (subdistrictId != null) patchData['subdistrict_id'] = subdistrictId;
+    if (districtId != null) patchData['district_id'] = districtId;
+    if (stateId != null) patchData['state_id'] = stateId;
+
+    if (patchData.isNotEmpty) {
+      try {
+        await updateLocationProfile(patchData);
+      } catch (e) {
+        debugPrint('Failed to patch canonical location profile: $e');
+      }
+    }
+  }
+
+  // --- Canonical Locations (States / Districts / Subdistricts / Villages / Search) ---
+  Future<List<dynamic>> searchLocations(String query) async {
+    try {
+      final response = await _dio.get('/api/v1/locations/search/', queryParameters: {'q': query});
+      return (response.data['data'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getStates() async {
+    try {
+      final response = await _dio.get('/api/v1/locations/states/');
+      return (response.data['data'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getDistricts(String state) async {
+    try {
+      final response = await _dio.get('/api/v1/locations/districts/', queryParameters: {'state': state});
+      return (response.data['data'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getSubdistricts(String district) async {
+    try {
+      final response = await _dio.get('/api/v1/locations/subdistricts/', queryParameters: {'district': district});
+      return (response.data['data'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getVillages(String subdistrict) async {
+    try {
+      final response = await _dio.get('/api/v1/locations/villages/', queryParameters: {'subdistrict': subdistrict});
+      return (response.data['data'] as List?) ?? [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getLocationProfile() async {
+    try {
+      final endpoint = AppState.instance.isLoggedIn
+          ? '/api/v1/auth/locations/profile/'
+          : '/api/v1/auth/locations/guest/';
+      final response = await _dio.get(endpoint);
+      return response.data['data'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> updateLocationProfile(Map<String, dynamic> data) async {
+    try {
+      final endpoint = AppState.instance.isLoggedIn
+          ? '/api/v1/auth/locations/profile/'
+          : '/api/v1/auth/locations/guest/';
+      final response = await _dio.patch(endpoint, data: data);
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>> updateCategoryPreferences(Map<String, double> categoryWeights) async {
     final response = await _dio.patch('/api/v1/users/me/preferences/', data: {
       'category_weights': categoryWeights
@@ -183,8 +473,6 @@ class ApiService {
     final payload = response.data is Map
         ? ((response.data as Map<String, dynamic>)['data'] ?? response.data)
         : response.data;
-
-    debugPrint('Article detail payload for slug "$slug": $payload');
 
     if (payload is! Map<String, dynamic>) {
       throw Exception('Unexpected detail payload format for article $slug');
@@ -258,20 +546,75 @@ class ApiService {
     }
   }
 
-  /// Post a like/dislike/none reaction for an article.
-  /// The backend is expected to accept `article_id` and `reaction` ('like'|'dislike'|'none')
+  /// Set or remove a like/dislike reaction for an article.
+  /// Backend contract:
+  /// PUT /api/v1/articles/{article_id}/reaction/ with {"reaction_type": "like" | "dislike"}
+  /// DELETE /api/v1/articles/{article_id}/reaction/ when reaction is 'none' or empty
   Future<Map<String, dynamic>> postArticleReaction(String articleId, Object reaction) async {
-    // Accept either a String ('like'|'dislike'|'none') or an enum/other whose
-    // toString() ends with the value (e.g. 'Reaction.like'). This avoids
-    // importing UI enums into the service layer.
-    final String r = reaction is String
-        ? reaction
-        : reaction.toString().split('.').last;
-    final response = await _dio.post('/api/v1/articles/reaction/', data: {
-      'article_id': articleId,
-      'reaction': r,
+    final String r = (reaction is String
+            ? reaction
+            : reaction.toString().split('.').last)
+        .toLowerCase();
+    if (r == 'none' || r.isEmpty) {
+      return deleteArticleReaction(articleId);
+    }
+    final response = await _dio.put('/api/v1/articles/$articleId/reaction/', data: {
+      'reaction_type': r,
     });
-    return response.data['data'] as Map<String, dynamic>;
+    return (response.data is Map && response.data['data'] is Map<String, dynamic>)
+        ? response.data['data'] as Map<String, dynamic>
+        : <String, dynamic>{};
+  }
+
+  /// Remove reaction via DELETE /api/v1/articles/{article_id}/reaction/
+  Future<Map<String, dynamic>> deleteArticleReaction(String articleId) async {
+    final response = await _dio.delete('/api/v1/articles/$articleId/reaction/');
+    return (response.data is Map && response.data['data'] is Map<String, dynamic>)
+        ? response.data['data'] as Map<String, dynamic>
+        : <String, dynamic>{};
+  }
+
+  // --- Comments ---
+  Future<List<Comment>> getComments(String articleId, {String? cursor, int pageSize = 20}) async {
+    try {
+      final response = await _dio.get('/api/v1/articles/$articleId/comments/', queryParameters: {
+        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+        'page_size': pageSize,
+      });
+      final List data = response.data['data'] as List? ?? [];
+      return data.map((json) => Comment.fromJson(json as Map<String, dynamic>)).toList();
+    } catch (e) {
+      debugPrint('Failed to fetch comments for article $articleId: $e');
+      return [];
+    }
+  }
+
+  Future<Comment> postComment(String articleId, String content, {String? parentId}) async {
+    final response = await _dio.post('/api/v1/articles/$articleId/comments/', data: {
+      'content': content,
+      if (parentId != null && parentId.isNotEmpty) 'parent_id': parentId,
+    });
+    return Comment.fromJson(response.data['data'] as Map<String, dynamic>);
+  }
+
+  Future<Comment> editComment(String commentId, String content) async {
+    final response = await _dio.patch('/api/v1/articles/comments/$commentId/', data: {
+      'content': content,
+    });
+    return Comment.fromJson(response.data['data'] as Map<String, dynamic>);
+  }
+
+  Future<bool> deleteComment(String commentId) async {
+    final response = await _dio.delete('/api/v1/articles/comments/$commentId/');
+    return response.statusCode == 200 || response.statusCode == 204;
+  }
+
+  Future<bool> reportComment(String commentId, {required String reason, String? notes}) async {
+    final response = await _dio.post('/api/v1/articles/comments/$commentId/report/', data: {
+      'reason': reason,
+      if (notes != null && notes.isNotEmpty) 'notes': notes,
+    });
+    return response.statusCode == 200 || response.statusCode == 201;
   }
 
   // --- Feeds ---
@@ -300,13 +643,28 @@ class ApiService {
       if (village != null) 'village': village,
     });
     return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
-      return (json as List).map((i) => UnifiedFeedItem.fromJson(i)).toList();
+      if (json is List) {
+        return json.map((i) => UnifiedFeedItem.fromJson(i)).toList();
+      }
+      return <UnifiedFeedItem>[];
     });
   }
 
   Future<List<LiveNews>> getLiveNews() async {
-    final response = await _dio.get('/api/v1/articles/live/');
-    return (response.data['data'] as List).map((i) => LiveNews.fromJson(i)).toList();
+    try {
+      final response = await _dio.get('/api/v1/articles/live/');
+      final List data = response.data['data'] as List? ?? [];
+      return data.map((i) => LiveNews.fromJson(i as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // In-memory feed cache for zero-latency instant article responses
+  final Map<String, ApiResponse<List<NewsArticle>>> _feedCache = {};
+
+  void clearFeedCache() {
+    _feedCache.clear();
   }
 
   Future<ApiResponse<List<NewsArticle>>> getNewsFeed({
@@ -323,19 +681,95 @@ class ApiService {
     String? village,
     double? latitude,
     double? longitude,
+    bool forceRefresh = false,
   }) async {
+    // Generate cache key for initial page
+    final isInitial = cursor == null || cursor.isEmpty;
+    final cacheKey = '$scope-$category-$lang-$state-$district';
+
+    // Fast-path: Return cached feed immediately on initial page
+    if (isInitial && !forceRefresh && _feedCache.containsKey(cacheKey)) {
+      // Fire-and-forget background revalidation
+      _fetchFeedFromNetwork(
+        cursor: cursor,
+        pageSize: pageSize,
+        scope: scope,
+        lang: lang,
+        category: category,
+        breaking: breaking,
+        state: state,
+        district: district,
+        city: city,
+        subdistrict: subdistrict,
+        village: village,
+        latitude: latitude,
+        longitude: longitude,
+      ).then((fresh) {
+        _feedCache[cacheKey] = fresh;
+      }).catchError((_) {});
+
+      return _feedCache[cacheKey]!;
+    }
+
+    final freshResponse = await _fetchFeedFromNetwork(
+      cursor: cursor,
+      pageSize: pageSize,
+      scope: scope,
+      lang: lang,
+      category: category,
+      breaking: breaking,
+      state: state,
+      district: district,
+      city: city,
+      subdistrict: subdistrict,
+      village: village,
+      latitude: latitude,
+      longitude: longitude,
+    );
+
+    if (isInitial && (freshResponse.data?.isNotEmpty ?? false)) {
+      _feedCache[cacheKey] = freshResponse;
+    }
+
+    return freshResponse;
+  }
+
+  Future<ApiResponse<List<NewsArticle>>> _fetchFeedFromNetwork({
+    String? cursor,
+    int? pageSize,
+    String? scope,
+    String? lang,
+    String? category,
+    bool? breaking,
+    String? state,
+    String? district,
+    String? city,
+    String? subdistrict,
+    String? village,
+    double? latitude,
+    double? longitude,
+  }) async {
+    // Default to a fat response of 25 articles per page for rapid browsing
+    final effectiveLang = lang ?? 'te';
+    final effectiveState = state ?? (scope == 'local' ? AppState.instance.stateName : null);
+    final effectiveDistrict = district ?? (scope == 'local' ? AppState.instance.district : null);
+    final effectiveCity = city ?? (scope == 'local' ? AppState.instance.city : null);
+    final effectiveSubdistrict = subdistrict ?? (scope == 'local' && AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null);
+    final effectiveVillage = village ?? (scope == 'local' && AppState.instance.village.isNotEmpty ? AppState.instance.village : null);
+    final effectivePageSize = pageSize ?? 25;
+
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
-      if (pageSize != null) 'page_size': pageSize,
-      if (scope != null) 'scope': scope,
-      if (lang != null) 'lang': lang,
+      'page_size': effectivePageSize,
+      if (scope != null && scope == 'local') 'scope': 'local',
+      'lang': effectiveLang,
       if (category != null && category != 'For You' && category != 'Trending') 'category': category.toLowerCase(),
       if (breaking != null) 'breaking': breaking,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (effectiveState != null && effectiveState.isNotEmpty) 'state': effectiveState,
+      if (effectiveDistrict != null && effectiveDistrict.isNotEmpty) 'district': effectiveDistrict,
+      if (effectiveCity != null && effectiveCity.isNotEmpty) 'city': effectiveCity,
+      if (effectiveSubdistrict != null && effectiveSubdistrict.isNotEmpty) 'subdistrict': effectiveSubdistrict,
+      if (effectiveVillage != null && effectiveVillage.isNotEmpty) 'village': effectiveVillage,
       if (latitude != null) ...{
         'latitude': latitude,
         'lat': latitude,
@@ -346,9 +780,14 @@ class ApiService {
         'lon': longitude,
       },
     });
-    return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-      return (json as List).map((i) => NewsArticle.fromJson(i)).toList();
+    final parsed = ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
+      if (json is List) {
+        return json.map((i) => NewsArticle.fromJson(i)).toList();
+      }
+      return <NewsArticle>[];
     });
+
+    return parsed;
   }
 
   Future<ApiResponse<List<NewsArticle>>> getBlogsFeed({String? cursor}) async {
@@ -356,7 +795,10 @@ class ApiService {
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     });
     return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-      return (json as List).map((i) => NewsArticle.fromJson(i)).toList();
+      if (json is List) {
+        return json.map((i) => NewsArticle.fromJson(i)).toList();
+      }
+      return <NewsArticle>[];
     });
   }
 
@@ -406,7 +848,10 @@ class ApiService {
       if (village != null) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
-      return (json as List).map((i) => VideoItem.fromJson(i)).toList();
+      if (json is List) {
+        return json.map((i) => VideoItem.fromJson(i)).toList();
+      }
+      return <VideoItem>[];
     });
   }
 
@@ -433,7 +878,10 @@ class ApiService {
       if (village != null) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
-      return (json as List).map((i) => VideoItem.fromJson(i)).toList();
+      if (json is List) {
+        return json.map((i) => VideoItem.fromJson(i)).toList();
+      }
+      return <VideoItem>[];
     });
   }
 
@@ -442,29 +890,47 @@ class ApiService {
     String? scope,
     String? state,
     String? district,
+    String? city,
+    String? lang,
     String? areaId,
   }) async {
     try {
+      final placementZone = zone ?? 'feed';
+      final effectiveState = state ?? AppState.instance.stateName;
+      final effectiveDistrict = district ?? AppState.instance.district;
+      final effectiveCity = city ?? AppState.instance.city;
+      final effectiveLang = lang ?? 'te';
+
       final response = await _dio.get('/api/v1/ads/', queryParameters: {
-        if (zone != null) 'zone': zone,
-        if (scope != null) 'scope': scope,
-        if (state != null) 'state': state,
-        if (district != null) 'district': district,
+        'placement_zone': placementZone,
+        'zone': placementZone,
+        if (scope != null && scope == 'local') 'scope': 'local',
+        if (effectiveState.isNotEmpty) 'state': effectiveState,
+        if (effectiveDistrict.isNotEmpty) 'district': effectiveDistrict,
+        if (effectiveCity.isNotEmpty) 'city': effectiveCity,
+        'lang': effectiveLang,
         if (areaId != null) 'area_id': areaId,
       });
       return ApiResponse<List<AdBanner>>.fromJson(response.data, (json) {
-        return (json as List).map((i) => AdBanner.fromJson(i)).toList();
+        if (json is List) {
+          return json.map((i) => AdBanner.fromJson(i)).toList();
+        }
+        return <AdBanner>[];
       });
     } catch (e) {
-      return ApiResponse(data: []);
+      return ApiResponse.error(
+        message: e is AppException ? e.message : e.toString(),
+        fallbackData: <AdBanner>[],
+      );
     }
   }
 
-  Future<void> trackAdEvent(String adId, String eventType) async {
+  Future<void> trackAdEvent(String adId, String eventType, {String placementZone = 'feed'}) async {
     try {
       await _dio.post('/api/v1/ads/event/', data: {
         'ad_id': adId,
         'event_type': eventType,
+        'placement_zone': placementZone,
       });
     } catch (e) {
       // Silently fail for analytics tracking
@@ -484,11 +950,18 @@ class ApiService {
       });
       // Search API wraps items in data['results'] instead of directly in data.
       return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-        final results = (json as Map<String, dynamic>)['results'] as List;
-        return results.map((i) => NewsArticle.fromJson(i)).toList();
+        if (json is Map<String, dynamic> && json['results'] is List) {
+          return (json['results'] as List).map((i) => NewsArticle.fromJson(i)).toList();
+        } else if (json is List) {
+          return json.map((i) => NewsArticle.fromJson(i)).toList();
+        }
+        return <NewsArticle>[];
       });
     } catch (e) {
-      return ApiResponse(data: []);
+      return ApiResponse.error(
+        message: e is AppException ? e.message : e.toString(),
+        fallbackData: <NewsArticle>[],
+      );
     }
   }
 
@@ -538,18 +1011,24 @@ class ApiService {
   Future<List<NewsArticle>> getBookmarks() async {
     try {
       final response = await _dio.get('/api/v1/bookmarks/');
-      return (response.data['data'] as List).map((i) => NewsArticle.fromJson(i)).toList();
+      final List data = response.data['data'] as List? ?? [];
+      return data.map((i) {
+        final map = i as Map<String, dynamic>;
+        final nestedArticle = map['article'];
+        final articleJson = nestedArticle is Map<String, dynamic> ? nestedArticle : map;
+        return NewsArticle.fromJson(articleJson);
+      }).toList();
     } catch (_) {
       return [];
     }
   }
 
   Future<void> addBookmark(String articleId) async {
-    await _dio.post('/api/v1/bookmarks/', data: {'article': articleId});
+    await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
   }
 
   Future<bool> toggleBookmark(String articleId) async {
-    final response = await _dio.post('/api/v1/bookmarks/toggle/', data: {'article': articleId});
+    final response = await _dio.post('/api/v1/bookmarks/toggle/', data: {'article_id': articleId});
     return response.statusCode == 200 || response.statusCode == 201;
   }
 
@@ -589,16 +1068,16 @@ class ApiService {
     return response.statusCode == 200;
   }
 
-  Future<List<UnifiedFeedItem>> getUgcFeed({
+  Future<ApiResponse<List<UnifiedFeedItem>>> getUgcFeed({
     String? state,
     String? district,
     String? scope,
     int pageSize = 20,
-    int page = 1,
+    String? cursor,
   }) async {
     final Map<String, dynamic> params = {
       'page_size': pageSize,
-      'page': page,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
     if (state != null) params['state'] = state;
     if (district != null) params['district'] = district;
@@ -606,29 +1085,37 @@ class ApiService {
 
     try {
       final response = await _dio.get('/api/v1/ugc/feed/', queryParameters: params);
-      final List data = response.data['data'] ?? [];
-      return data.map((json) => UnifiedFeedItem(
-        id: json['id'] ?? '',
-        type: json['type'] ?? 'ugc',
-        title: json['title'] ?? '',
-        summary: json['description'] ?? '',
-        thumbnailUrl: json['thumbnail_url'] ?? '',
-        mediaUrl: json['media_url'] ?? '',
-        createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
-        district: json['district'] ?? '',
-        subdistrict: json['subdistrict'] ?? '',
-        village: json['village'] ?? '',
-        state: json['state'] ?? '',
-        priorityScore: json['priority_score'] ?? 0,
-        source: json['source'] ?? json['uploader'] ?? 'UGC',
-        trustScore: json['trust_score'] ?? 50,
-        metadata: {
-          'media_type': json['media_type'],
-          'trust_level': json['trust_level'],
-        },
-      )).toList();
+      return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
+        if (json is! List) return <UnifiedFeedItem>[];
+        return json.map((item) {
+          final map = item is Map<String, dynamic> ? item : <String, dynamic>{};
+          return UnifiedFeedItem(
+            id: map['id']?.toString() ?? '',
+            type: map['type']?.toString() ?? 'ugc',
+            title: map['title']?.toString() ?? '',
+            summary: map['description']?.toString() ?? '',
+            thumbnailUrl: map['thumbnail_url']?.toString() ?? '',
+            mediaUrl: map['media_url']?.toString() ?? '',
+            createdAt: DateParser.tryParse(map['created_at']) ?? DateTime.now(),
+            district: map['district']?.toString() ?? '',
+            subdistrict: map['subdistrict']?.toString() ?? '',
+            village: map['village']?.toString() ?? '',
+            state: map['state']?.toString() ?? '',
+            priorityScore: map['priority_score'] is num ? (map['priority_score'] as num).toInt() : 0,
+            source: map['source']?.toString() ?? map['uploader']?.toString() ?? 'UGC',
+            trustScore: map['trust_score'] is num ? (map['trust_score'] as num).toInt() : 50,
+            metadata: {
+              'media_type': map['media_type'],
+              'trust_level': map['trust_level'],
+            },
+          );
+        }).toList();
+      });
     } catch (e) {
-      return [];
+      return ApiResponse.error(
+        message: e is AppException ? e.message : e.toString(),
+        fallbackData: <UnifiedFeedItem>[],
+      );
     }
   }
 
@@ -642,6 +1129,8 @@ class ApiService {
     required String mobile,
     required String mediaType,
     required String filePath,
+    ProgressCallback? onSendProgress,
+    CancelToken? cancelToken,
   }) async {
     final formData = FormData.fromMap({
       'submission_id': submissionId,
@@ -649,7 +1138,50 @@ class ApiService {
       'media_type': mediaType,
       'file': await MultipartFile.fromFile(filePath),
     });
-    final response = await _dio.post('/api/v1/ugc/upload-media/', data: formData);
+    final response = await _dio.post(
+      '/api/v1/ugc/upload-media/',
+      data: formData,
+      onSendProgress: onSendProgress,
+      cancelToken: cancelToken,
+    );
+    return response.data['data'] as Map<String, dynamic>;
+  }
+
+  /// Upload multiple media files for one UGC submission in a single request.
+  /// Falls back to the single-file `file`/`media_type` shape when there's
+  /// only one path, matching the backend contract exactly for both cases.
+  Future<Map<String, dynamic>> uploadMediaBatch({
+    required String submissionId,
+    required String mobile,
+    required List<String> filePaths,
+    required List<String> mediaTypes,
+    ProgressCallback? onSendProgress,
+    CancelToken? cancelToken,
+  }) async {
+    if (filePaths.length == 1) {
+      return uploadMedia(
+        submissionId: submissionId,
+        mobile: mobile,
+        mediaType: mediaTypes.first,
+        filePath: filePaths.first,
+        onSendProgress: onSendProgress,
+        cancelToken: cancelToken,
+      );
+    }
+    final files = await Future.wait(filePaths.map((p) => MultipartFile.fromFile(p)));
+    final formData = FormData.fromMap({
+      'submission_id': submissionId,
+      'mobile': mobile,
+      'media_type': mediaTypes.first,
+      'media_types': mediaTypes.join(','),
+      'files': files,
+    });
+    final response = await _dio.post(
+      '/api/v1/ugc/upload-media/',
+      data: formData,
+      onSendProgress: onSendProgress,
+      cancelToken: cancelToken,
+    );
     return response.data['data'] as Map<String, dynamic>;
   }
 
@@ -659,21 +1191,32 @@ class ApiService {
   }
 
   Future<List<ReporterPost>> getReporterSubmissions({
-    String status = 'pending',
+    String? status,
     int pageSize = 20,
     int page = 1,
   }) async {
     try {
-      final response = await _dio.get('/api/v1/ugc/reporter/submissions/', queryParameters: {
-        'status': status,
+      final query = <String, dynamic>{
         'page_size': pageSize,
         'page': page,
-      });
+      };
+      if (status != null && status.isNotEmpty && status.toLowerCase() != 'all') {
+        query['status'] = status.toLowerCase();
+      }
+      final response = await _dio.get('/api/v1/ugc/reporter/submissions/', queryParameters: query);
       final List data = response.data['data'] ?? [];
       return data.map((json) {
         PostStatus postStatus = PostStatus.pending;
-        if (json['status'] == 'approved' || json['status'] == 'published') postStatus = PostStatus.approved;
-        if (json['status'] == 'rejected') postStatus = PostStatus.rejected;
+        final raw = (json['status'] ?? '').toString().toLowerCase();
+        if (raw == 'approved') {
+          postStatus = PostStatus.approved;
+        } else if (raw == 'published') {
+          postStatus = PostStatus.published;
+        } else if (raw == 'rejected') {
+          postStatus = PostStatus.rejected;
+        } else {
+          postStatus = PostStatus.pending;
+        }
         
         return ReporterPost(
           id: json['id'] ?? '',
@@ -756,9 +1299,12 @@ class ApiService {
     String? cursor,
     int pageSize = 20,
   }) async {
-    final Map<String, dynamic> params = {'page_size': pageSize};
+    final effectiveLang = lang ?? 'te';
+    final Map<String, dynamic> params = {
+      'page_size': pageSize,
+      'lang': effectiveLang,
+    };
     if (category != null) params['category'] = category;
-    if (lang != null) params['lang'] = lang;
     if (cursor != null) params['cursor'] = cursor;
 
     try {
@@ -796,12 +1342,13 @@ class ApiService {
 
 
   // --- Notifications ---
-  Future<List<dynamic>> getNotifications({bool? unread}) async {
+  Future<List<AppNotification>> getNotifications({bool? unread}) async {
     final Map<String, dynamic> params = {};
     if (unread != null) params['unread'] = unread;
     try {
       final response = await _dio.get('/api/v1/notifications/inbox/', queryParameters: params);
-      return response.data['data'] as List<dynamic>? ?? [];
+      final List data = response.data['data'] as List? ?? [];
+      return data.map((json) => AppNotification.fromJson(json as Map<String, dynamic>)).toList();
     } catch (_) {
       return [];
     }
@@ -810,7 +1357,7 @@ class ApiService {
   Future<int> getUnreadNotificationCount() async {
     try {
       final response = await _dio.get('/api/v1/notifications/inbox/unread-count/');
-      return response.data['data']['count'] ?? 0;
+      return response.data['data']['unread_count'] ?? 0;
     } catch (_) {
       return 0;
     }
@@ -834,12 +1381,95 @@ class ApiService {
     }
   }
 
+  // --- Notification Preferences & Subscriptions ---
+  Future<Map<String, dynamic>?> getNotificationPreferences() async {
+    try {
+      final response = await _dio.get('/api/v1/notifications/preferences/');
+      return response.data['data'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> updateNotificationPreferences(Map<String, dynamic> data) async {
+    try {
+      final response = await _dio.patch('/api/v1/notifications/preferences/', data: data);
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getNotificationSubscriptions() async {
+    try {
+      final response = await _dio.get('/api/v1/notifications/subscriptions/');
+      final List data = response.data['data'] as List? ?? [];
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<bool> createNotificationSubscription(Map<String, dynamic> data) async {
+    try {
+      final response = await _dio.post('/api/v1/notifications/subscriptions/', data: data);
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> deleteNotificationSubscription(String subscriptionId) async {
+    try {
+      final response = await _dio.delete('/api/v1/notifications/subscriptions/$subscriptionId/');
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // --- Admin Notifications (Flow 7) ---
+  Future<Map<String, dynamic>> getAdminNotifications({String? status}) async {
+    final response = await _dio.get('/admin/api/notifications/', queryParameters: {
+      if (status != null && status.isNotEmpty) 'status': status,
+    });
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> previewAdminNotificationTarget(Map<String, dynamic> data) async {
+    final response = await _dio.post('/admin/api/notifications/target-preview/', data: data);
+    return response.data['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> sendAdminNotification(Map<String, dynamic> data) async {
+    final response = await _dio.post('/admin/api/notifications/send/', data: data);
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getAdminNotificationDetail(String id) async {
+    final response = await _dio.get('/admin/api/notifications/$id/');
+    return response.data['data'] as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> retryAdminNotificationFailed(String id) async {
+    final response = await _dio.post('/admin/api/notifications/$id/retry-failed/');
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getAdminNotificationLogs({required String notificationId, String? status}) async {
+    final response = await _dio.get('/admin/api/notifications/logs/', queryParameters: {
+      'notification': notificationId,
+      if (status != null && status.isNotEmpty) 'status': status,
+    });
+    return (response.data['data'] as List?) ?? [];
+  }
+
   // --- Polls ---
   Future<List<Poll>> getPolls() async {
     try {
       final response = await _dio.get('/api/v1/polls/');
       final List data = response.data['data'] ?? [];
-      return data.map((json) => _parsePoll(json)).toList();
+      return data.map((json) => Poll.fromJson(json as Map<String, dynamic>)).toList();
     } catch (_) {
       return [];
     }
@@ -848,48 +1478,28 @@ class ApiService {
   Future<Poll?> getPollDetails(String pollId) async {
     try {
       final response = await _dio.get('/api/v1/polls/$pollId/');
-      return _parsePoll(response.data['data']);
+      if (response.data['data'] != null) {
+        return Poll.fromJson(response.data['data'] as Map<String, dynamic>);
+      }
+      return null;
     } catch (_) {
       return null;
     }
   }
 
-  Poll _parsePoll(Map<String, dynamic> json) {
-    List<String> labels = [];
-    List<int> counts = [];
-    
-    final opts = json['options'] as List?;
-    if (opts != null && opts.isNotEmpty) {
-      for (var o in opts) {
-        labels.add(o['label'] ?? '');
-        counts.add(o['vote_count'] ?? 0);
-      }
-    } else {
-       labels.add(json['option_a'] ?? 'A');
-       labels.add(json['option_b'] ?? 'B');
-       counts.add(json['vote_a_count'] ?? 0);
-       counts.add(json['vote_b_count'] ?? 0);
-    }
-    
-    int? selectedIdx;
-    if (json['user_vote'] == 'a') selectedIdx = 0;
-    if (json['user_vote'] == 'b') selectedIdx = 1;
-
-    return Poll(
-      id: json['id'] ?? '',
-      question: json['question'] ?? '',
-      options: labels,
-      votes: counts,
-      selectedOption: selectedIdx,
-    );
-  }
-
-  Future<bool> submitPollVote(String pollId, int optionIndex) async {
+  Future<bool> submitPollVote(
+    String pollId, {
+    String? optionId,
+    int? optionIndex,
+  }) async {
     try {
-      String choice = optionIndex == 0 ? 'a' : 'b'; 
-      final response = await _dio.post('/api/v1/polls/$pollId/vote/', data: {
-        'choice': choice
-      });
+      final Map<String, dynamic> body = {};
+      if (optionId != null && optionId.isNotEmpty) {
+        body['option_id'] = optionId;
+      } else if (optionIndex != null) {
+        body['choice'] = optionIndex == 0 ? 'a' : 'b';
+      }
+      final response = await _dio.post('/api/v1/polls/$pollId/vote/', data: body);
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (_) {
       return false;
@@ -907,12 +1517,30 @@ class ApiService {
   }
 
   // --- Quotes / Daily Cards ---
-  Future<Map<String, dynamic>?> getRandomQuote() async {
+  Future<Map<String, dynamic>?> getRandomQuote({String? lang, bool forceRefresh = false}) async {
     try {
-      final response = await _dio.get('/api/v1/quotes/random/');
+      final effectiveLang = lang ?? 'te';
+      final response = await _dio.get('/api/v1/quotes/random/', queryParameters: {
+        'lang': effectiveLang,
+        if (forceRefresh) 't': DateTime.now().millisecondsSinceEpoch,
+      });
       return response.data['data'] as Map<String, dynamic>?;
     } catch (_) {
       return null;
+    }
+  }
+
+  // --- Trending Search Keywords ---
+  Future<List<String>> getTrendingSearchKeywords({int days = 7}) async {
+    try {
+      final response = await _dio.get('/api/v1/search/trending/', queryParameters: {'days': days});
+      final List data = response.data['data'] ?? [];
+      return data
+          .map<String>((item) => (item['keyword'] ?? '').toString())
+          .where((k) => k.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
     }
   }
 }

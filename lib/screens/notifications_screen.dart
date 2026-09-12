@@ -5,6 +5,13 @@ import '../state/app_state.dart';
 import '../models/app_notification.dart';
 import '../theme/app_theme.dart';
 
+import 'account_login_screen.dart';
+import 'notification_settings_screen.dart';
+import 'notifications_tab.dart';
+import '../services/api_service.dart';
+import '../core/navigation/notification_deep_link_resolver.dart';
+import '../services/notification_service.dart';
+
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -13,63 +20,186 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (AppState.instance.isLoggedIn) {
+      _loadNotifications();
+    }
+  }
+
+  Future<void> _loadNotifications() async {
+    if (!AppState.instance.isLoggedIn) return;
+    setState(() => _isLoading = true);
+    await AppState.instance.fetchNotifications();
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
     
-    return Scaffold(
-      backgroundColor: bgColor,
-      appBar: AppBar(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
         backgroundColor: bgColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Notifications',
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
+        appBar: AppBar(
+          backgroundColor: bgColor,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black87),
+            onPressed: () => Navigator.pop(context),
           ),
+          title: Text(
+            'Notifications',
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          bottom: TabBar(
+            labelColor: AppColors.primary,
+            unselectedLabelColor: isDark ? Colors.white54 : Colors.black54,
+            indicatorColor: AppColors.primary,
+            indicatorWeight: 3,
+            tabs: const [
+              Tab(text: 'Inbox'),
+              Tab(text: 'Activity Digest'),
+            ],
+          ),
+          actions: [
+            AnimatedBuilder(
+              animation: AppState.instance,
+              builder: (context, _) {
+                if (AppState.instance.unreadNotificationsCount == 0 || !AppState.instance.isLoggedIn) {
+                  return const SizedBox.shrink();
+                }
+                return TextButton(
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    AppState.instance.markAllNotificationsRead();
+                  },
+                  child: const Text('Mark all read', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                );
+              },
+            ),
+            IconButton(
+              icon: Icon(Icons.tune_rounded, color: isDark ? Colors.white70 : Colors.black87),
+              tooltip: 'Notification Settings',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+                );
+              },
+            ),
+          ],
         ),
-        actions: [
-          AnimatedBuilder(
-            animation: AppState.instance,
-            builder: (context, _) {
-              if (AppState.instance.unreadNotificationsCount == 0) return const SizedBox.shrink();
-              return TextButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  AppState.instance.markAllNotificationsRead();
-                },
-                child: const Text('Mark all as read', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
-              );
-            },
-          )
-        ],
+        body: TabBarView(
+          children: [
+            AnimatedBuilder(
+              animation: AppState.instance,
+              builder: (context, _) {
+                if (!AppState.instance.isLoggedIn) {
+                  return _buildLoginRequired(isDark);
+                }
+
+                final notifications = AppState.instance.notifications;
+                
+                if (_isLoading && notifications.isEmpty) {
+                  return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+                }
+
+                if (notifications.isEmpty) {
+                  return RefreshIndicator(
+                    onRefresh: _loadNotifications,
+                    color: AppColors.primary,
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.7,
+                        child: _buildEmptyState(isDark),
+                      ),
+                    ),
+                  );
+                }
+                
+                return RefreshIndicator(
+                  onRefresh: _loadNotifications,
+                  color: AppColors.primary,
+                  child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    itemCount: notifications.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      return _buildNotificationCard(notifications[index], isDark);
+                    },
+                  ),
+                );
+              },
+            ),
+            const NotificationsTab(),
+          ],
+        ),
       ),
-      body: AnimatedBuilder(
-        animation: AppState.instance,
-        builder: (context, _) {
-          final notifications = AppState.instance.notifications;
-          
-          if (notifications.isEmpty) {
-            return _buildEmptyState(isDark);
-          }
-          
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            itemCount: notifications.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              return _buildNotificationCard(notifications[index], isDark);
-            },
-          );
-        },
+    );
+  }
+
+  Widget _buildLoginRequired(bool isDark) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.mark_email_unread_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
+            const SizedBox(height: 16),
+            Text(
+              'Sign in for Notifications',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Sign in to receive breaking news alerts, editorial digests, and submission status updates.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white54 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+                );
+                if (AppState.instance.isLoggedIn) {
+                  _loadNotifications();
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Log In / Register', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -128,10 +258,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
         if (isUnread) {
           HapticFeedback.lightImpact();
           AppState.instance.markNotificationRead(notification.id);
+          ApiService.instance.markNotificationRead(notification.id);
+        }
+
+        final target = NotificationDeepLinkResolver.resolveFromAppNotification(notification);
+        if (mounted) {
+          NotificationService.instance.navigateToTarget(target, context: context);
         }
       },
       child: Container(
@@ -199,6 +335,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ],
               ),
             ),
+            if (notification.imageUrl != null && notification.imageUrl!.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  notification.imageUrl!,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
             if (isUnread) ...[
               const SizedBox(width: 12),
               Container(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/reporter_post.dart';
 import '../state/app_state.dart';
@@ -13,6 +14,7 @@ class MyPostsScreen extends StatefulWidget {
 }
 
 class _MyPostsScreenState extends State<MyPostsScreen> {
+  String _selectedFilter = 'all'; // 'all', 'pending', 'approved', 'published', 'rejected'
   bool _isLoading = true;
   List<ReporterPost> _posts = [];
 
@@ -25,17 +27,19 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   Future<void> _fetchSubmissions() async {
     setState(() => _isLoading = true);
     try {
-      final remotePosts = await ApiService.instance.getReporterSubmissions();
+      final remotePosts = await ApiService.instance.getReporterSubmissions(
+        status: _selectedFilter == 'all' ? null : _selectedFilter,
+      );
       if (mounted) {
         setState(() {
-          _posts = remotePosts.isNotEmpty ? remotePosts : AppState.instance.reporterPosts;
+          _posts = remotePosts;
           _isLoading = false;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _posts = AppState.instance.reporterPosts;
+          _posts = [];
           _isLoading = false;
         });
       }
@@ -68,15 +72,126 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
     }
   }
 
+  String _emptyMessage(String filter) {
+    switch (filter) {
+      case 'pending':
+        return 'No submissions currently pending review.';
+      case 'approved':
+        return 'No approved submissions awaiting publication.';
+      case 'published':
+        return 'No published submissions yet.';
+      case 'rejected':
+        return 'No rejected submissions.';
+      default:
+        return 'You haven\'t posted anything yet.';
+    }
+  }
+
+  Widget _buildFilterBar(bool isDark, int Function(String) countFor) {
+    final filters = [
+      {'key': 'all', 'label': 'All', 'color': AppColors.primary},
+      {'key': 'pending', 'label': 'Pending', 'color': const Color(0xFFE8A312)},
+      {'key': 'approved', 'label': 'Approved', 'color': const Color(0xFF10B981)},
+      {'key': 'published', 'label': 'Published', 'color': const Color(0xFF3B82F6)},
+      {'key': 'rejected', 'label': 'Rejected', 'color': const Color(0xFFE8412B)},
+    ];
+
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: filters.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final f = filters[index];
+          final key = f['key'] as String;
+          final label = f['label'] as String;
+          final color = f['color'] as Color;
+          final isSelected = _selectedFilter == key;
+          final count = countFor(key);
+
+          return GestureDetector(
+            onTap: () {
+              if (_selectedFilter != key) {
+                HapticFeedback.selectionClick();
+                setState(() => _selectedFilter = key);
+                _fetchSubmissions();
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? color.withValues(alpha: isDark ? 0.25 : 0.15)
+                    : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04)),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? color : (isDark ? Colors.white12 : Colors.black12),
+                  width: isSelected ? 1.5 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected
+                          ? color
+                          : (isDark ? Colors.white70 : Colors.black87),
+                    ),
+                  ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: isSelected ? color : (isDark ? Colors.white24 : Colors.black12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black54),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return AnimatedBuilder(
       animation: AppState.instance,
       builder: (context, _) {
-        final displayPosts = _posts.isNotEmpty ? _posts : AppState.instance.reporterPosts;
+        final sourcePosts = _posts.isNotEmpty ? _posts : AppState.instance.reporterPosts;
+        final displayPosts = _selectedFilter == 'all'
+            ? sourcePosts
+            : sourcePosts.where((p) => p.status.name == _selectedFilter).toList();
+
+        int countFor(String filter) {
+          if (filter == 'all') return sourcePosts.length;
+          return sourcePosts.where((p) => p.status.name == filter).length;
+        }
 
         return Scaffold(
-          backgroundColor: AppColors.background,
+          backgroundColor: isDark ? const Color(0xFF121212) : AppColors.background,
           appBar: AppBar(
             title: const Text('My Posts'),
             actions: [
@@ -86,19 +201,39 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
               ),
             ],
           ),
-          body: _isLoading && displayPosts.isEmpty
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-              : displayPosts.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'You haven\'t posted anything yet.',
-                        style: TextStyle(color: AppColors.textMuted),
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _fetchSubmissions,
-                      color: AppColors.primary,
-                      child: ListView.separated(
+          body: Column(
+            children: [
+              _buildFilterBar(isDark, countFor),
+              Expanded(
+                child: _isLoading && sourcePosts.isEmpty
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    : displayPosts.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    _selectedFilter == 'rejected' ? Icons.check_circle_outline : Icons.inbox_outlined,
+                                    size: 48,
+                                    color: AppColors.textMuted.withValues(alpha: 0.5),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _emptyMessage(_selectedFilter),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _fetchSubmissions,
+                            color: AppColors.primary,
+                            child: ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.all(16),
                         itemCount: displayPosts.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -223,6 +358,9 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                         },
                       ),
                     ),
+              ),
+            ],
+          ),
         );
       },
     );

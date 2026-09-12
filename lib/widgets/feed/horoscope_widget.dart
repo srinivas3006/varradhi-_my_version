@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -157,7 +158,7 @@ class _HoroscopeWidgetState extends State<HoroscopeWidget> {
                     const Icon(Icons.auto_awesome, color: Colors.orange, size: 22),
                     const SizedBox(width: 8),
                     Text(
-                      tr('horoscope') ?? 'Daily Horoscope',
+                      tr('horoscope'),
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,

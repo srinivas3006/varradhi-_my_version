@@ -31,7 +31,7 @@ class BottomNavBar extends StatelessWidget {
         : Colors.white.withValues(alpha: 0.9);
 
     return AnimatedBuilder(
-      animation: AppState.instance,
+      animation: AppState.instance.themeAndLocaleNotifier,
       builder: (context, _) {
         return Stack(
           clipBehavior: Clip.none,
@@ -82,14 +82,26 @@ class BottomNavBar extends StatelessWidget {
                                       color: isActive ? AppColors.primary : AppColors.textMuted,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    tr(item.key),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                                      color: isActive ? AppColors.primary : AppColors.textMuted,
-                                    ),
+                                  Builder(
+                                    builder: (context) {
+                                      final itemLabel = (index == 1 && AppState.instance.displayLocation.isNotEmpty)
+                                          ? AppState.instance.displayLocation
+                                          : tr(item.key);
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                                        child: Text(
+                                          itemLabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                                            color: isActive ? AppColors.primary : AppColors.textMuted,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                   // Removed bottom dot as requested for cleaner UI
                                 ],

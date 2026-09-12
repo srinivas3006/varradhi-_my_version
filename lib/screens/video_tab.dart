@@ -1,46 +1,123 @@
 import 'dart:ui';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:video_player/video_player.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
-import '../models/video_item.dart';
-import '../services/api_service.dart';
+
+import '../core/media/media_source.dart';
+import '../core/media/video_playback_controller.dart';
+import '../core/media/video_player_widget.dart';
 import '../localization/app_translations.dart';
+import '../models/video_item.dart';
+import '../repositories/video_repository.dart';
 import '../state/app_state.dart';
 
 class VideoTab extends StatefulWidget {
-  const VideoTab({super.key});
+  final bool isActive;
+  const VideoTab({super.key, this.isActive = true});
 
   @override
   State<VideoTab> createState() => _VideoTabState();
 }
 
-class _VideoTabState extends State<VideoTab> {
+class _VideoTabState extends State<VideoTab> with WidgetsBindingObserver {
   final PageController _pageController = PageController();
   final List<VideoItem> _videos = [];
   bool _isLoading = true;
   String? _nextCursor;
   bool _hasMore = true;
   int _focusedIndex = 0;
+  bool _isAppActive = true;
+  bool _isMuted = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadVideos();
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant VideoTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final isActive = state == AppLifecycleState.resumed;
+    if (_isAppActive != isActive) {
+      setState(() {
+        _isAppActive = isActive;
+      });
+    }
+  }
+
+  Future<void> _refresh() async {
+    VideoRepository.instance.clearCache();
+    setState(() {
+      _isLoading = true;
+      _videos.clear();
+      _nextCursor = null;
+      _hasMore = true;
+      _focusedIndex = 0;
+    });
+    await _loadVideos();
+  }
+
   Future<void> _loadVideos() async {
-    if (!_hasMore) return;
+    if (!_hasMore && _videos.isNotEmpty) return;
 
     try {
-      final response = await ApiService.instance.getVideoFeed(cursor: _nextCursor);
+      final List<VideoItem> fetched = [];
+      String? nextCur;
+
+      // 1. Fetch YouTube Shorts feed via VideoRepository
+      try {
+        final shortsResponse = await VideoRepository.instance.getShortsFeed(
+          cursor: _nextCursor,
+        );
+        if (shortsResponse.data != null && shortsResponse.data!.isNotEmpty) {
+          fetched.addAll(shortsResponse.data!);
+          nextCur = shortsResponse.nextCursor;
+        }
+      } catch (e) {
+        debugPrint('[VideoTab] Error fetching shorts feed: $e');
+      }
+
+      // 2. Also fetch regular video feed and merge
+      try {
+        final videoResponse = await VideoRepository.instance.getVideoFeed(
+          cursor: nextCur ?? _nextCursor,
+        );
+        if (videoResponse.data != null && videoResponse.data!.isNotEmpty) {
+          for (final item in videoResponse.data!) {
+            if (!fetched.any((v) => v.id == item.id)) {
+              fetched.add(item);
+            }
+          }
+          nextCur ??= videoResponse.nextCursor;
+        }
+      } catch (e) {
+        debugPrint('[VideoTab] Error fetching video feed: $e');
+      }
+
       if (!mounted) return;
 
       setState(() {
-        _videos.addAll(response.data ?? []);
-        _nextCursor = response.nextCursor;
-        _hasMore = response.nextCursor != null;
+        _videos.addAll(fetched);
+        _nextCursor = nextCur;
+        _hasMore = nextCur != null;
         _isLoading = false;
       });
     } catch (_) {
@@ -61,12 +138,6 @@ class _VideoTabState extends State<VideoTab> {
   }
 
   @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     if (_isLoading && _videos.isEmpty) {
       return Container(
@@ -74,11 +145,43 @@ class _VideoTabState extends State<VideoTab> {
         child: const Center(child: CircularProgressIndicator(color: Colors.redAccent)),
       );
     }
-    
+
     if (_videos.isEmpty) {
       return Container(
         color: Colors.black,
-        child: const Center(child: Text('No videos available', style: TextStyle(color: Colors.white))),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.videocam_off_rounded, color: Colors.white54, size: 56),
+                const SizedBox(height: 16),
+                const Text(
+                  'No videos available right now',
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Please check your internet connection or try again',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: _refresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Reload'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -91,13 +194,17 @@ class _VideoTabState extends State<VideoTab> {
         itemCount: _videos.length,
         onPageChanged: _onPageChanged,
         itemBuilder: (context, index) {
-          final isFocused = index == _focusedIndex;
+          final isFocused = (index == _focusedIndex) && _isAppActive && widget.isActive;
           final isNext = index == _focusedIndex + 1;
           return VideoCardItem(
             key: ValueKey(_videos[index].id),
             video: _videos[index],
             isFocused: isFocused,
             isNext: isNext,
+            isMuted: _isMuted,
+            onToggleMute: () {
+              setState(() => _isMuted = !_isMuted);
+            },
           );
         },
       ),
@@ -105,17 +212,21 @@ class _VideoTabState extends State<VideoTab> {
   }
 }
 
-/// Individual Vertical Short Card with Dual Engine & Glass Controls
+/// Individual Vertical Short Card with Unified Video Engine & Glass Controls
 class VideoCardItem extends StatefulWidget {
   final VideoItem video;
   final bool isFocused;
   final bool isNext;
+  final bool isMuted;
+  final VoidCallback onToggleMute;
 
   const VideoCardItem({
     super.key,
     required this.video,
     required this.isFocused,
     this.isNext = false,
+    this.isMuted = false,
+    required this.onToggleMute,
   });
 
   @override
@@ -123,12 +234,8 @@ class VideoCardItem extends StatefulWidget {
 }
 
 class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProviderStateMixin {
-  VideoPlayerController? _videoController;
-  YoutubePlayerController? _ytController;
-  
-  bool _isInitialized = false;
-  bool _isPlaying = true;
-  bool _isYoutube = false;
+  VideoPlaybackController? _controller;
+  int _generationToken = 0;
 
   // Heart Pulse Animation Setup
   bool _showHeartAnimation = false;
@@ -147,104 +254,87 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
     );
 
     if (widget.isFocused) {
-      _initializeVideo();
+      _initController();
     }
   }
 
-  void _disposeControllers() {
-    _videoController?.dispose();
-    _videoController = null;
-    _ytController?.close();
-    _ytController = null;
-    _isInitialized = false;
+  void _disposeController() {
+    _generationToken++;
+    _controller?.pause();
+    _controller?.dispose();
+    _controller = null;
   }
 
-  Future<void> _initializeVideo() async {
-    if (_isInitialized) return;
-    final video = widget.video;
-    
-    if (video.youtubeVideoId != null && video.youtubeVideoId!.isNotEmpty) {
-      _isYoutube = true;
-      _ytController = YoutubePlayerController(
-        params: const YoutubePlayerParams(
-          showControls: false,
-          mute: false,
-          loop: true,
-          showFullscreenButton: false,
-        ),
-      );
-      
-      if (mounted) {
-        _ytController!.loadVideoById(videoId: video.youtubeVideoId!);
-        setState(() {
-          _isInitialized = true;
-          _isPlaying = widget.isFocused;
-        });
-        if (!widget.isFocused) {
-          _ytController!.pauseVideo();
-        }
+  Future<void> _initController() async {
+    _disposeController();
+    final int token = ++_generationToken;
+
+    final MediaSource source = widget.video.toMediaSource();
+    if (source.type == MediaSourceType.unsupported || source.type == MediaSourceType.imageOnly) {
+      return;
+    }
+
+    final ctrl = VideoPlaybackController.fromSource(source);
+    ctrl.setLooping(true);
+    ctrl.setMuted(widget.isMuted);
+
+    try {
+      await ctrl.initialize();
+      if (!mounted || token != _generationToken) {
+        ctrl.dispose();
+        return;
       }
-    } else if (video.videoUrl != null && video.videoUrl!.isNotEmpty) {
-      _isYoutube = false;
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(video.videoUrl!));
-      
-      try {
-        await _videoController!.initialize();
-        _videoController!.setLooping(true);
-        if (mounted) {
-          setState(() => _isInitialized = true);
-          if (widget.isFocused) {
-            _videoController!.play();
-            _isPlaying = true;
-          } else {
-            _isPlaying = false;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error initializing video: $e');
+
+      setState(() {
+        _controller = ctrl;
+      });
+
+      if (widget.isFocused) {
+        ctrl.play();
       }
+    } catch (e) {
+      if (!mounted || token != _generationToken) {
+        ctrl.dispose();
+        return;
+      }
+      debugPrint('[VideoCardItem] Playback init error: $e');
     }
   }
 
   @override
   void didUpdateWidget(covariant VideoCardItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isFocused && !_isInitialized) {
-      _initializeVideo();
-    } else if (!widget.isFocused && oldWidget.isFocused) {
-      _disposeControllers();
-      if (mounted) {
-        setState(() => _isPlaying = false);
-      }
-    } else if (widget.isFocused && _isInitialized) {
-      _videoController?.play();
-      _ytController?.playVideo();
-      if (mounted) {
-        setState(() => _isPlaying = true);
+
+    if (widget.isMuted != oldWidget.isMuted) {
+      _controller?.setMuted(widget.isMuted);
+    }
+
+    if (widget.isFocused != oldWidget.isFocused) {
+      if (widget.isFocused) {
+        if (_controller == null) {
+          _initController();
+        } else {
+          _controller?.play();
+        }
+      } else {
+        // Immediately pause and dispose off-screen player to free native memory
+        _disposeController();
+        if (mounted) setState(() {});
       }
     }
   }
 
   @override
   void dispose() {
-    _disposeControllers();
+    _disposeController();
     _heartAnimController.dispose();
     super.dispose();
   }
 
   void _togglePlayPause() {
-    if (!_isInitialized) return;
-    setState(() {
-      if (_isPlaying) {
-        _videoController?.pause();
-        _ytController?.pauseVideo();
-        _isPlaying = false;
-      } else {
-        _videoController?.play();
-        _ytController?.playVideo();
-        _isPlaying = true;
-      }
-    });
+    if (_controller == null) return;
+    HapticFeedback.selectionClick();
+    _controller!.togglePlayPause();
   }
 
   void _triggerDoubleTapLike() {
@@ -268,10 +358,12 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
 
   void _shareVideo() {
     HapticFeedback.lightImpact();
-    final link = widget.video.youtubeVideoId != null 
-        ? 'https://youtube.com/watch?v=${widget.video.youtubeVideoId}' 
+    final link = widget.video.youtubeVideoId != null
+        ? 'https://youtube.com/watch?v=${widget.video.youtubeVideoId}'
         : (widget.video.videoUrl ?? '');
-    SharePlus.instance.share(ShareParams(text: 'Check out this news video on Vaaradhi: ${widget.video.title}\n$link'));
+    SharePlus.instance.share(
+      ShareParams(text: 'Check out this news video on Vaaradhi: ${widget.video.title}\n$link'),
+    );
   }
 
   void _openCommentsBottomSheet() {
@@ -306,27 +398,42 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
               onDoubleTap: _triggerDoubleTapLike,
               child: Container(
                 color: Colors.black,
-                child: _isInitialized
-                    ? _buildPlayerLayer()
-                    : (widget.video.thumbnailUrl.isNotEmpty
-                        ? Image.network(widget.video.thumbnailUrl, fit: BoxFit.cover)
-                        : const Center(child: CircularProgressIndicator(color: Colors.redAccent))),
+                child: _controller != null
+                    ? VideoPlayerWidget(
+                        controller: _controller!,
+                        fit: BoxFit.cover,
+                        showControls: false,
+                        onRetry: _initController,
+                      )
+                    : _buildThumbnailPlaceholder(),
               ),
             ),
 
-            // 2. Center Play/Pause Overlay Indicator
-            if (_isInitialized && !_isPlaying)
-              Center(
-                child: IgnorePointer( // Let taps pass through to the detector
-                    child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 50),
-                  ),
-                ),
+            // 2. Center Play Indicator when Paused
+            if (_controller != null)
+              ValueListenableBuilder<VideoPlaybackState>(
+                valueListenable: _controller!,
+                builder: (context, state, _) {
+                  if (state.isInitialized && !state.isPlaying && !state.isBuffering) {
+                    return Center(
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 50,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
               ),
 
             // 3. Animated Double-Tap Heart Pulse
@@ -380,7 +487,11 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
                           color: Colors.redAccent,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 20),
+                        child: const Icon(
+                          Icons.play_circle_fill_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -428,34 +539,23 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
     );
   }
 
-  Widget _buildPlayerLayer() {
-    if (_isYoutube && _ytController != null) {
-      return FittedBox(
+  Widget _buildThumbnailPlaceholder() {
+    if (widget.video.thumbnailUrl.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: widget.video.thumbnailUrl,
         fit: BoxFit.cover,
-        child: SizedBox(
-          width: MediaQuery.of(context).size.width,
-          height: MediaQuery.of(context).size.width * (16 / 9),
-          // Ignore pointer is crucial here so YouTube's iframe doesn't swallow
-          // the double-tap and single-tap gestures of our parent GestureDetector.
-          child: IgnorePointer(
-            child: YoutubePlayer(
-              controller: _ytController!,
-              aspectRatio: 9 / 16,
-            ),
-          ),
-        ),
-      );
-    } else if (_videoController != null && _videoController!.value.isInitialized) {
-      return FittedBox(
-        fit: BoxFit.cover,
-        child: SizedBox(
-          width: _videoController!.value.size.width,
-          height: _videoController!.value.size.height,
-          child: VideoPlayer(_videoController!),
+        placeholder: (_, __) => Container(color: Colors.black),
+        errorWidget: (_, __, ___) => const Center(
+          child: Icon(Icons.videocam_off_rounded, color: Colors.white24, size: 56),
         ),
       );
     }
-    return const SizedBox.shrink();
+    return Container(
+      color: Colors.black,
+      child: const Center(
+        child: CircularProgressIndicator(color: Colors.redAccent, strokeWidth: 2.5),
+      ),
+    );
   }
 
   /// Right-hand Vertical Action Rail with Frosted Glass Shell
@@ -474,6 +574,15 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Mute/Unmute Action
+              _buildRailButton(
+                icon: widget.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                iconColor: widget.isMuted ? Colors.amberAccent : Colors.white,
+                label: widget.isMuted ? 'Muted' : 'Sound',
+                onTap: widget.onToggleMute,
+              ),
+              const SizedBox(height: 18),
+
               // Like Action
               _buildRailButton(
                 icon: isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
@@ -481,16 +590,16 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
                 label: _formatCount(displayLikes),
                 onTap: _toggleLike,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
 
               // Comments Action
               _buildRailButton(
                 icon: Icons.chat_bubble_outline_rounded,
                 iconColor: Colors.white,
-                label: tr('chat'), // Using localization
+                label: tr('chat'),
                 onTap: _openCommentsBottomSheet,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
 
               // Share Action
               _buildRailButton(
@@ -520,7 +629,11 @@ class _VideoCardItemState extends State<VideoCardItem> with SingleTickerProvider
           const SizedBox(height: 4),
           Text(
             label,
-            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -545,11 +658,12 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
   void _submitComment() {
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
-    
+
     if (!AppState.instance.isLoggedIn) {
-       // Ideally trigger login sheet here, but for simplicity:
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in to comment')));
-       return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to comment')),
+      );
+      return;
     }
 
     AppState.instance.addComment(widget.articleId, text);
@@ -593,15 +707,17 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
             ),
           ),
           const Divider(color: Colors.white12, height: 1),
-          
+
           Expanded(
             child: AnimatedBuilder(
               animation: AppState.instance,
               builder: (context, _) {
                 final comments = AppState.instance.getComments(widget.articleId);
-                
+
                 if (comments.isEmpty) {
-                  return const Center(child: Text('No comments yet. Be the first!', style: TextStyle(color: Colors.white70)));
+                  return const Center(
+                    child: Text('No comments yet. Be the first!', style: TextStyle(color: Colors.white70)),
+                  );
                 }
 
                 return ListView.separated(

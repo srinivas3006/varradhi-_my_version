@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
@@ -79,10 +80,19 @@ class _DailyGreetingWidgetState extends State<DailyGreetingWidget> {
               height: 250,
               decoration: BoxDecoration(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                image: DecorationImage(
-                  image: NetworkImage(widget.imageUrl),
-                  fit: BoxFit.cover,
-                ),
+                gradient: widget.imageUrl.isEmpty 
+                    ? const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [AppColors.primary, AppColors.primaryDark],
+                      )
+                    : null,
+                image: widget.imageUrl.isNotEmpty
+                    ? DecorationImage(
+                        image: NetworkImage(widget.imageUrl),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
               child: Container(
                 decoration: BoxDecoration(

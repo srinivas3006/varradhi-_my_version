@@ -8,7 +8,7 @@ class ReporterPost {
   final PostType type;
   final String caption;
   final String category;
-  final String mediaUrl; // mocked — a placeholder thumbnail/image URL
+  final String mediaUrl;
   PostStatus status;
   final DateTime submittedAt;
   String? rejectionReason;

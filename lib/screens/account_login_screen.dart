@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import 'account_signup_screen.dart';
+import 'forgot_password_screen.dart';
+import 'home_screen.dart';
 
-/// Full account login for the Reporter Program — distinct from the
-/// onboarding-time quick phone+OTP login. This is what "Log in" on the
-/// Profile tab now opens.
+/// Full account login screen.
+/// - API: POST /api/v1/auth/login/
+/// - Rate limiting: 429 error mapping
+/// - Destination: Returns to original protected action or navigates to HomeScreen
 class AccountLoginScreen extends StatefulWidget {
-  const AccountLoginScreen({super.key});
+  final VoidCallback? onLoginSuccess;
+  const AccountLoginScreen({super.key, this.onLoginSuccess});
 
   @override
   State<AccountLoginScreen> createState() => _AccountLoginScreenState();
@@ -36,8 +41,8 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
 
     try {
       final data = await ApiService.instance.login(
-        email, 
-        password, 
+        email,
+        password,
         fcmToken: AppState.instance.fcmToken,
       );
       final token = data['access'] ?? data['token'];
@@ -45,25 +50,71 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
         throw Exception('No access token returned');
       }
 
-      // Persist the token in secure storage rather than plain AppState,
-      // and never retain the raw password anywhere on-device.
-      await AppState.instance.setAuthToken(token);
-      final user = data['user'] as Map<String, dynamic>?;
-      AppState.instance.accountLogin(username: user?['full_name'] ?? user?['username'] ?? 'Reporter');
+      // Persist tokens securely
+      await AppState.instance.setAuthToken(token, refresh: data['refresh'] as String?);
+      final sessionId = data['session_id']?.toString() ?? data['session']?['id']?.toString();
+      if (sessionId != null && sessionId.isNotEmpty) {
+        await AppState.instance.setSessionId(sessionId);
+      }
 
-      // isAdmin/isContributor must come from the server, never set
-      // client-side — refetch /auth/me/ so every possible role signal
-      // (is_admin, is_staff, role, roles, groups, permissions...) is
-      // considered, not just the login response's bare is_admin field.
+      final user = data['user'] as Map<String, dynamic>?;
+      AppState.instance.accountLogin(
+        username: user?['full_name'] ?? user?['username'] ?? 'User',
+      );
+
+      // Refresh server-side roles (admin/contributor/tokens)
       await AppState.instance.refreshRolesFromServer();
 
-      // Send user's location to backend after login
+      // Handoff guest device token to logged-in user (Backend Flow 2)
+      if (AppState.instance.fcmToken != null) {
+        await ApiService.instance.handoffDeviceToken(
+          sessionId: sessionId,
+          fcmToken: AppState.instance.fcmToken,
+          installationSecret: AppState.instance.installationSecret,
+        );
+      }
+
+      // Sync user location
       await ApiService.instance.syncUserLocation();
 
-      if (mounted) Navigator.of(context).pop();
+      if (!mounted) return;
+
+      // Invoke custom callback if provided
+      if (widget.onLoginSuccess != null) {
+        widget.onLoginSuccess!();
+      }
+
+      // Navigate back to original protected action, or HomeScreen
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
     } catch (e) {
       if (mounted) {
-        setState(() => _error = 'Invalid email or password.');
+        String errorMsg = 'Invalid email or password.';
+        if (e is DioException) {
+          if (e.response?.statusCode == 429) {
+            errorMsg = 'Too many attempts. Please wait and try again.';
+          } else if (e.response?.data is Map) {
+            final resp = e.response!.data as Map;
+            if (resp['errors'] is Map) {
+              final errMap = resp['errors'] as Map;
+              if (errMap['message'] != null) {
+                errorMsg = errMap['message'].toString();
+              } else if (errMap['details'] is Map && errMap['details']['detail'] != null) {
+                errorMsg = errMap['details']['detail'].toString();
+              }
+            } else if (resp['message'] != null) {
+              errorMsg = resp['message'].toString();
+            } else if (resp['detail'] != null) {
+              errorMsg = resp['detail'].toString();
+            }
+          }
+        }
+        setState(() => _error = errorMsg);
       }
     } finally {
       if (mounted) {
@@ -79,7 +130,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: const Text('Log In')),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -103,7 +154,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Log in to manage your Reporter account.',
+                'Log in to access your account, preferences, and submissions.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -143,13 +194,32 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                   ),
                 ),
               ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ForgotPasswordScreen()),
+                    );
+                  },
+                  child: const Text(
+                    'Forgot Password?',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
               if (_error != null) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(_error!,
                     style:
                         const TextStyle(color: AppColors.primary, fontSize: 12.5)),
               ],
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 height: 52,

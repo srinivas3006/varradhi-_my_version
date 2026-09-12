@@ -2,14 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:video_player/video_player.dart';
 import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/share_service.dart';
 import '../services/api_service.dart';
+import '../services/tts_service.dart';
 import '../repositories/news_article_repository.dart';
+import '../widgets/news_article_video_player.dart';
 import 'comments_screen.dart';
 
 class NewsDetailScreen extends StatefulWidget {
@@ -24,14 +24,9 @@ class NewsDetailScreen extends StatefulWidget {
 
 class _NewsDetailScreenState extends State<NewsDetailScreen> {
   late NewsArticle article;
-  final FlutterTts flutterTts = FlutterTts();
-  bool isPlaying = false;
   int _currentImageIndex = 0;
   bool _isLoadingDetail = false;
   String? _detailError;
-  VideoPlayerController? _videoController;
-  bool _isVideoInitialized = false;
-
 
   Future<void> _fetchFullArticleDetail() async {
     final slugToFetch = (widget.slug?.isNotEmpty ?? false)
@@ -58,16 +53,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       debugPrint('Fetching full detail for slug: $slugToFetch');
       final fullArticle = await NewsArticleRepository.instance.getDetail(slugToFetch);
       debugPrint('Detail API success for slug "$slugToFetch". Body length: ${fullArticle.body.length}');
-      debugPrint('Detail API content preview for slug "$slugToFetch": ${fullArticle.body.isNotEmpty ? fullArticle.body.substring(0, fullArticle.body.length > 140 ? 140 : fullArticle.body.length) : '(empty)'}');
 
       if (mounted) {
         setState(() {
           article = fullArticle;
           _isLoadingDetail = false;
         });
-        if (article.isVideo && article.videoUrl.isNotEmpty) {
-          unawaited(_initializeVideoIfNeeded());
-        }
       }
     } catch (e) {
       debugPrint('Detail API error for slug "$slugToFetch": $e');
@@ -80,43 +71,44 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-  void _initTts() async {
-    String lang = AppState.instance.language.toLowerCase();
-    String languageCode = 'en-US';
-    if (lang == 'telugu') {
-      languageCode = 'te-IN';
-    } else if (lang == 'tamil') {
-      languageCode = 'ta-IN';
-    } else if (lang == 'kannada') {
-      languageCode = 'kn-IN';
-    } else if (lang == 'malayalam') {
-      languageCode = 'ml-IN';
-    } else if (lang == 'marathi') {
-      languageCode = 'mr-IN';
-    } else if (lang == 'bengali') {
-      languageCode = 'bn-IN';
-    } else if (lang == 'gujarati') {
-      languageCode = 'gu-IN';
+  bool _isTogglingLike = false;
+
+  Future<void> _toggleLike() async {
+    if (_isTogglingLike) return;
+    _isTogglingLike = true;
+    HapticFeedback.lightImpact();
+
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    AppState.instance.toggleLike(targetId);
+
+    final isNowLiked = AppState.instance.isLiked(targetId);
+    final prevLikes = article.likes;
+
+    setState(() {
+      article.isLiked = isNowLiked;
+      article.likes = isNowLiked ? prevLikes + 1 : (prevLikes > 0 ? prevLikes - 1 : 0);
+    });
+
+    if (targetId.isEmpty) {
+      _isTogglingLike = false;
+      return;
     }
 
-    await flutterTts.setLanguage(languageCode);
-    await flutterTts.setPitch(1.1); // Slightly higher pitch for smoother female voice
-    await flutterTts.setSpeechRate(0.5); // Comfortable reading speed
-
-    flutterTts.setCompletionHandler(() {
-      if (mounted) {
+    try {
+      final res = await ApiService.instance.postArticleReaction(
+        targetId,
+        isNowLiked ? 'like' : 'none',
+      );
+      if (mounted && res.containsKey('like_count')) {
         setState(() {
-          isPlaying = false;
+          article.likes = (res['like_count'] as num?)?.toInt() ?? article.likes;
         });
       }
-    });
-  }
-
-  @override
-  void dispose() {
-    flutterTts.stop();
-    _videoController?.dispose();
-    super.dispose();
+    } catch (e) {
+      debugPrint('Error syncing article reaction: $e');
+    } finally {
+      _isTogglingLike = false;
+    }
   }
 
   void _share() async {
@@ -129,66 +121,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (mounted) Navigator.pop(context); // dismiss loading
   }
 
-  void _toggleAudio() async {
-    if (isPlaying) {
-      await flutterTts.stop();
-      if (mounted) {
-        setState(() {
-          isPlaying = false;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          isPlaying = true;
-        });
-      }
-      
-      // Re-enforce language right before speaking
-      String lang = AppState.instance.language.toLowerCase();
-      String languageCode = 'en-US';
-      if (lang == 'telugu') {
-        languageCode = 'te-IN';
-      } else if (lang == 'tamil') {
-        languageCode = 'ta-IN';
-      } else if (lang == 'kannada') {
-        languageCode = 'kn-IN';
-      } else if (lang == 'malayalam') {
-        languageCode = 'ml-IN';
-      } else if (lang == 'marathi') {
-        languageCode = 'mr-IN';
-      } else if (lang == 'bengali') {
-        languageCode = 'bn-IN';
-      } else if (lang == 'gujarati') {
-        languageCode = 'gu-IN';
-      }
-      await flutterTts.setLanguage(languageCode);
-      
-      await flutterTts.speak(article.body);
-    }
-  }
-
-  Future<void> _initializeVideoIfNeeded() async {
-    if (!article.isVideo || article.videoUrl.isEmpty || _videoController != null) return;
-
-    _videoController = VideoPlayerController.networkUrl(Uri.parse(article.videoUrl));
-    await _videoController!.initialize();
-    if (mounted) {
-      setState(() {
-        _isVideoInitialized = true;
-      });
-    }
-  }
-
   @override
   void initState() {
     super.initState();
     article = widget.article;
-    _initTts();
-    _fetchFullArticleDetail();
-    if (article.isVideo && article.videoUrl.isNotEmpty) {
-      _initializeVideoIfNeeded();
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    if (AppState.instance.isLiked(targetId)) {
+      article.isLiked = true;
     }
+    _fetchFullArticleDetail();
   }
 
   @override
@@ -212,36 +153,39 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               fit: StackFit.expand,
               children: [
                 // Media Content
-                if (article.isVideo && _videoController != null && _isVideoInitialized)
-                  Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      AspectRatio(
-                        aspectRatio: _videoController!.value.aspectRatio,
-                        child: VideoPlayer(_videoController!),
-                      ),
-                      Positioned(
-                        bottom: 40,
-                        right: 16,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.75),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            article.formattedVideoDuration.isNotEmpty
-                                ? article.formattedVideoDuration
-                                : 'Video',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
+                if (article.mediaItems.isNotEmpty)
+                  PageView.builder(
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentImageIndex = index;
+                      });
+                    },
+                    itemCount: article.mediaItems.length,
+                    itemBuilder: (context, index) {
+                      final item = article.mediaItems[index];
+                      if (item.isVideo) {
+                        return NewsArticleVideoPlayer(
+                          article: article,
+                          height: 360,
+                        );
+                      }
+                      return CachedNetworkImage(
+                        imageUrl: item.url.isNotEmpty ? item.url : item.thumbnailUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(color: AppColors.chipBg),
+                        errorWidget: (context, url, error) => Container(
+                          color: AppColors.chipBg,
+                          child: const Center(
+                            child: Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted, size: 40),
                           ),
                         ),
-                      ),
-                    ],
+                      );
+                    },
+                  )
+                else if (article.isVideo || article.videoUrl.isNotEmpty)
+                  NewsArticleVideoPlayer(
+                    article: article,
+                    height: 360,
                   )
                 else if (article.imageUrls != null && article.imageUrls!.length > 1)
                   PageView.builder(
@@ -298,44 +242,23 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Vaaradhi Logo Watermark (Bottom Right of Image)
+                // Vaaradhi Logo Watermark (Spotlight style)
                 Positioned(
                   bottom: 44,
                   right: 16,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.bolt_rounded, color: Colors.white, size: 16),
-                        SizedBox(width: 4),
-                        Text(
-                          'Vaaradhi',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
+                  child: Opacity(
+                    opacity: 0.85,
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 38,
+                      height: 38,
+                      fit: BoxFit.contain,
                     ),
                   ),
                 ),
 
-                // Image Carousel Counter (If multiple images)
-                if (article.imageUrls != null && article.imageUrls!.length > 1)
+                // Media Carousel Counter (If multiple media items)
+                if (article.mediaItems.length > 1 || (article.imageUrls != null && article.imageUrls!.length > 1))
                   Positioned(
                     bottom: 44,
                     left: 16,
@@ -346,7 +269,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${_currentImageIndex + 1} / ${article.imageUrls!.length}',
+                        '${_currentImageIndex + 1} / ${article.mediaItems.isNotEmpty ? article.mediaItems.length : article.imageUrls!.length}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,
@@ -410,12 +333,27 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     AnimatedBuilder(
                       animation: AppState.instance,
                       builder: (context, _) {
-                        final isBookmarked = AppState.instance.isBookmarked(article.id);
+                        final targetId = article.id.isNotEmpty ? article.id : article.slug;
+                        final isBookmarked = AppState.instance.isBookmarked(targetId);
                         return GestureDetector(
                           onTap: () async {
                             HapticFeedback.lightImpact();
-                            AppState.instance.toggleBookmark(article.id);
-                            await ApiService.instance.toggleBookmark(article.id);
+                            AppState.instance.toggleBookmark(targetId);
+                            await ApiService.instance.toggleBookmark(targetId);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    AppState.instance.isBookmarked(targetId)
+                                        ? 'Saved to Bookmarks'
+                                        : 'Removed from Bookmarks',
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
                           },
                           child: Container(
                             width: 42,
@@ -479,42 +417,90 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Row(
                         children: [
                           // Audio Listen Pill Button (Orange Accent)
-                          GestureDetector(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              _toggleAudio();
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isPlaying ? AppColors.primary : AppColors.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(
-                                  color: AppColors.primary.withValues(alpha: isPlaying ? 1.0 : 0.3),
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Row(
+                          AnimatedBuilder(
+                            animation: AppTtsService.instance,
+                            builder: (context, _) {
+                              final targetId = article.id.isNotEmpty ? article.id : article.slug;
+                              final isPlaying = AppTtsService.instance.isArticlePlaying(targetId);
+                              final isLoading = AppTtsService.instance.isArticleLoading(targetId);
+
+                              return Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
-                                    isPlaying ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
-                                    size: 20,
-                                    color: isPlaying ? Colors.white : AppColors.primary,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    isPlaying ? 'Stop Audio' : 'Listen Article',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: isPlaying ? Colors.white : AppColors.primary,
+                                  GestureDetector(
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      AppTtsService.instance.toggleArticleTts(article);
+                                    },
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 250),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: isPlaying ? AppColors.primary : AppColors.primary.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(24),
+                                        border: Border.all(
+                                          color: AppColors.primary.withValues(alpha: isPlaying ? 1.0 : 0.3),
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isLoading)
+                                            const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                                            )
+                                          else
+                                            Icon(
+                                              isPlaying ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                                              size: 20,
+                                              color: isPlaying ? Colors.white : AppColors.primary,
+                                            ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            isLoading
+                                                ? 'Loading...'
+                                                : (isPlaying ? 'Stop Audio' : 'Listen Article'),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: isPlaying ? Colors.white : AppColors.primary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
+                                  if (isPlaying) ...[
+                                    const SizedBox(width: 8),
+                                    GestureDetector(
+                                      onTap: () {
+                                        HapticFeedback.selectionClick();
+                                        AppTtsService.instance.cycleSpeed();
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.primary.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(18),
+                                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                                        ),
+                                        child: Text(
+                                          AppTtsService.instance.playbackSpeedText,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w800,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
-                              ),
-                            ),
+                              );
+                            },
                           ),
 
                           const Spacer(),
@@ -590,29 +576,39 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
                             // Likes Metric Pill
-                            GestureDetector(
-                              onTap: () {
-                                HapticFeedback.lightImpact();
-                                setState(() => article.isLiked = !article.isLiked);
+                            AnimatedBuilder(
+                              animation: AppState.instance,
+                              builder: (context, _) {
+                                final targetId = article.id.isNotEmpty ? article.id : article.slug;
+                                final isLiked = AppState.instance.isLiked(targetId) || article.isLiked;
+
+                                return GestureDetector(
+                                  onTap: _toggleLike,
+                                  child: Row(
+                                    children: [
+                                      AnimatedSwitcher(
+                                        duration: const Duration(milliseconds: 250),
+                                        transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
+                                        child: Icon(
+                                          isLiked ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
+                                          key: ValueKey(isLiked),
+                                          color: isLiked ? AppColors.primary : mutedTextColor,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '${article.likes}',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: isLiked ? AppColors.primary : textColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
                               },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    article.isLiked ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
-                                    color: article.isLiked ? AppColors.primary : mutedTextColor,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '${article.likes + (article.isLiked ? 1 : 0)}',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      color: article.isLiked ? AppColors.primary : textColor,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ),
 
                             Container(width: 1, height: 16, color: isDark ? Colors.white12 : Colors.black12),
@@ -623,12 +619,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                               builder: (context, _) {
                                 final count = AppState.instance.getDisplayCommentCount(article.id, article.comments);
                                 return GestureDetector(
-                                  onTap: () {
+                                  onTap: () async {
                                     HapticFeedback.lightImpact();
-                                    Navigator.push(
+                                    await Navigator.push(
                                       context,
                                       MaterialPageRoute(builder: (_) => CommentsScreen(article: article)),
                                     );
+                                    if (mounted) setState(() {});
                                   },
                                   child: Row(
                                     children: [

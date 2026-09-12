@@ -2,26 +2,48 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:device_preview/device_preview.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'core/navigation/app_navigator_observer.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
+import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
 
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  if (!kIsWeb) {
-    await Firebase.initializeApp();
-  }
-  debugPrint("Handling a background message: ${message.messageId}");
-}
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Global Flutter framework error handling
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+
+  // Global platform dispatcher async error handling
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[PlatformDispatcher] Unhandled async error: $error');
+    return true;
+  };
+
+  // Graceful release mode fallback widget for widget-build failures
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    if (kReleaseMode) {
+      return const Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Text(
+              'ఏదో తప్పు జరిగింది. దయచేసి మళ్లీ ప్రయత్నించండి.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+          ),
+        ),
+      );
+    }
+    return ErrorWidget(details.exception);
+  };
   
   // Set preferred orientations
   await SystemChrome.setPreferredOrientations([
@@ -29,58 +51,10 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  try {
-    if (!kIsWeb) {
-      await Firebase.initializeApp();
-      FirebaseMessaging messaging = FirebaseMessaging.instance;
-      NotificationSettings settings = await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      print('User granted permission: ${settings.authorizationStatus}');
-      
-      String? token = await messaging.getToken();
-      if (token != null) {
-        AppState.instance.fcmToken = token;
-      }
-      
-      // Listen to token refreshes
-      messaging.onTokenRefresh.listen((newToken) {
-        AppState.instance.fcmToken = newToken;
-        if (AppState.instance.isLoggedIn) {
-          ApiService.instance.updateFcmToken(newToken);
-        }
-      });
-
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Got a message whilst in the foreground!');
-        if (message.notification != null) {
-          scaffoldMessengerKey.currentState?.showSnackBar(
-            SnackBar(
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(message.notification!.title ?? 'New Notification', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text(message.notification!.body ?? ''),
-                ],
-              ),
-              behavior: SnackBarBehavior.floating,
-              margin: const EdgeInsets.only(top: 50, left: 16, right: 16),
-              backgroundColor: AppTheme.light('English').primaryColor,
-              duration: const Duration(seconds: 4),
-              dismissDirection: DismissDirection.up,
-            ),
-          );
-        }
-      });
-    }
-  } catch (e) {
-    debugPrint('Firebase initialization error (Missing google-services.json?): $e');
-  }
+  await NotificationService.instance.initEarly(
+    messengerKey: scaffoldMessengerKey,
+    navigatorKey: navigatorKey,
+  );
 
   await AppState.instance.init();
 
@@ -98,12 +72,7 @@ void main() async {
     unawaited(AppState.instance.refreshRolesFromServer());
   }
 
-  runApp(
-    DevicePreview(
-      enabled: !kReleaseMode,
-      builder: (context) => const Way2NewsCloneApp(),
-    ),
-  );
+  runApp(const Way2NewsCloneApp());
 }
 
 class Way2NewsCloneApp extends StatelessWidget {
@@ -111,18 +80,18 @@ class Way2NewsCloneApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // AnimatedBuilder rebuilds this whole subtree whenever AppState changes
-    // (coins, login, and — critically for this feature — language), so
-    // every tr('key') call downstream picks up the new language immediately.
+    // AnimatedBuilder rebuilds MaterialApp only when themeMode or language
+    // changes, preventing app-wide rebuilds and raster blur invalidations
+    // when coins, likes, bookmarks, or profile data update.
     return AnimatedBuilder(
-      animation: AppState.instance,
+      animation: AppState.instance.themeAndLocaleNotifier,
       builder: (context, _) {
         return MaterialApp(
-          locale: DevicePreview.locale(context),
-          builder: DevicePreview.appBuilder,
-          title: 'Vaaradhi',
+          title: 'VARADHI',
           debugShowCheckedModeBanner: false,
+          navigatorKey: navigatorKey,
           scaffoldMessengerKey: scaffoldMessengerKey,
+          navigatorObservers: [AppNavigatorObserver.instance],
           theme: AppTheme.light(AppState.instance.language),
           darkTheme: AppTheme.dark(AppState.instance.language),
           themeMode: AppState.instance.themeMode,

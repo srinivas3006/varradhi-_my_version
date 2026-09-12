@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import '../controllers/ugc_controller.dart';
 import '../models/reporter_post.dart';
+import '../models/ugc_draft.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
 import '../state/app_state.dart';
@@ -15,19 +16,10 @@ class CreatePostScreen extends StatefulWidget {
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
-  PostType _type = PostType.image;
-  String _category = 'Local';
+  late final UgcController _controller;
   final _titleController = TextEditingController();
   final _captionController = TextEditingController();
   final _otpController = TextEditingController();
-  final ImagePicker _picker = ImagePicker();
-
-  bool _submitting = false;
-  bool _isPicking = false;
-  String? _error;
-  
-  List<XFile> _selectedImages = [];
-  XFile? _selectedVideo;
 
   static const _categories = [
     'Local', 'Sports', 'Politics', 'Weather', 'Accident', 'Community'
@@ -36,74 +28,189 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void initState() {
     super.initState();
-    _titleController.addListener(() => setState(() {}));
-    _captionController.addListener(() => setState(() {}));
+    _controller = UgcController();
+    _controller.addListener(_onControllerStateChanged);
+
+    _titleController.addListener(() {
+      _controller.setTitle(_titleController.text);
+    });
+    _captionController.addListener(() {
+      _controller.setDescription(_captionController.text);
+    });
+
+    // Check for any recoverable pending draft
+    _controller.checkForPendingDraft();
+  }
+
+  void _onControllerStateChanged() {
+    if (!mounted) return;
+    setState(() {});
+
+    if (_controller.status == UgcUploadStatus.completed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('News submitted to Admin Queue (Pending)'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      _titleController.clear();
+      _captionController.clear();
+      if (!(ModalRoute.of(context)?.isFirst ?? true)) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (!_controller.hasUnsavedChanges && !_controller.isSubmittingOrUploading) {
+      return true;
+    }
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard post?'),
+        content: const Text('Your drafted news will be kept locally so you can resume later. Do you want to leave now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep editing'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Leave', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    return discard == true;
   }
 
   void _onSubmitPressed() {
     if (_titleController.text.trim().isEmpty) {
-      setState(() => _error = 'Please enter a title for your news.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a title for your news.')),
+      );
       return;
     }
     if (_captionController.text.trim().isEmpty) {
-      setState(() => _error = 'Add a short description of the news.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a short description of the news.')),
+      );
       return;
     }
-    if (_type == PostType.image && _selectedImages.isEmpty) {
-      setState(() => _error = 'Please attach at least one photo.');
+    if (_controller.type == PostType.image && _controller.selectedImagePaths.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please attach at least one photo.')),
+      );
       return;
     }
-    if (_type == PostType.video && _selectedVideo == null) {
-      setState(() => _error = 'Please attach a video.');
+    if (_controller.type == PostType.video && _controller.selectedVideoPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please attach a video.')),
+      );
       return;
     }
-    
-    setState(() => _error = null);
 
     if (!AppState.instance.uploadVerified) {
       _showOtpSheet();
       return;
     }
 
-    _finalizeSubmission();
+    _controller.submitNews();
   }
 
-  Future<void> _pickMedia() async {
-    if (_isPicking) return;
-    setState(() => _isPicking = true);
-    try {
-      if (_type == PostType.image) {
-        final List<XFile> picked = await _picker.pickMultiImage();
-        if (picked.isNotEmpty) {
-          setState(() {
-            _selectedImages = picked;
-          });
-        }
-      } else {
-        final XFile? picked = await _picker.pickVideo(source: ImageSource.gallery);
-        if (picked != null) {
-          setState(() {
-            _selectedVideo = picked;
-          });
-        }
-      }
-    } catch (e) {
-      setState(() => _error = 'Failed to pick media: $e');
-    } finally {
-      setState(() => _isPicking = false);
-    }
+  void _showMediaPickerSheet() {
+    final isImage = _controller.type == PostType.image;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  margin: const EdgeInsets.only(bottom: 16),
+                ),
+                Text(
+                  isImage ? 'Attach News Photos' : 'Attach News Video',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.camera_alt_rounded, color: AppColors.primary),
+                  ),
+                  title: Text(isImage ? 'Take Photo with Camera' : 'Record Video with Camera'),
+                  subtitle: Text(
+                    isImage ? 'Capture high quality photo' : 'Max 3 minutes duration',
+                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (isImage) {
+                      _controller.pickPhotoFromCamera();
+                    } else {
+                      _controller.recordVideoFromCamera();
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.photo_library_rounded, color: AppColors.primary),
+                  ),
+                  title: Text(isImage ? 'Choose from Gallery' : 'Choose Video from Gallery'),
+                  subtitle: Text(
+                    isImage ? 'Up to 10 photos supported' : 'Max 50MB file size',
+                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (isImage) {
+                      _controller.pickPhotosFromGallery();
+                    } else {
+                      _controller.pickVideoFromGallery();
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showOtpSheet() async {
     _otpController.clear();
     Timer? sheetTimer;
     
-    // Send OTP immediately upon opening
     final phone = AppState.instance.userPhone.isNotEmpty ? AppState.instance.userPhone : '9876543210';
     try {
       await ApiService.instance.sendOtp(phone);
-    } catch (e) {
-      // Handle fail
+    } catch (_) {
+      // Ignored
     }
 
     if (!mounted) return;
@@ -129,20 +236,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               });
             }
 
-            // Start timer on first build
             if (sheetTimer == null) {
               startTimer();
             }
 
             void verifyOtp() async {
-              if (_otpController.text.length != 4) {
-                setSheetState(() => sheetError = 'Please enter a 4-digit code.');
+              final otpCode = _otpController.text.trim();
+              if (otpCode.length < 4 || otpCode.length > 6) {
+                setSheetState(() => sheetError = 'Please enter a valid OTP code.');
                 return;
               }
               setSheetState(() => sheetSubmitting = true);
               
               try {
-                final success = await ApiService.instance.verifyOtp(phone, _otpController.text);
+                final success = await ApiService.instance.verifyOtp(phone, otpCode);
                 setSheetState(() => sheetSubmitting = false);
                 
                 if (!success) {
@@ -150,9 +257,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   return;
                 }
                 
-                AppState.instance.uploadVerified = true;
-                if (mounted) Navigator.pop(context);
-                _finalizeSubmission();
+                AppState.instance.markUploadVerified();
+                if (context.mounted) Navigator.pop(context);
+                _controller.submitNews();
               } catch (e) {
                 setSheetState(() {
                   sheetSubmitting = false;
@@ -160,7 +267,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 });
               }
             }
-
 
             final isDark = Theme.of(context).brightness == Brightness.dark;
             final sheetColor = Theme.of(context).cardColor;
@@ -218,12 +324,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     TextField(
                       controller: _otpController,
                       keyboardType: TextInputType.number,
-                      maxLength: 4,
+                      maxLength: 6,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 24, letterSpacing: 16, fontWeight: FontWeight.w700),
+                      style: const TextStyle(fontSize: 22, letterSpacing: 12, fontWeight: FontWeight.w700),
                       decoration: InputDecoration(
                         counterText: '',
-                        hintText: '••••',
+                        hintText: '••••••',
                         filled: true,
                         fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.02),
                         border: OutlineInputBorder(
@@ -278,102 +384,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
             );
-          }
+          },
         );
       },
     ).then((_) {
       sheetTimer?.cancel();
     });
   }
-
-  void _finalizeSubmission() async {
-    setState(() => _submitting = true);
-    
-    try {
-      final String contentType = _type == PostType.image ? 'image' : 'video';
-      final mobile = AppState.instance.userPhone.isNotEmpty ? AppState.instance.userPhone : '9876543210';
-      
-      // 1. Submit UGC data first
-      final ugcResponse = await ApiService.instance.submitUgc({
-        'mobile': mobile,
-        'title': _titleController.text.trim(),
-        'description': _captionController.text.trim(),
-        'category': _category.toLowerCase(),
-        'content_type': contentType,
-        'media_url': '', // Provided after upload if needed
-        'thumbnail_url': '',
-        'location_lat': '17.141500', // Mocked or get from geolocator later
-        'location_lon': '79.623600',
-        'village': '',
-        'subdistrict': '',
-        'district': AppState.instance.district,
-        'state': AppState.instance.stateName,
-        'country': 'India',
-      });
-      
-      final submissionId = ugcResponse['submission_id'] ?? ugcResponse['id'] ?? 'mock-uuid-123';
-      
-      // 2. Upload media tied to submission_id
-        if (_type == PostType.image && _selectedImages.isNotEmpty) {
-          await ApiService.instance.uploadMedia(
-            submissionId: submissionId.toString(),
-            mobile: mobile,
-            mediaType: contentType,
-            filePath: _selectedImages.first.path,
-          );
-        } else if (_type == PostType.video && _selectedVideo != null) {
-          await ApiService.instance.uploadMedia(
-            submissionId: submissionId.toString(),
-            mobile: mobile,
-            mediaType: contentType,
-            filePath: _selectedVideo!.path,
-          );
-        }
-        
-        // Register the post locally to reflect in the Reporter Dashboard
-        AppState.instance.submitReporterPost(
-          type: _type,
-          caption: _titleController.text.trim(),
-          category: _category,
-          mediaUrl: _type == PostType.image && _selectedImages.isNotEmpty 
-              ? _selectedImages.first.path 
-              : (_selectedVideo?.path ?? ''),
-        );
-        
-        if (mounted) {
-        setState(() {
-          _submitting = false;
-          _titleController.clear();
-          _captionController.clear();
-          _selectedImages.clear();
-          _selectedVideo = null;
-          _type = PostType.image;
-          _category = 'Local';
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('News submitted to Admin Queue (Pending)'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-          if (!(ModalRoute.of(context)?.isFirst ?? true)) {
-            Navigator.of(context).pop();
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _submitting = false;
-          _error = 'Failed to submit post: $e';
-        });
-      }
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {
@@ -422,8 +439,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 style: TextStyle(fontSize: 15, color: AppColors.textMuted, height: 1.5),
               ),
               const SizedBox(height: 32),
-              
-              // Points info
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -463,7 +478,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ],
                 ),
               ),
-              
               const SizedBox(height: 48),
               SizedBox(
                 width: double.infinity,
@@ -490,13 +504,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Widget _buildUploadForm() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasMedia = (_type == PostType.image && _selectedImages.isNotEmpty) || 
-                     (_type == PostType.video && _selectedVideo != null);
+    final hasMedia = (_controller.type == PostType.image && _controller.selectedImagePaths.isNotEmpty) || 
+                     (_controller.type == PostType.video && _controller.selectedVideoPath != null);
     
-    return Scaffold(
+    final isSecondaryRoute = !(ModalRoute.of(context)?.isFirst ?? true);
+    
+    final formScaffold = Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        leading: (ModalRoute.of(context)?.isFirst ?? true) ? null : IconButton(
+        leading: isSecondaryRoute ? IconButton(
           icon: Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
@@ -505,8 +521,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
             child: Icon(Icons.chevron_left, size: 20, color: Theme.of(context).iconTheme.color),
           ),
-          onPressed: () => Navigator.pop(context),
-        ),
+          onPressed: () async {
+            if (_controller.hasUnsavedChanges) {
+              final shouldDiscard = await _confirmDiscard();
+              if (shouldDiscard && mounted) {
+                Navigator.pop(context);
+              }
+            } else {
+              Navigator.pop(context);
+            }
+          },
+        ) : null,
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -525,6 +550,69 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Pending Draft Recovery Banner
+              if (_controller.pendingDraft != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.restore_page_rounded, color: Colors.amber, size: 24),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'You have an unsaved draft. Restore it?',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          _controller.restorePendingDraft().then((_) {
+                            _titleController.text = _controller.title;
+                            _captionController.text = _controller.description;
+                          });
+                        },
+                        child: const Text('Restore', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: _controller.dismissPendingDraft,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // Missing Local Files Warning
+              if (_controller.missingFilesWarning.isNotEmpty) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.orange.shade400),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Some attached media files are no longer available on your device. Please re-attach them.',
+                          style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               const Text('POST TYPE',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 0.5)),
               const SizedBox(height: 12),
@@ -534,8 +622,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     child: _typeCard(
                       icon: '🖼️',
                       label: 'Image News',
-                      selected: _type == PostType.image,
-                      onTap: () => setState(() { _type = PostType.image; _selectedVideo = null; }),
+                      selected: _controller.type == PostType.image,
+                      onTap: () => _controller.setType(PostType.image),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -543,8 +631,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     child: _typeCard(
                       icon: '🎥',
                       label: 'Video News',
-                      selected: _type == PostType.video,
-                      onTap: () => setState(() { _type = PostType.video; _selectedImages.clear(); }),
+                      selected: _controller.type == PostType.video,
+                      onTap: () => _controller.setType(PostType.video),
                     ),
                   ),
                 ],
@@ -553,7 +641,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               
               // Upload Box
               GestureDetector(
-                onTap: _pickMedia,
+                onTap: _controller.isSubmittingOrUploading ? null : _showMediaPickerSheet,
                 child: Container(
                   height: 150,
                   width: double.infinity,
@@ -565,9 +653,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       style: hasMedia ? BorderStyle.solid : BorderStyle.none,
                       width: 1.5
                     ),
-                    image: hasMedia && _type == PostType.image
+                    image: hasMedia && _controller.type == PostType.image
                         ? DecorationImage(
-                            image: FileImage(File(_selectedImages.first.path)),
+                            image: FileImage(File(_controller.selectedImagePaths.first)),
                             fit: BoxFit.cover,
                             colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.3), BlendMode.darken),
                           )
@@ -580,10 +668,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               top: 8,
                               right: 8,
                               child: GestureDetector(
-                                onTap: () => setState(() {
-                                  _selectedImages.clear();
-                                  _selectedVideo = null;
-                                }),
+                                onTap: _controller.isSubmittingOrUploading ? null : _controller.clearMedia,
                                 child: Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: const BoxDecoration(
@@ -594,7 +679,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                 ),
                               ),
                             ),
-                            if (_type == PostType.image)
+                            if (_controller.type == PostType.image)
                               Positioned(
                                 bottom: 8,
                                 left: 8,
@@ -604,20 +689,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                     color: Colors.black54,
                                     borderRadius: BorderRadius.circular(20),
                                   ),
-                                  child: Text('${_selectedImages.length} photo(s)', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
+                                  child: Text('${_controller.selectedImagePaths.length} photo(s)', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
                                 ),
                               ),
-                            if (_type == PostType.video)
+                            if (_controller.type == PostType.video)
                                const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 48)),
                           ],
                         )
                       : Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(_type == PostType.image ? '🖼️' : '🎥', style: const TextStyle(fontSize: 24)),
+                            Text(_controller.type == PostType.image ? '🖼️' : '🎥', style: const TextStyle(fontSize: 24)),
                             const SizedBox(height: 8),
                             Text(
-                              _type == PostType.image ? 'Tap to attach a photo' : 'Tap to attach a video',
+                              _controller.type == PostType.image ? 'Tap to attach photo (Camera or Gallery)' : 'Tap to attach video (Camera or Gallery)',
                               style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                             ),
                           ],
@@ -625,33 +710,53 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
               
-              if (_type == PostType.image && _selectedImages.length > 1) ...[
+              // Individual Photo Removal Strip
+              if (_controller.type == PostType.image && _controller.selectedImagePaths.length > 1) ...[
                 const SizedBox(height: 12),
                 SizedBox(
-                  height: 60,
+                  height: 64,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
-                    itemCount: _selectedImages.length,
+                    itemCount: _controller.selectedImagePaths.length,
                     itemBuilder: (context, index) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            File(_selectedImages[index].path),
-                            width: 60,
-                            height: 60,
-                            fit: BoxFit.cover,
+                      return Stack(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 10),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(_controller.selectedImagePaths[index]),
+                                width: 64,
+                                height: 64,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
                           ),
-                        ),
+                          Positioned(
+                            top: 2,
+                            right: 12,
+                            child: GestureDetector(
+                              onTap: _controller.isSubmittingOrUploading ? null : () => _controller.removeImageAt(index),
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black87,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 12),
+                              ),
+                            ),
+                          ),
+                        ],
                       );
                     },
                   ),
                 ),
               ],
               
-              const SizedBox(height: 12),
-              // Location Chip
+              const SizedBox(height: 14),
+              // Location Display / Selection Requirement
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
@@ -664,9 +769,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     const Text('📍', style: TextStyle(fontSize: 12)),
                     const SizedBox(width: 6),
                     Text(
-                      '${AppState.instance.district}, ${AppState.instance.stateName}',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Theme.of(context).textTheme.bodyLarge?.color),
+                      AppState.instance.hasValidLocation
+                          ? '${AppState.instance.district}, ${AppState.instance.stateName}'
+                          : 'Location required (Tap to detect)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppState.instance.hasValidLocation
+                            ? Theme.of(context).textTheme.bodyLarge?.color
+                            : Colors.orange,
+                      ),
                     ),
+                    if (!AppState.instance.hasValidLocation) ...[
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: () => _controller.ensureLocationAvailable(),
+                        child: const Icon(Icons.refresh, size: 14, color: AppColors.primary),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -678,6 +798,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               TextField(
                 controller: _titleController,
                 maxLength: 60,
+                enabled: !_controller.isSubmittingOrUploading,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
                   hintText: 'E.g., Suryapet road repair update',
@@ -707,9 +828,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 spacing: 8,
                 runSpacing: 10,
                 children: _categories.map((cat) {
-                  final selected = cat == _category;
+                  final selected = cat == _controller.category;
                   return GestureDetector(
-                    onTap: () => setState(() => _category = cat),
+                    onTap: _controller.isSubmittingOrUploading ? null : () => _controller.setCategory(cat),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
@@ -738,6 +859,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 controller: _captionController,
                 maxLines: 4,
                 maxLength: 500,
+                enabled: !_controller.isSubmittingOrUploading,
                 style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Add full details about the news...',
@@ -759,9 +881,71 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
               
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+              // Progress Bar & State Display
+              if (_controller.isSubmittingOrUploading) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _controller.status == UgcUploadStatus.preparing
+                                ? 'Preparing media...'
+                                : (_controller.status == UgcUploadStatus.submitting
+                                    ? 'Submitting post details...'
+                                    : 'Uploading media (${(_controller.uploadProgress * 100).toInt()}%)...'),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary),
+                          ),
+                          if (_controller.status == UgcUploadStatus.uploading)
+                            GestureDetector(
+                              onTap: _controller.cancelUpload,
+                              child: const Text('Cancel', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: _controller.status == UgcUploadStatus.uploading ? _controller.uploadProgress : null,
+                        backgroundColor: AppColors.primary.withValues(alpha: 0.2),
+                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              if (_controller.errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _controller.errorMessage!,
+                          style: const TextStyle(color: Colors.red, fontSize: 12.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
               
               const SizedBox(height: 24),
@@ -776,11 +960,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     elevation: 8,
                     shadowColor: AppColors.primary.withValues(alpha: 0.4),
                   ),
-                  onPressed: _submitting ? null : _onSubmitPressed,
-                  child: _submitting
+                  onPressed: _controller.isSubmittingOrUploading ? null : _onSubmitPressed,
+                  child: _controller.isSubmittingOrUploading
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('Submit for Review',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                      : Text(
+                          _controller.submissionId != null && _controller.status == UgcUploadStatus.failed
+                              ? 'Retry Media Upload'
+                              : 'Submit for Review',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                        ),
                 ),
               ),
               const SizedBox(height: 40),
@@ -789,6 +977,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
       ),
     );
+
+    if (isSecondaryRoute) {
+      return PopScope(
+        canPop: !_controller.hasUnsavedChanges && !_controller.isSubmittingOrUploading,
+        onPopInvokedWithResult: (didPop, _) async {
+          if (didPop) return;
+          final shouldDiscard = await _confirmDiscard();
+          if (shouldDiscard && mounted) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: formScaffold,
+      );
+    }
+
+    return formScaffold;
   }
 
   Widget _typeCard({
@@ -830,6 +1034,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerStateChanged);
+    _controller.dispose();
     _titleController.dispose();
     _captionController.dispose();
     _otpController.dispose();

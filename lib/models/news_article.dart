@@ -1,3 +1,13 @@
+import '../core/utils/date_parser.dart';
+import '../core/utils/url_normalizer.dart';
+
+int _toInt(dynamic val, [int fallback = 0]) {
+  if (val == null) return fallback;
+  if (val is int) return val;
+  if (val is num) return val.toInt();
+  return int.tryParse(val.toString().trim()) ?? fallback;
+}
+
 class NewsArticle {
   final String id;
   final String title;
@@ -8,7 +18,7 @@ class NewsArticle {
   final String source;
   final String category;
   final DateTime publishedAt;
-  final int likes;
+  int likes;
   final int comments;
   final int shares;
   final int readTimeMinutes;
@@ -23,6 +33,12 @@ class NewsArticle {
   final String mediaType;
   final String videoUrl;
   final int videoDurationSeconds;
+  final bool hasMore;
+  final String coverageLevel;
+  final String authorName;
+  final String language;
+  final bool isFeatured;
+  final List<MediaItem> mediaItems;
   bool isLiked;
   bool isBookmarked;
 
@@ -51,9 +67,34 @@ class NewsArticle {
     this.mediaType = 'image',
     this.videoUrl = '',
     this.videoDurationSeconds = 0,
+    this.hasMore = false,
+    this.coverageLevel = 'global',
+    this.authorName = '',
+    this.language = 'te',
+    this.isFeatured = false,
+    this.mediaItems = const [],
     this.isLiked = false,
     this.isBookmarked = false,
   });
+
+  factory NewsArticle.placeholder({String slug = '', String title = ''}) {
+    return NewsArticle(
+      id: slug.isNotEmpty ? slug : 'placeholder',
+      title: title.isNotEmpty ? title : 'News Update',
+      slug: slug,
+      summary: '',
+      body: '',
+      imageUrl: '',
+      source: 'Vaaradhi',
+      category: 'General',
+      publishedAt: DateTime.now(),
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      readTimeMinutes: 1,
+      viewCount: 0,
+    );
+  }
 
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
     String extractString(List<String> keys) {
@@ -73,45 +114,120 @@ class NewsArticle {
       return '';
     }
 
+    String rawImgUrl = (json['thumbnail_url'] ?? json['image_url'] ?? json['imageUrl'])?.toString() ?? '';
+    final rawVid = (json['video_url'] ?? json['youtube_url'])?.toString() ?? '';
+
+    if (rawImgUrl.isEmpty && rawVid.isNotEmpty) {
+      final ytThumb = UrlNormalizer.extractYoutubeThumbnail(rawVid);
+      if (ytThumb != null) {
+        rawImgUrl = ytThumb;
+      }
+    }
+
+    final normalizedImgUrl = UrlNormalizer.normalize(rawImgUrl);
+
+    // Resolve video url
+    String resolvedVideoUrl = '';
+    if (json['video_url']?.toString().trim().isNotEmpty == true) {
+      resolvedVideoUrl = json['video_url'].toString().trim();
+    } else if (json['youtube_url']?.toString().trim().isNotEmpty == true) {
+      resolvedVideoUrl = json['youtube_url'].toString().trim();
+    } else if (json['youtube_video_id']?.toString().trim().isNotEmpty == true) {
+      resolvedVideoUrl = 'https://www.youtube.com/watch?v=${json['youtube_video_id']}';
+    } else if (json['article'] is Map) {
+      final art = json['article'] as Map;
+      if (art['video_url']?.toString().trim().isNotEmpty == true) {
+        resolvedVideoUrl = art['video_url'].toString().trim();
+      } else if (art['youtube_url']?.toString().trim().isNotEmpty == true) {
+        resolvedVideoUrl = art['youtube_url'].toString().trim();
+      } else if (art['youtube_video_id']?.toString().trim().isNotEmpty == true) {
+        resolvedVideoUrl = 'https://www.youtube.com/watch?v=${art['youtube_video_id']}';
+      }
+    }
+
+    // Media type resolution
+    final rawMediaType = json['media_type']?.toString().trim().toLowerCase() ?? '';
+    final isVid = (rawMediaType == 'video') ||
+        resolvedVideoUrl.isNotEmpty ||
+        json['is_video'] == true;
+
+    final mediaType = isVid ? 'video' : (rawMediaType.isNotEmpty ? rawMediaType : 'image');
+
+    // Safe Category parsing
+    String parsedCategory = 'News';
+    if (json['category'] is Map) {
+      parsedCategory = json['category']['name']?.toString() ?? 'News';
+    } else if (json['category_name'] != null) {
+      parsedCategory = json['category_name'].toString();
+    } else if (json['category'] != null) {
+      parsedCategory = json['category'].toString();
+    }
+
+    // Safe list of media items
+    List<MediaItem> parsedMediaItems = [];
+    if (json['media_items'] is List) {
+      for (final item in (json['media_items'] as List)) {
+        if (item is Map<String, dynamic>) {
+          parsedMediaItems.add(MediaItem.fromJson(item));
+        }
+      }
+      parsedMediaItems.sort((a, b) {
+        if (a.isPrimary && !b.isPrimary) return -1;
+        if (!a.isPrimary && b.isPrimary) return 1;
+        return a.sortOrder.compareTo(b.sortOrder);
+      });
+    }
+
     return NewsArticle(
       id: json['id']?.toString() ?? '',
-      title: json['title'] ?? '',
+      title: json['title']?.toString() ?? '',
       slug: json['slug']?.toString() ?? '',
       summary: extractString(['summary', 'description', 'excerpt']),
       body: extractString(['content', 'body', 'content_html', 'body_html']),
-      imageUrl: json['thumbnail_url'] ?? json['image_url'] ?? json['imageUrl'] ?? '',
-      source: json['source_name'] ?? json['source'] ?? 'VARADHI Desk',
-      category: json['category'] is Map 
-          ? (json['category']['name'] ?? 'News') 
-          : (json['category_name'] ?? json['category']?.toString() ?? 'News'),
-      publishedAt: json['published_at'] != null 
-          ? DateTime.parse(json['published_at']) 
-          : DateTime.now(),
-      likes: json['likes_count'] ?? json['likes'] ?? 0,
-      comments: json['comments_count'] ?? json['comments'] ?? 0,
-      shares: json['shares_count'] ?? json['shares'] ?? 0,
-      readTimeMinutes: json['read_time_minutes'] ?? 2,
-      viewCount: json['view_count'] ?? json['views_count'] ?? 0,
-      state: json['state'],
-      district: json['district'],
-      subdistrict: json['subdistrict'],
-      village: json['village'],
-      isBreaking: json['is_breaking'] ?? false,
-      isRegional: json['is_regional'] ?? false,
-      imageUrls: (json['image_urls'] as List?)?.map((e) => e.toString()).toList(),
-      mediaType: (json['media_type']?.toString().trim().isNotEmpty ?? false)
-          ? json['media_type']!.toString().trim().toLowerCase()
-          : (json['video_url'] != null && json['video_url'].toString().trim().isNotEmpty ? 'video' : 'image'),
-      videoUrl: json['video_url']?.toString() ?? '',
-      videoDurationSeconds: json['video_duration_seconds'] is int 
-          ? json['video_duration_seconds'] 
-          : int.tryParse(json['video_duration_seconds']?.toString() ?? '0') ?? 0,
-      isLiked: json['is_liked_by_user'] ?? false,
-      isBookmarked: json['is_bookmarked_by_user'] ?? false,
+      imageUrl: normalizedImgUrl,
+      source: json['source_name']?.toString() ?? json['source']?.toString() ?? 'VARADHI Desk',
+      category: parsedCategory,
+      publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
+      likes: _toInt(json['likes_count'] ?? json['likes']),
+      comments: _toInt(json['comments_count'] ?? json['comments']),
+      shares: _toInt(json['shares_count'] ?? json['shares']),
+      readTimeMinutes: _toInt(json['read_time_minutes'], 2),
+      viewCount: _toInt(json['view_count'] ?? json['views_count']),
+      state: json['state']?.toString(),
+      district: json['district']?.toString(),
+      subdistrict: json['subdistrict']?.toString(),
+      village: json['village']?.toString(),
+      isBreaking: json['is_breaking'] == true,
+      isRegional: json['is_regional'] == true,
+      imageUrls: (json['image_urls'] as List?)
+          ?.map((e) => UrlNormalizer.normalize(e?.toString()))
+          .where((e) => e.isNotEmpty)
+          .toList(),
+      mediaType: mediaType,
+      videoUrl: resolvedVideoUrl,
+      videoDurationSeconds: _toInt(json['video_duration_seconds']),
+      isLiked: json['is_liked_by_user'] == true ||
+          json['is_liked'] == true ||
+          json['my_reaction'] == 'like' ||
+          json['reaction_type'] == 'like',
+      isBookmarked: json['is_bookmarked_by_user'] == true || json['is_bookmarked'] == true,
+      hasMore: json['has_more'] == true ||
+          json['hasMore'] == true ||
+          (json['article'] is Map &&
+              (json['article']['has_more'] == true || json['article']['hasMore'] == true)),
+      coverageLevel: json['coverage_level']?.toString().toLowerCase() ?? 'global',
+      authorName: json['author_name']?.toString() ??
+          (json['author'] is Map ? json['author']['name']?.toString() : null) ??
+          json['source_name']?.toString() ??
+          json['source']?.toString() ??
+          'VARADHI Desk',
+      language: json['language']?.toString() ?? json['lang']?.toString() ?? 'te',
+      isFeatured: json['is_featured'] == true,
+      mediaItems: parsedMediaItems,
     );
   }
 
-  bool get isVideo => mediaType == 'video' && videoUrl.isNotEmpty;
+  bool get isVideo => (mediaType == 'video' || videoUrl.isNotEmpty) && videoUrl.isNotEmpty;
 
   String get formattedVideoDuration {
     if (videoDurationSeconds <= 0) return '';
@@ -149,6 +265,7 @@ class NewsArticle {
       'is_breaking': isBreaking,
       'is_regional': isRegional,
       'image_urls': imageUrls,
+      'has_more': hasMore,
       'is_liked_by_user': isLiked,
       'is_bookmarked_by_user': isBookmarked,
     };
@@ -157,10 +274,16 @@ class NewsArticle {
 
 class Comment {
   final String id;
+  final String? articleId;
+  final String? authorId;
+  final String? parentId;
   final String username;
   final String avatarUrl;
   final String text;
   final DateTime postedAt;
+  final String status;
+  final String visibility;
+  final DateTime? editedAt;
   int likes;
   bool isLikedByUser;
   bool isReported;
@@ -168,20 +291,98 @@ class Comment {
 
   Comment({
     required this.id,
+    this.articleId,
+    this.authorId,
+    this.parentId,
     required this.username,
     required this.avatarUrl,
     required this.text,
     required this.postedAt,
+    this.status = 'published',
+    this.visibility = 'published',
+    this.editedAt,
     this.likes = 0,
     this.isLikedByUser = false,
     this.isReported = false,
     List<Comment>? replies,
   }) : replies = replies ?? [];
 
+  factory Comment.fromJson(Map<String, dynamic> json) {
+    final author = json['author'] as Map<String, dynamic>?;
+    final authorName = author?['display_name'] ?? json['username'] ?? 'Anonymous';
+    final authorId = author?['id']?.toString();
+    final repliesList = (json['replies'] as List<dynamic>?)
+            ?.map((r) => Comment.fromJson(r as Map<String, dynamic>))
+            .toList() ??
+        [];
+
+    final createdAtStr = json['created_at'] ?? json['postedAt'];
+    final createdAt = DateParser.tryParse(createdAtStr) ?? DateTime.now();
+    final editedAt = DateParser.tryParse(json['edited_at']);
+
+    return Comment(
+      id: json['id']?.toString() ?? '',
+      articleId: json['article_id']?.toString(),
+      authorId: authorId,
+      parentId: json['parent_id']?.toString(),
+      username: authorName.toString(),
+      avatarUrl: UrlNormalizer.normalize(
+        (json['avatar_url'] ?? json['avatarUrl'])?.toString(),
+        fallback: 'https://i.pravatar.cc/150?u=${authorName.hashCode}',
+      ),
+      text: json['content']?.toString() ?? json['text']?.toString() ?? '',
+      postedAt: createdAt,
+      status: json['status']?.toString() ?? 'published',
+      visibility: json['visibility']?.toString() ?? 'published',
+      editedAt: editedAt,
+      likes: _toInt(json['likes_count'] ?? json['likes']),
+      isLikedByUser: json['is_liked'] == true || json['isLikedByUser'] == true,
+      isReported: json['is_reported'] == true || json['isReported'] == true,
+      replies: repliesList,
+    );
+  }
+
   String get timeAgo {
     final diff = DateTime.now().difference(postedAt);
+    if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
   }
+}
+
+class MediaItem {
+  final String mediaType; // 'image' or 'video'
+  final String url;
+  final String thumbnailUrl;
+  final int sortOrder;
+  final bool isPrimary;
+
+  const MediaItem({
+    required this.mediaType,
+    required this.url,
+    required this.thumbnailUrl,
+    this.sortOrder = 0,
+    this.isPrimary = false,
+  });
+
+  factory MediaItem.fromJson(Map<String, dynamic> json) {
+    final mType = json['media_type']?.toString().toLowerCase() ?? 'image';
+    final urlStr = UrlNormalizer.normalize(json['url']?.toString());
+    final thumbStr = UrlNormalizer.normalize(json['thumbnail_url']?.toString(), fallback: urlStr);
+    final order = _toInt(json['sort_order'], 0);
+    return MediaItem(
+      mediaType: mType,
+      url: urlStr,
+      thumbnailUrl: thumbStr,
+      sortOrder: order,
+      isPrimary: json['is_primary'] == true,
+    );
+  }
+
+  bool get isVideo =>
+      mediaType == 'video' ||
+      url.endsWith('.mp4') ||
+      url.contains('youtube.com') ||
+      url.contains('youtu.be');
 }

@@ -1,3 +1,19 @@
+int _toInt(dynamic val, [int fallback = 0]) {
+  if (val == null) return fallback;
+  if (val is int) return val;
+  if (val is num) return val.toInt();
+  return int.tryParse(val.toString().trim()) ?? fallback;
+}
+
+bool _toBool(dynamic val, [bool fallback = true]) {
+  if (val == null) return fallback;
+  if (val is bool) return val;
+  final str = val.toString().trim().toLowerCase();
+  if (str == 'true' || str == '1') return true;
+  if (str == 'false' || str == '0') return false;
+  return fallback;
+}
+
 class Category {
   final String id;
   final String name;
@@ -18,11 +34,11 @@ class Category {
   factory Category.fromJson(Map<String, dynamic> json) {
     return Category(
       id: json['id']?.toString() ?? '',
-      name: json['name'] ?? '',
-      slug: json['slug'] ?? '',
-      icon: json['icon'] ?? '',
-      order: json['order'] ?? 0,
-      isActive: json['is_active'] ?? true,
+      name: json['name']?.toString() ?? '',
+      slug: json['slug']?.toString() ?? '',
+      icon: json['icon']?.toString() ?? '',
+      order: _toInt(json['order'], 0),
+      isActive: _toBool(json['is_active'], true),
     );
   }
 }

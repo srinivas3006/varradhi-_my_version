@@ -1,41 +1,53 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:visibility_detector/visibility_detector.dart';
 import '../../models/ad_banner.dart';
-import '../../services/api_service.dart';
+import '../../services/ad_manager.dart';
+import '../../utils/share_service.dart';
 import '../../theme/app_theme.dart';
+import 'ad_viewability_detector.dart';
+import 'video_ad_card.dart';
 
-/// Backend-driven native in-feed ad card. Displays ad title, image, and CTA
-/// fetched dynamically from ApiService with automatic impression & click analytics.
+/// Backend-driven native in-feed ad card styled identically to regular news cards.
+/// Displays an ad with a "Sponsored" label, consistent typography, action buttons,
+/// and automatic dwell-based viewability and click tracking via [AdManager].
 class NativeAdCard extends StatefulWidget {
   final AdBanner? ad;
+  final String placementZone;
+  final String? exposureKey;
 
-  const NativeAdCard({super.key, this.ad});
+  const NativeAdCard({
+    super.key,
+    this.ad,
+    this.placementZone = 'feed',
+    this.exposureKey,
+  });
 
   @override
   State<NativeAdCard> createState() => _NativeAdCardState();
 }
 
 class _NativeAdCardState extends State<NativeAdCard> {
-  bool _impressionTracked = false;
-
-  void _onVisibilityChanged(VisibilityInfo info) {
-    if (widget.ad != null && !_impressionTracked && info.visibleFraction > 0.5) {
-      _impressionTracked = true;
-      ApiService.instance.trackAdEvent(widget.ad!.id, 'impression');
-    }
-  }
-
   Future<void> _handleTap() async {
     if (widget.ad == null) return;
-    ApiService.instance.trackAdEvent(widget.ad!.id, 'click');
+    HapticFeedback.selectionClick();
+    AdManager.instance.recordClick(widget.ad!, placementZone: widget.placementZone);
+
     if (widget.ad!.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad!.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     }
+  }
+
+  void _handleShare() {
+    if (widget.ad == null) return;
+    HapticFeedback.lightImpact();
+    final shareText = '${widget.ad!.title}\n${widget.ad!.destinationUrl}';
+    ShareService.shareText(shareText);
   }
 
   @override
@@ -47,34 +59,45 @@ class _NativeAdCardState extends State<NativeAdCard> {
       return const SizedBox.shrink();
     }
 
-    return VisibilityDetector(
-      key: Key('native_ad_${ad.id}'),
-      onVisibilityChanged: _onVisibilityChanged,
-      child: GestureDetector(
-        onTap: _handleTap,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: isDark ? Colors.white.withValues(alpha: 0.1) : const Color(0xFFE7E7EA),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
+    // If ad is a video ad, delegate to VideoAdCard
+    if (ad.isVideo) {
+      return VideoAdCard(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+
+    return AdViewabilityDetector(
+      ad: ad,
+      placementZone: widget.placementZone,
+      exposureKey: widget.exposureKey,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: _handleTap,
+          splashColor: AppColors.primary.withValues(alpha: 0.1),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Ad Banner Image / Media Frame
+              // Media Header Frame
               SizedBox(
-                height: 180,
+                height: 190,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -88,25 +111,83 @@ class _NativeAdCardState extends State<NativeAdCard> {
                       errorWidget: (context, url, error) => Container(
                         color: isDark ? Colors.white10 : AppColors.chipBg,
                         child: const Center(
-                          child: Icon(Icons.storefront_rounded, size: 48, color: AppColors.textMuted),
+                          child: Icon(Icons.campaign_rounded, size: 48, color: AppColors.textMuted),
                         ),
                       ),
                     ),
+
+                    // Subtle Bottom Gradient on Image
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.35),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Top-Left "Sponsored" Frosted Badge Pill
                     Positioned(
                       top: 12,
                       left: 12,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(20),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white24, width: 0.8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.campaign_rounded, color: Colors.amber, size: 14),
+                                SizedBox(width: 5),
+                                Text(
+                                  'SPONSORED',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        child: const Text(
-                          'Ad',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                      ),
+                    ),
+
+                    // Top-Right Share Button
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                          child: InkWell(
+                            onTap: _handleShare,
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white24, width: 0.8),
+                              ),
+                              child: const Icon(Icons.share_rounded, color: Colors.white, size: 16),
+                            ),
                           ),
                         ),
                       ),
@@ -115,48 +196,74 @@ class _NativeAdCardState extends State<NativeAdCard> {
                 ),
               ),
 
-              // Title and CTA Action Bar
+              // Ad Content & Call To Action
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Headline
                     Text(
                       ad.title.isNotEmpty ? ad.title : 'Sponsored Promotion',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                         color: isDark ? Colors.white : AppColors.textDark,
                         height: 1.25,
+                        letterSpacing: -0.3,
                       ),
                     ),
                     const SizedBox(height: 6),
+
+                    // Sponsor Domain / Attribution
                     Text(
-                      ad.destinationUrl.isNotEmpty ? 'Sponsored · ${ad.destinationUrl}' : 'Sponsored Content',
+                      ad.destinationUrl.isNotEmpty
+                          ? 'Sponsored · ${Uri.tryParse(ad.destinationUrl)?.host ?? ad.destinationUrl}'
+                          : 'Sponsored Partner',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white60 : AppColors.textMuted,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 40,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: const BorderSide(color: AppColors.primary),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+
+                    // CTA Row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: _handleTap,
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Learn More',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Icon(Icons.arrow_forward_rounded, size: 15),
+                              ],
+                            ),
                           ),
                         ),
-                        onPressed: _handleTap,
-                        child: const Text(
-                          'Learn More',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
+                      ],
                     ),
                   ],
                 ),

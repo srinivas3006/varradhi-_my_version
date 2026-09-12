@@ -26,9 +26,21 @@ class AdminPaginatedResponse<T> {
     return AdminPaginatedResponse<T>(
       items: items,
       count: raw is Map && raw['count'] != null ? int.tryParse(raw['count'].toString()) ?? items.length : items.length,
-      next: raw is Map ? raw['next']?.toString() : null,
-      previous: raw is Map ? raw['previous']?.toString() : null,
+      next: raw is Map ? _extractCursor(raw['next']?.toString()) : null,
+      previous: raw is Map ? _extractCursor(raw['previous']?.toString()) : null,
     );
+  }
+
+  /// Backend returns a full URL (e.g. ".../queue/?cursor=abc123"). Extract
+  /// just the opaque cursor token so it can be sent back as ?cursor=...
+  /// on the next request instead of nesting the whole URL as the value.
+  static String? _extractCursor(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final uri = Uri.tryParse(value);
+    if (uri != null && uri.queryParameters.containsKey('cursor')) {
+      return uri.queryParameters['cursor'];
+    }
+    return value;
   }
 
   bool get hasMore => next != null && next!.isNotEmpty;

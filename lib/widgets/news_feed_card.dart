@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../localization/app_translations.dart';
 import 'reaction_buttons.dart';
 import '../services/api_service.dart';
+import 'news_article_video_player.dart';
 
 class NewsFeedCard extends StatefulWidget {
   final NewsArticle article;
@@ -103,10 +104,8 @@ class _NewsFeedCardState extends State<NewsFeedCard>
     final hasMultipleImages = article.imageUrls != null && article.imageUrls!.length > 1;
     final images = hasMultipleImages ? article.imageUrls! : [article.imageUrl];
 
-    return GestureDetector(
-      onTap: _handleTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: Colors.white,
@@ -352,15 +351,73 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     ),
                     const SizedBox(height: 6),
                     Expanded(
-                      child: Text(
-                        article.summary,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textMuted,
-                          height: 1.3,
-                        ),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final toShow = article.summary.trim().isNotEmpty
+                              ? article.summary.trim()
+                              : article.body.trim();
+
+                          const textStyle = TextStyle(
+                            fontSize: 13.0,
+                            color: AppColors.textMuted,
+                            height: 1.35,
+                          );
+
+                          final double lineHeight = textStyle.fontSize! * textStyle.height!;
+                          const double reservedForButton = 28.0;
+                          final double availableForText = (constraints.maxHeight - reservedForButton).clamp(0.0, double.infinity);
+                          final int calculatedLines = (availableForText / lineHeight).floor();
+                          final int dynamicMaxLines = calculatedLines.clamp(2, 5);
+
+                          final textSpan = TextSpan(text: toShow, style: textStyle);
+                          final textPainter = TextPainter(
+                            text: textSpan,
+                            textDirection: Directionality.of(context),
+                            maxLines: dynamicMaxLines,
+                          )..layout(maxWidth: constraints.maxWidth);
+
+                          final bool isTruncated = textPainter.didExceedMaxLines;
+                          final bool hasMoreBackend = article.hasMore ||
+                              (article.body.trim().isNotEmpty && article.body.trim().length > toShow.length);
+                          final bool shouldShowReadMore = isTruncated || hasMoreBackend;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  toShow,
+                                  maxLines: dynamicMaxLines,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textStyle,
+                                ),
+                              ),
+                              if (shouldShowReadMore) ...[
+                                const SizedBox(height: 3),
+                                GestureDetector(
+                                  onTap: _handleTap,
+                                  behavior: HitTestBehavior.opaque,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        AppState.instance.language == 'Telugu' ? 'ఇంకా చదవండి' : 'Read More',
+                                        style: const TextStyle(
+                                          fontSize: 12.0,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 3),
+                                      const Icon(Icons.arrow_forward_rounded, size: 12, color: AppColors.primary),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
                       ),
                     ),
                     const Divider(height: 16),
@@ -417,8 +474,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildMediaPreview() {
@@ -429,71 +485,9 @@ class _NewsFeedCardState extends State<NewsFeedCard>
     final shouldShowVideoCard = article.isVideo && article.videoUrl.isNotEmpty;
 
     if (shouldShowVideoCard) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          if (previewUrl.isNotEmpty)
-            CachedNetworkImage(
-              imageUrl: previewUrl,
-              fit: BoxFit.cover,
-              placeholder: (context, url) => Container(color: AppColors.chipBg),
-              errorWidget: (context, url, error) => Container(
-                color: AppColors.chipBg,
-                child: const Icon(Icons.image_not_supported_outlined,
-                    color: AppColors.textMuted, size: 40),
-              ),
-            )
-          else
-            Container(color: AppColors.chipBg),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.center,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.18)],
-                ),
-              ),
-            ),
-          ),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.6),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
-            ),
-          ),
-          if (article.formattedVideoDuration.isNotEmpty)
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.play_circle_fill, color: Colors.white, size: 12),
-                    const SizedBox(width: 4),
-                    Text(
-                      article.formattedVideoDuration,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
+      return NewsArticleVideoPlayer(
+        article: article,
+        onDoubleTap: _handleDoubleTap,
       );
     }
 
@@ -515,6 +509,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
         CachedNetworkImage(
           imageUrl: url,
           fit: BoxFit.cover,
+          memCacheWidth: 800,
           placeholder: (context, url) => Container(color: AppColors.chipBg),
           errorWidget: (context, url, error) => Container(
             color: AppColors.chipBg,

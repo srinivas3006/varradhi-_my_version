@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/redeem_request.dart';
 import '../state/app_state.dart';
 import 'redeem_request_screen.dart';
@@ -14,6 +15,8 @@ class ReporterWalletScreen extends StatelessWidget {
         return 'Processing';
       case RedeemStatus.paid:
         return 'Paid';
+      case RedeemStatus.rejected:
+        return 'Rejected';
     }
   }
 
@@ -25,6 +28,8 @@ class ReporterWalletScreen extends StatelessWidget {
         return const Color(0xFF3B82F6);
       case RedeemStatus.paid:
         return const Color(0xFF10B981);
+      case RedeemStatus.rejected:
+        return const Color(0xFFEF4444);
     }
   }
 
@@ -114,186 +119,292 @@ class ReporterWalletScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Balance Card
+                      // Modern Red Rewards Balance Card
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
                           gradient: const LinearGradient(
-                            colors: [Color(0xFF2C2C2C), Color(0xFF1A1A1A)],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
+                            colors: [
+                              Color(0xFFE0001B),
+                              Color(0xFFBA0014),
+                            ],
                           ),
-                          borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+                              color: const Color(0xFFBA0014).withValues(alpha: 0.35),
                               blurRadius: 20,
                               offset: const Offset(0, 10),
-                            )
+                            ),
                           ],
-                          border: Border.all(
-                            color: const Color(0xFFFFD700).withValues(alpha: 0.3),
-                            width: 1,
-                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // "AVAILABLE COINS" Row
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  'Total Balance',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.7),
-                                    fontSize: 14,
-                                    letterSpacing: 1.1,
-                                  ),
-                                ),
                                 Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFFD700).withValues(alpha: 0.1),
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFBBF24),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
-                                    Icons.account_balance_wallet_rounded,
-                                    color: Color(0xFFFFD700),
-                                    size: 20,
+                                    Icons.attach_money_rounded,
+                                    size: 14,
+                                    color: Color(0xFF92400E),
                                   ),
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '₹${state.reporterTokens * AppState.rupeesPerToken}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 40,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -1,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFD700).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                '${state.reporterTokens} Tokens Earned',
-                                style: const TextStyle(
-                                  color: Color(0xFFFFD700),
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 32),
-                      
-                      // Progress Section
-                      Text(
-                        'Redemption Progress',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: isDark ? [] : [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            )
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
+                                const SizedBox(width: 8),
                                 Text(
-                                  '${(progress * 100).toInt()}% towards goal',
+                                  'AVAILABLE COINS',
                                   style: TextStyle(
-                                    color: isDark ? Colors.white70 : Colors.black54,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                Text(
-                                  '${state.reporterTokens} / ${AppState.tokensNeededToRedeem}',
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white54 : Colors.black45,
                                     fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.1,
+                                    color: Colors.white.withValues(alpha: 0.9),
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
+
+                            const SizedBox(height: 14),
+
+                            // Balance + Rupee estimate
+                            Builder(
+                              builder: (context) {
+                                final coins = state.reporterTokens > 0 ? state.reporterTokens : 5549;
+                                final rupees = coins * 3.0;
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    Text(
+                                      '$coins',
+                                      style: const TextStyle(
+                                        fontSize: 40,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white,
+                                        letterSpacing: -1.0,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      '≈ ₹${rupees.toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white.withValues(alpha: 0.9),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Yellow Progress Bar
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
                                 value: progress,
-                                minHeight: 8,
-                                backgroundColor: isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade200,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  canRedeem ? const Color(0xFF10B981) : const Color(0xFFFFD700),
-                                ),
+                                minHeight: 5,
+                                backgroundColor: Colors.white24,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFBBF24)),
                               ),
                             ),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 54,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: canRedeem 
-                                      ? const Color(0xFFFFD700) 
-                                      : (isDark ? const Color(0xFF2C2C2C) : Colors.grey.shade300),
-                                  foregroundColor: canRedeem 
-                                      ? Colors.black87 
-                                      : (isDark ? Colors.white54 : Colors.black38),
-                                  elevation: canRedeem ? 4 : 0,
-                                  shadowColor: const Color(0xFFFFD700).withValues(alpha: 0.5),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
+
+                            const SizedBox(height: 10),
+
+                            // Subtext
+                            Text(
+                              canRedeem
+                                  ? 'You can withdraw now.'
+                                  : 'Need ${AppState.tokensNeededToRedeem - state.reporterTokens} more to withdraw',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.white.withValues(alpha: 0.85),
+                              ),
+                            ),
+
+                            const SizedBox(height: 18),
+
+                            // CTA: "Withdraw over UPI"
+                            GestureDetector(
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const RedeemRequestScreen()),
+                                );
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.08),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
                                 ),
-                                onPressed: canRedeem
-                                    ? () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                              builder: (_) => const RedeemRequestScreen()),
-                                        )
-                                    : null,
-                                child: Text(
-                                  canRedeem
-                                      ? 'Request Payout'
-                                      : 'Need ${AppState.tokensNeededToRedeem - state.reporterTokens} more to redeem',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                    letterSpacing: 0.5,
-                                  ),
+                                child: const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.account_balance_wallet_outlined,
+                                      color: Color(0xFFBA0014),
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Withdraw over UPI',
+                                      style: TextStyle(
+                                        color: Color(0xFFBA0014),
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ],
                         ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Metrics Grid (3 Columns)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF1F5F9)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.02),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '10000',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: isDark ? Colors.white : const Color(0xFF111827),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  const Text(
+                                    'Lifetime',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF6B7280),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF1F5F9)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.02),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '580',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: isDark ? Colors.white : const Color(0xFF111827),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  const Text(
+                                    'Locked',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF6B7280),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isDark ? const Color(0xFF2C2C2C) : const Color(0xFFF1F5F9)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.02),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '3871',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: isDark ? Colors.white : const Color(0xFF111827),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  const Text(
+                                    'Redeemed',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF6B7280),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       
                       const SizedBox(height: 32),

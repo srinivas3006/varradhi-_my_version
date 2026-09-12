@@ -1,3 +1,13 @@
+import '../core/utils/date_parser.dart';
+import '../core/utils/url_normalizer.dart';
+
+int _toInt(dynamic val, [int fallback = 0]) {
+  if (val == null) return fallback;
+  if (val is int) return val;
+  if (val is num) return val.toInt();
+  return int.tryParse(val.toString().trim()) ?? fallback;
+}
+
 class UnifiedFeedItem {
   final String id;
   final String type;
@@ -34,24 +44,30 @@ class UnifiedFeedItem {
   });
 
   factory UnifiedFeedItem.fromJson(Map<String, dynamic> json) {
+    final rawThumb = (json['thumbnail_url'] ?? json['image_url'])?.toString();
+    final rawMedia = (json['media_url'] ?? json['video_url'])?.toString();
+
+    Map<String, dynamic> parsedMeta = {};
+    if (json['metadata'] is Map) {
+      parsedMeta = Map<String, dynamic>.from(json['metadata'] as Map);
+    }
+
     return UnifiedFeedItem(
       id: json['id']?.toString() ?? '',
-      type: json['type'] ?? 'article',
-      title: json['title'] ?? '',
-      summary: json['summary'] ?? '',
-      thumbnailUrl: json['thumbnail_url'] ?? '',
-      mediaUrl: json['media_url'] ?? '',
-      createdAt: json['created_at'] != null 
-          ? DateTime.parse(json['created_at']) 
-          : DateTime.now(),
-      district: json['district'] ?? '',
-      subdistrict: json['subdistrict'] ?? '',
-      village: json['village'] ?? '',
-      state: json['state'] ?? '',
-      priorityScore: json['priority_score'] ?? 0,
-      source: json['source'] ?? '',
-      trustScore: json['trust_score'] ?? 0,
-      metadata: json['metadata'] ?? {},
+      type: json['type']?.toString().trim().toLowerCase() ?? 'article',
+      title: json['title']?.toString() ?? '',
+      summary: json['summary']?.toString() ?? json['description']?.toString() ?? '',
+      thumbnailUrl: UrlNormalizer.normalize(rawThumb),
+      mediaUrl: UrlNormalizer.normalize(rawMedia),
+      createdAt: DateParser.tryParse(json['created_at'] ?? json['published_at']) ?? DateTime.now(),
+      district: json['district']?.toString() ?? '',
+      subdistrict: json['subdistrict']?.toString() ?? '',
+      village: json['village']?.toString() ?? '',
+      state: json['state']?.toString() ?? '',
+      priorityScore: _toInt(json['priority_score']),
+      source: json['source']?.toString() ?? json['source_name']?.toString() ?? 'VARADHI',
+      trustScore: _toInt(json['trust_score']),
+      metadata: parsedMeta,
     );
   }
 }

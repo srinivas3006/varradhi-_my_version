@@ -1,33 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:visibility_detector/visibility_detector.dart';
 import '../../models/ad_banner.dart';
-import '../../services/api_service.dart';
+import '../../services/ad_manager.dart';
+import 'ad_viewability_detector.dart';
 
-class AdBannerWidget extends StatefulWidget {
+class AdBannerWidget extends StatelessWidget {
   final AdBanner ad;
-  
-  const AdBannerWidget({super.key, required this.ad});
+  final String placementZone;
+  final String? exposureKey;
 
-  @override
-  State<AdBannerWidget> createState() => _AdBannerWidgetState();
-}
-
-class _AdBannerWidgetState extends State<AdBannerWidget> {
-  bool _impressionTracked = false;
-
-  void _onVisibilityChanged(VisibilityInfo info) {
-    if (!_impressionTracked && info.visibleFraction > 0.5) {
-      _impressionTracked = true;
-      ApiService.instance.trackAdEvent(widget.ad.id, 'impression');
-    }
-  }
+  const AdBannerWidget({
+    super.key,
+    required this.ad,
+    this.placementZone = 'banner',
+    this.exposureKey,
+  });
 
   Future<void> _handleTap() async {
-    ApiService.instance.trackAdEvent(widget.ad.id, 'click');
-    if (widget.ad.destinationUrl.isNotEmpty) {
-      final uri = Uri.tryParse(widget.ad.destinationUrl);
+    AdManager.instance.recordClick(ad, placementZone: placementZone);
+    if (ad.destinationUrl.isNotEmpty) {
+      final uri = Uri.tryParse(ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
@@ -36,25 +29,34 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return VisibilityDetector(
-      key: Key('ad_${widget.ad.id}'),
-      onVisibilityChanged: _onVisibilityChanged,
+    return AdViewabilityDetector(
+      ad: ad,
+      placementZone: placementZone,
+      exposureKey: exposureKey,
       child: GestureDetector(
         onTap: _handleTap,
         child: Container(
           width: double.infinity,
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          color: Colors.black, // Background while loading
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.black.withValues(alpha: 0.04),
+          ),
           child: CachedNetworkImage(
-            imageUrl: widget.ad.imageUrl,
+            imageUrl: ad.imageUrl,
             fit: BoxFit.contain,
-            placeholder: (context, url) => const Center(
-              child: Padding(
-                padding: EdgeInsets.all(32.0),
-                child: CircularProgressIndicator(),
+            placeholder: (context, url) => const SizedBox(
+              height: 56,
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             ),
-            errorWidget: (context, url, error) => const Icon(Icons.error),
+            errorWidget: (context, url, error) => const SizedBox.shrink(),
           ),
         ),
       ),

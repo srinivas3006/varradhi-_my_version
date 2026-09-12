@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
 class DeviceSessionsScreen extends StatefulWidget {
@@ -9,30 +11,72 @@ class DeviceSessionsScreen extends StatefulWidget {
 }
 
 class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
-  // Mock sessions
-  final List<Map<String, dynamic>> _sessions = [
-    {
-      'id': '1',
-      'device': 'iPhone 14 Pro Max',
-      'location': 'Hyderabad, India',
-      'lastActive': 'Active now',
-      'isCurrent': true,
-    },
-    {
-      'id': '2',
-      'device': 'MacBook Pro 16"',
-      'location': 'Hyderabad, India',
-      'lastActive': 'Last active 2 days ago',
-      'isCurrent': false,
-    },
-    {
-      'id': '3',
-      'device': 'Samsung Galaxy S22',
-      'location': 'Mumbai, India',
-      'lastActive': 'Last active 1 week ago',
-      'isCurrent': false,
-    },
-  ];
+  bool _isLoading = true;
+  String? _error;
+  List<Map<String, dynamic>> _sessions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSessions();
+  }
+
+  String _firstString(Map<String, dynamic> json, List<String> keys, [String fallback = '']) {
+    for (final key in keys) {
+      final value = json[key];
+      if (value != null && value.toString().trim().isNotEmpty) return value.toString();
+    }
+    return fallback;
+  }
+
+  Future<void> _fetchSessions() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final raw = await ApiService.instance.getDeviceSessions();
+      final currentDeviceId = AppState.instance.deviceId;
+
+      final sessions = raw.map((item) {
+        final json = item as Map<String, dynamic>;
+        final deviceId = _firstString(json, ['device_id']);
+        return {
+          'id': _firstString(json, ['id', 'session_id']),
+          'device': _firstString(json, ['device_name', 'device'], 'Unknown Device'),
+          'deviceType': _firstString(json, ['device_type']).toLowerCase(),
+          'lastActive': _firstString(json, ['last_active_at', 'last_used_at', 'updated_at', 'created_at']),
+          'isCurrent': deviceId.isNotEmpty && deviceId == currentDeviceId,
+        };
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _sessions = sessions;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load device sessions.';
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  String _formatLastActive(String raw) {
+    if (raw.isEmpty) return 'Last active unknown';
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return raw;
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 5) return 'Active now';
+    if (diff.inHours < 1) return 'Last active ${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return 'Last active ${diff.inHours}h ago';
+    return 'Last active ${diff.inDays}d ago';
+  }
 
   void _revokeSession(String id) {
     showDialog(
@@ -46,14 +90,28 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              setState(() {
-                _sessions.removeWhere((s) => s['id'] == id);
-              });
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Device session revoked.')),
-              );
+              final previousSessions = _sessions;
+              setState(() {
+                _sessions = _sessions.where((s) => s['id'] != id).toList();
+              });
+              final messenger = ScaffoldMessenger.of(context);
+              try {
+                await ApiService.instance.revokeDeviceSession(id);
+                if (mounted) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Device session revoked.')),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  setState(() => _sessions = previousSessions);
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Failed to revoke session. Please try again.')),
+                  );
+                }
+              }
             },
             child: const Text('Revoke', style: TextStyle(color: AppColors.primary)),
           ),
@@ -72,12 +130,41 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         elevation: 0.5,
       ),
-      body: ListView.separated(
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_error!),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: _fetchSessions, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
+
+    if (_sessions.isEmpty) {
+      return const Center(child: Text('No active sessions found.', style: TextStyle(color: AppColors.textMuted)));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchSessions,
+      child: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 12),
         itemCount: _sessions.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
           final session = _sessions[index];
+          final isCurrent = session['isCurrent'] == true;
           return Container(
             color: Theme.of(context).cardColor,
             padding: const EdgeInsets.all(16),
@@ -90,10 +177,10 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
-                    session['device'].toString().contains('MacBook')
+                    (session['deviceType'] as String? ?? '').contains('web')
                         ? Icons.laptop_mac
                         : Icons.phone_iphone,
-                    color: session['isCurrent'] ? AppColors.primary : AppColors.textMuted,
+                    color: isCurrent ? AppColors.primary : AppColors.textMuted,
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -103,15 +190,18 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            session['device'],
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).textTheme.bodyLarge?.color,
+                          Expanded(
+                            child: Text(
+                              session['device'] as String? ?? 'Unknown Device',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).textTheme.bodyLarge?.color,
+                              ),
                             ),
                           ),
-                          if (session['isCurrent']) ...[
+                          if (isCurrent) ...[
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -129,7 +219,7 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${session['location']} • ${session['lastActive']}',
+                        _formatLastActive(session['lastActive'] as String? ?? ''),
                         style: const TextStyle(
                           fontSize: 13,
                           color: AppColors.textMuted,
@@ -138,10 +228,10 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                     ],
                   ),
                 ),
-                if (!session['isCurrent'])
+                if (!isCurrent)
                   IconButton(
                     icon: const Icon(Icons.exit_to_app, color: AppColors.primary),
-                    onPressed: () => _revokeSession(session['id']),
+                    onPressed: () => _revokeSession(session['id'] as String),
                     tooltip: 'Revoke Session',
                   ),
               ],

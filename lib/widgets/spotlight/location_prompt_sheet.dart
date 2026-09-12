@@ -38,18 +38,11 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
 
     try {
       final deviceLocation = await LocationService.detectLocation();
-      AppState.instance.setDeviceLocation(deviceLocation);
-
-      if (AppState.instance.isLoggedIn) {
-        try {
-          await ApiService.instance.updateUserLocationDevice(deviceLocation);
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Location detected but failed to sync with server.')),
-            );
-          }
-        }
+      try {
+        await ApiService.instance.resolveAndSyncCanonicalLocation(deviceLocation);
+      } catch (e) {
+        debugPrint('Location canonical sync error: $e');
+        AppState.instance.setDeviceLocation(deviceLocation);
       }
 
       if (mounted) {
@@ -145,12 +138,12 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
             
             const SizedBox(height: 24),
             const Text(
-              'Enable Location',
+              'మీ ప్రాంత వార్తలు కావాలా?',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textDark, letterSpacing: -0.5),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Allow us to access your location to serve personalized local news and updates in your area.',
+              'మీ గ్రామం, మండలం మరియు జిల్లా తాజా వార్తలను ఎప్పటికప్పుడు పొందడానికి లొకేషన్ అనుమతిని ఇవ్వండి.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.textMuted, fontSize: 14.5, height: 1.4),
             ),
@@ -173,7 +166,7 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
                         width: 24,
                         child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                       )
-                    : const Text('Allow Location', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                    : const Text('అనుమతించండి (Allow)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
               ),
             ),
             const SizedBox(height: 12),
@@ -182,7 +175,7 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
               ),
-              child: const Text('Maybe Later', style: TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 15)),
+              child: const Text('ప్రస్తుతానికి వద్దు (Maybe Later)', style: TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 15)),
             ),
           ],
         ),

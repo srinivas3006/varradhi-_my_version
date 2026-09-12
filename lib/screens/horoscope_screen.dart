@@ -11,42 +11,29 @@ class HoroscopeScreen extends StatefulWidget {
 
 class _HoroscopeScreenState extends State<HoroscopeScreen> {
   static const _signs = [
-    {'name': 'Aries', 'symbol': '♈'},
-    {'name': 'Taurus', 'symbol': '♉'},
-    {'name': 'Gemini', 'symbol': '♊'},
-    {'name': 'Cancer', 'symbol': '♋'},
-    {'name': 'Leo', 'symbol': '♌'},
-    {'name': 'Virgo', 'symbol': '♍'},
-    {'name': 'Libra', 'symbol': '♎'},
-    {'name': 'Scorpio', 'symbol': '♏'},
-    {'name': 'Sagittarius', 'symbol': '♐'},
-    {'name': 'Capricorn', 'symbol': '♑'},
-    {'name': 'Aquarius', 'symbol': '♒'},
-    {'name': 'Pisces', 'symbol': '♓'},
+    {'name': 'మేషం', 'symbol': '♈'},
+    {'name': 'వృషభం', 'symbol': '♉'},
+    {'name': 'మిథునం', 'symbol': '♊'},
+    {'name': 'కర్కాటకం', 'symbol': '♋'},
+    {'name': 'సింహం', 'symbol': '♌'},
+    {'name': 'కన్య', 'symbol': '♍'},
+    {'name': 'తుల', 'symbol': '♎'},
+    {'name': 'వృశ్చికం', 'symbol': '♏'},
+    {'name': 'ధనుస్సు', 'symbol': '♐'},
+    {'name': 'మకరం', 'symbol': '♑'},
+    {'name': 'కుంభం', 'symbol': '♒'},
+    {'name': 'మీనం', 'symbol': '♓'},
   ];
 
   int _selected = 0;
 
-  static const _readings = [
-    'A promising day for new beginnings. Trust your instincts on a financial decision.',
-    'Focus on relationships today — a small gesture goes a long way with loved ones.',
-    'Your communication skills shine. A good day to negotiate or pitch an idea.',
-    'Take time for self-care. Emotional clarity comes after a quiet moment alone.',
-    'Leadership opportunities arise at work. Step up, but stay open to feedback.',
-    'Small details matter today. Double-check important documents before signing.',
-    'Balance is key — don\'t let work overshadow personal time this evening.',
-    'An intense but rewarding day. Trust the process on a long-term goal.',
-    'Travel or learning something new brings unexpected joy today.',
-    'Discipline pays off. A pending task finally moves forward.',
-    'Innovative thinking helps solve a nagging problem at work or home.',
-    'Intuition is heightened. Listen to your gut on a decision you\'ve been avoiding.',
-  ];
+  static const _readings = <String>[];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Daily Horoscope')),
+      appBar: AppBar(title: const Text('నేటి రాశి ఫలాలు')),
       body: Column(
         children: [
           SizedBox(
@@ -124,12 +111,14 @@ class _HoroscopeScreenState extends State<HoroscopeScreen> {
                           color: AppColors.textDark),
                     ),
                     const SizedBox(height: 4),
-                    const Text('Today\'s reading',
+                    const Text('నేటి రాశి భవిష్యత్తు',
                         style: TextStyle(
                             fontSize: 12, color: AppColors.textMuted)),
                     const SizedBox(height: 16),
                     Text(
-                      _readings[_selected],
+                      _selected < _readings.length 
+                          ? _readings[_selected] 
+                          : 'నేటి రాశి ఫలాలు మరియు జ్యోతిష్య అంచనాలు రూపొందించబడుతున్నాయి. దిన ఫలాలు ఉదయపు ఎడిషన్‌తో పాటు నిరంతరం నవీకరించబడతాయి.',
                       style: const TextStyle(
                           fontSize: 15, height: 1.6, color: Color(0xFF2E2E2E)),
                     ),

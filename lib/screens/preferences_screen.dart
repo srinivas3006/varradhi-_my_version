@@ -47,8 +47,15 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
     });
   }
 
-  void _savePreferences() {
-    AppState.instance.setPreferredCategories(_selected);
+  bool _isSaving = false;
+
+  Future<void> _savePreferences() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+
+    await AppState.instance.setPreferredCategories(_selected);
+    if (!mounted) return;
+
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -133,10 +140,16 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: Text(
-                    AppState.instance.language == 'Telugu' ? 'సేవ్ చేయండి' : 'Save Preferences',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  child: _isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(
+                          AppState.instance.language == 'Telugu' ? 'సేవ్ చేయండి' : 'Save Preferences',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                 ),
               ),
             ),

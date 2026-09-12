@@ -37,6 +37,15 @@ class ShareService {
       debugPrint('Error sharing article: $e');
     }
   }
+
+  /// Shares plain text or deep links via native share sheet.
+  static Future<void> shareText(String text, {String? subject}) async {
+    try {
+      await Share.share(text, subject: subject);
+    } catch (e) {
+      debugPrint('Error sharing text: $e');
+    }
+  }
 }
 
 /// The off-screen widget that represents exactly how the image should look when shared.

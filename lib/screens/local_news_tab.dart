@@ -1,6 +1,7 @@
 import 'dart:ui' as dart_ui;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import '../localization/app_translations.dart';
+import '../core/navigation/app_navigator.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../models/news_article.dart';
@@ -9,6 +10,8 @@ import '../services/location_service.dart';
 import 'news_detail_screen.dart';
 import '../models/ad_banner.dart';
 import '../widgets/ads/ad_banner_widget.dart';
+import 'ugc_feed_screen.dart';
+import 'location_selection_screen.dart';
 
 class LocalNewsTab extends StatefulWidget {
   const LocalNewsTab({super.key});
@@ -22,19 +25,32 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   bool _isLoading = true;
   bool _isDetectingLocation = false;
   final List<NewsArticle> _feed = [];
+  List<AdBanner> _localAds = [];
   String? _nextCursor;
   bool _hasMore = true;
-
-  // Mock list for Autocomplete (since no real Places API backend is connected)
-  static const List<String> _telanganaLocations = [
-    'Placeholder Location',
-  ];
 
   @override
   void initState() {
     super.initState();
     _location = AppState.instance.displayLocation;
+    _loadAds();
     _loadFeed();
+  }
+
+  Future<void> _loadAds() async {
+    try {
+      final res = await ApiService.instance.getAds(
+        zone: 'feed',
+        scope: 'local',
+        state: AppState.instance.stateName,
+        district: AppState.instance.district,
+        city: AppState.instance.city,
+        lang: 'te',
+      );
+      if (mounted && res.data != null && res.data!.isNotEmpty) {
+        setState(() => _localAds = res.data!);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFeed() async {
@@ -47,12 +63,27 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         state: AppState.instance.stateName,
         district: AppState.instance.district,
         city: AppState.instance.city,
+        subdistrict: AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null,
+        village: AppState.instance.village.isNotEmpty ? AppState.instance.village : null,
+        lang: 'te',
         latitude: AppState.instance.latitude,
         longitude: AppState.instance.longitude,
       );
 
       if (!mounted) return;
-      final newArticles = response.data ?? [];
+      var newArticles = response.data ?? [];
+      if (newArticles.isEmpty && _feed.isEmpty && AppState.instance.subdistrict.isNotEmpty) {
+        try {
+          final fallback = await ApiService.instance.getNewsFeed(
+            scope: 'local',
+            state: AppState.instance.stateName,
+            district: AppState.instance.district,
+            lang: 'te',
+          );
+          newArticles = fallback.data ?? [];
+        } catch (_) {}
+      }
+
       setState(() {
         _feed.addAll(newArticles);
         _nextCursor = response.nextCursor;
@@ -73,7 +104,10 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       _nextCursor = null;
       _hasMore = true;
     });
-    await _loadFeed();
+    await Future.wait([
+      _loadAds(),
+      _loadFeed(),
+    ]);
   }
 
   Future<void> _detectLocation() async {
@@ -81,10 +115,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
     try {
       final deviceLocation = await LocationService.detectLocation();
-      AppState.instance.setDeviceLocation(deviceLocation);
-      if (AppState.instance.isLoggedIn) {
-        await ApiService.instance.updateUserLocationDevice(deviceLocation);
-      }
+      await ApiService.instance.resolveAndSyncCanonicalLocation(deviceLocation);
       if (mounted) {
         setState(() {
           _location = AppState.instance.displayLocation;
@@ -109,123 +140,17 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     }
   }
 
-  void _changeLocation() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        tr('change_location'),
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 16),
-                      Autocomplete<String>(
-                        optionsBuilder: (TextEditingValue textEditingValue) {
-                          if (textEditingValue.text == '') {
-                            return const Iterable<String>.empty();
-                          }
-                          return _telanganaLocations.where((String option) {
-                            return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
-                          });
-                        },
-                        onSelected: (String selection) {
-                          setState(() => _location = selection);
-                          _refresh();
-                          Navigator.pop(context);
-                        },
-                        fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
-                          return TextField(
-                            controller: textEditingController,
-                            focusNode: focusNode,
-                            decoration: InputDecoration(
-                              hintText: 'Search city, district, mandal...',
-                              prefixIcon: const Icon(Icons.search, color: AppColors.textMuted),
-                              filled: true,
-                              fillColor: Theme.of(context).brightness == Brightness.dark 
-                                  ? AppColors.chipBgDark 
-                                  : AppColors.chipBg,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                            ),
-                          );
-                        },
-                        optionsViewBuilder: (context, onSelected, options) {
-                          return Align(
-                            alignment: Alignment.topLeft,
-                            child: Material(
-                              elevation: 4.0,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxHeight: 200, maxWidth: 300),
-                                child: ListView.builder(
-                                  padding: EdgeInsets.zero,
-                                  shrinkWrap: true,
-                                  itemCount: options.length,
-                                  itemBuilder: (BuildContext context, int index) {
-                                    final String option = options.elementAt(index);
-                                    return InkWell(
-                                      onTap: () => onSelected(option),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(16.0),
-                                        child: Text(option),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 24),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 0,
-                        ),
-                        onPressed: _isDetectingLocation ? null : () async {
-                          setModalState(() => _isDetectingLocation = true);
-                          final navigator = Navigator.of(context);
-                          await _detectLocation();
-                          if (mounted && navigator.canPop()) {
-                            setModalState(() => _isDetectingLocation = false);
-                          }
-                        },
-                        icon: _isDetectingLocation 
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                            : const Icon(Icons.my_location),
-                        label: Text(_isDetectingLocation ? 'Detecting...' : 'Detect my location via GPS', style: const TextStyle(fontWeight: FontWeight.w700)),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }
-        );
-      },
+  Future<void> _changeLocation() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LocationSelectionScreen()),
     );
+    if (changed == true && mounted) {
+      setState(() {
+        _location = AppState.instance.displayLocation;
+      });
+      _refresh();
+    }
   }
 
   Widget _buildTopAppBar() {
@@ -294,6 +219,38 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                   ),
                 ),
               ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: _isDetectingLocation
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                      )
+                    : const Icon(Icons.my_location_rounded, size: 20, color: AppColors.primary),
+                tooltip: 'Detect current location via GPS',
+                onPressed: _isDetectingLocation ? null : _detectLocation,
+              ),
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UgcFeedScreen())),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.record_voice_over_rounded, color: Colors.amber, size: 15),
+                      SizedBox(width: 4),
+                      Text('Citizen Feed', style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
               const Spacer(),
               IconButton(
                 icon: Icon(Icons.search_rounded, color: Theme.of(context).iconTheme.color),
@@ -308,155 +265,153 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     );
   }
 
-  Widget _buildLocalFeedSection() {
-    if (_feed.isEmpty && !_isLoading) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 100),
-          child: Text(tr('no_stories'), style: const TextStyle(color: Colors.grey)),
-        ),
-      );
-    }
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03);
-    final borderColor = isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05);
-
-    return ListView.separated(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      itemCount: _feed.length + (_hasMore ? 1 : 0),
-      separatorBuilder: (context, index) {
-        if ((index + 1) % 4 == 0) {
-          return Column(
-            children: [
-              const SizedBox(height: 16),
-              AdBannerWidget(
-                ad: AdBanner(
-                  id: 'mock_local_ad_$index',
-                  imageUrl: 'https://images.unsplash.com/photo-1593642532842-98d0fd5ebc1a?auto=format&fit=crop&q=80&w=800',
-                  destinationUrl: 'https://flutter.dev',
-                  adType: 'banner',
-                  placementZone: 'feed',
-                  targetScope: 'local',
-                  displayFrequency: 1,
-                  ctr: 0.0,
-                ),
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 80),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
               ),
-              const SizedBox(height: 16),
-            ],
-          );
-        }
-        return const SizedBox(height: 16);
-      },
-      itemBuilder: (context, index) {
-        if (index == _feed.length) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: CircularProgressIndicator(color: AppColors.primary),
+              child: const Icon(Icons.location_off_rounded, size: 34, color: AppColors.primary),
             ),
-          );
-        }
-
-        final article = _feed[index];
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)));
-          },
-          child: Row(
-            children: [
-              Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: cardColor,
-                  border: Border.all(color: borderColor),
-                  image: article.imageUrl.isNotEmpty
-                      ? DecorationImage(
-                          image: NetworkImage(article.imageUrl),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
+            const SizedBox(height: 16),
+            const Text(
+              'మీ ప్రాంతానికి స్థానిక వార్తలు అందుబాటులో లేవు',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'No local news available for your area.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildArticleCard(NewsArticle article, Color cardColor, Color borderColor) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        AppNavigator.pushSafe(
+          context,
+          MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)),
+        );
+      },
+      child: Row(
+        children: [
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: cardColor,
+              border: Border.all(color: borderColor),
+              image: article.imageUrl.isNotEmpty
+                  ? DecorationImage(
+                      image: CachedNetworkImageProvider(
+                        article.imageUrl,
+                        maxWidth: 300,
+                        maxHeight: 300,
+                      ),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    article.category.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  article.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    height: 1.3,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        article.category.toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.primary,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
+                    Icon(Icons.access_time_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
+                    const SizedBox(width: 4),
                     Text(
-                      article.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        height: 1.3,
-                        letterSpacing: -0.3,
+                      article.timeAgo,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).textTheme.bodySmall?.color,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(Icons.access_time_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
-                        const SizedBox(width: 4),
-                        Text(
-                          article.timeAgo,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Text('•', style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
-                        ),
-                        Icon(Icons.favorite_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${article.likes}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).textTheme.bodySmall?.color,
-                          ),
-                        ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text('•', style: TextStyle(fontSize: 11, color: Theme.of(context).textTheme.bodySmall?.color)),
+                    ),
+                    Icon(Icons.favorite_rounded, size: 12, color: Theme.of(context).textTheme.bodySmall?.color),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${article.likes}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03);
+    final borderColor = isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05);
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
@@ -473,13 +428,61 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                       }
                       return false;
                     },
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.only(
-                        top: MediaQuery.of(context).padding.top + 70, // Space for floating app bar
-                        bottom: 120, // space for floating bottom nav
-                      ),
-                      child: _buildLocalFeedSection(),
-                    ),
+                    child: _feed.isEmpty && !_isLoading
+                        ? SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: EdgeInsets.only(
+                              top: MediaQuery.of(context).padding.top + 70,
+                              bottom: 120,
+                            ),
+                            child: _buildEmptyState(),
+                          )
+                        : CustomScrollView(
+                            slivers: [
+                              SliverPadding(
+                                padding: EdgeInsets.only(
+                                  top: MediaQuery.of(context).padding.top + 70,
+                                  left: 16,
+                                  right: 16,
+                                  bottom: 120,
+                                ),
+                                sliver: SliverList.separated(
+                                  itemCount: _feed.length + (_hasMore ? 1 : 0),
+                                  separatorBuilder: (context, index) {
+                                    if ((index + 1) % 4 == 0) {
+                                      final adSlotIndex = ((index + 1) ~/ 4) - 1;
+                                      final ad = _localAds.isNotEmpty
+                                          ? _localAds[adSlotIndex % _localAds.length]
+                                          : null;
+                                      if (ad != null) {
+                                        return Column(
+                                          children: [
+                                            const SizedBox(height: 16),
+                                            AdBannerWidget(ad: ad),
+                                            const SizedBox(height: 16),
+                                          ],
+                                        );
+                                      }
+                                    }
+                                    return const SizedBox(height: 16);
+                                  },
+                                  itemBuilder: (context, index) {
+                                    if (index == _feed.length) {
+                                      return const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(16.0),
+                                          child: CircularProgressIndicator(color: AppColors.primary),
+                                        ),
+                                      );
+                                    }
+
+                                    final article = _feed[index];
+                                    return _buildArticleCard(article, cardColor, borderColor);
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
                   ),
                 ),
           

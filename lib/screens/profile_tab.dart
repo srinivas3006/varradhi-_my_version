@@ -9,12 +9,18 @@ import 'reporter_intro_screen.dart';
 import '../features/admin/presentation/screens/admin_ugc_screen.dart';
 import 'bookmarks_screen.dart';
 import 'preferences_screen.dart';
+import 'settings_screen.dart';
 import 'about_screen.dart';
 import 'privacy_policy_screen.dart';
+import 'terms_screen.dart';
 import 'notifications_screen.dart';
 import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
+import 'blogs_screen.dart';
+import 'ugc_feed_screen.dart';
+import 'device_sessions_screen.dart';
+import 'video_feed_screen.dart';
 import '../localization/app_translations.dart';
 
 class ProfileTab extends StatefulWidget {
@@ -126,11 +132,13 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 const SizedBox(height: 16),
 
                 // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
-                if (state.isLoggedIn && !state.isReporter) ...[
+                if (state.isLoggedIn && !state.isReporter && !state.isAdmin) ...[
                   _buildBecomeReporterCard(),
                   const SizedBox(height: 16),
-                ] else if (state.isLoggedIn && state.isReporter) ...[
+                ] else if (state.isLoggedIn && state.isReporter && !state.isAdmin) ...[
                   _buildReporterDashboardCard(state, isDark),
+                  const SizedBox(height: 16),
+                  _buildRewardsCard(state, isDark),
                   const SizedBox(height: 16),
                 ],
 
@@ -154,6 +162,33 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                   ),
                   _buildListTile(
                     isDark: isDark,
+                    icon: Icons.article_outlined,
+                    title: 'Blogs & Editorials',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const BlogsScreen()));
+                    },
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.record_voice_over_outlined,
+                    title: 'Citizen Journalism Feed',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const UgcFeedScreen()));
+                    },
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.ondemand_video_rounded,
+                    title: 'Videos & Shorts',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const VideoFeedScreen()));
+                    },
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
                     icon: Icons.campaign_outlined,
                     title: tr('advertise_with_us'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
@@ -161,14 +196,14 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const AdBookingScreen()));
                     },
                   ),
-                  if (state.isLoggedIn && state.isReporter)
+                  if (state.isLoggedIn)
                     _buildListTile(
                       isDark: isDark,
-                      icon: Icons.account_balance_wallet_rounded,
-                      title: tr('rewards_earnings'),
+                      icon: Icons.devices_rounded,
+                      title: 'Active Device Sessions',
                       trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const ReporterWalletScreen()));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceSessionsScreen()));
                       },
                     ),
                 ]),
@@ -177,20 +212,19 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
                 _buildSectionTitle('PREFERENCES', isDark),
                 _buildSettingsGroup(isDark, [
-                  // Language Tile
-                  _buildListTile(
-                    isDark: isDark,
-                    icon: Icons.language_rounded,
-                    title: tr('language'),
-                    trailing: Text(state.language, style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                    onTap: () => _showLanguagePicker(state, isDark),
-                  ),
                   _buildListTile(
                     isDark: isDark,
                     icon: Icons.tune,
                     title: tr('news_preferences'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen())),
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.settings_outlined,
+                    title: 'App Settings',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
                   ),
                   // Push Notifications Toggle
                   // Premium Notifications Tile
@@ -262,6 +296,13 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     title: tr('privacy_policy'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen())),
+                  ),
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.description_outlined,
+                    title: 'Terms & Conditions',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsScreen())),
                   ),
                 ]),
 
@@ -630,11 +671,11 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
   }
 
   Widget _buildSettingsGroup(bool isDark, List<Widget> tiles) {
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
+    return Material(
+      color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05)),
+        side: BorderSide(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05)),
       ),
       child: Column(
         children: tiles,
@@ -799,105 +840,6 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
             },
           );
         },
-      );
+      ).whenComplete(() => nameController.dispose());
     }
-  
-    void _showLanguagePicker(AppState state, bool isDark) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Drag Handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(top: 8, bottom: 20),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Text(
-                'Select Language',
-                style: TextStyle(
-                  color: isDark ? Colors.white : Colors.black87,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _buildLangOption(state, isDark, 'English', 'en'),
-              const SizedBox(height: 12),
-              _buildLangOption(state, isDark, 'Telugu', 'te'),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLangOption(AppState state, bool isDark, String lang, String code) {
-    final isSelected = state.language == lang;
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        state.setLanguage(lang);
-        Navigator.of(context).pop();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          color: isSelected 
-              ? Colors.redAccent.withValues(alpha: 0.1) 
-              : (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02)),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected 
-                ? Colors.redAccent.withValues(alpha: 0.3)
-                : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Text(
-                  lang,
-                  style: TextStyle(
-                    color: isSelected ? Colors.redAccent : (isDark ? Colors.white : Colors.black87),
-                    fontSize: 16,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  ),
-                ),
-                if (code == 'te') ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '(తెలుగు)',
-                    style: TextStyle(
-                      color: isSelected ? Colors.redAccent.withValues(alpha: 0.8) : Colors.grey,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            if (isSelected)
-              const Icon(Icons.check_circle_rounded, color: Colors.redAccent, size: 22)
-            else
-              Icon(Icons.circle_outlined, color: isDark ? Colors.white24 : Colors.black26, size: 22),
-          ],
-        ),
-      ),
-    );
-  }
 }

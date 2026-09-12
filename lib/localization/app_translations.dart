@@ -223,6 +223,18 @@ class AppTranslations {
       'cat_spiritual': 'ఆధ్యాత్మికం',
       'cat_videos': 'వీడియోలు',
       'cat_photos': 'ఫోటోలు',
+      'read_more': 'ఇంకా చదవండి',
+      'all': 'అన్నీ',
+      'no_stories_available': 'కథనాలు అందుబాటులో లేవు',
+      'no_local_stories': 'స్థానిక కథనాలు ఏవీ కనుగొనబడలేదు',
+      'change_location_btn': 'ప్రాంతాన్ని మార్చండి',
+      'refresh': 'తాజాకరించు',
+      'daily_posters': 'రోజువారీ పోస్టర్లు & శుభాకాంక్షలు',
+      'for_you_section': 'మీ కోసం',
+      'horoscope_title': 'నేటి రాశి ఫలాలు',
+      'today_reading': 'నేటి రాశి భవిష్యత్తు',
+      'cat_general': 'జనరల్',
+      'cat_ai': 'కృత్రిమ మేధస్సు (AI)',
     },
     'Tamil': {
       'choose_language': 'உங்கள் மொழியைத் தேர்ந்தெடுக்கவும்',
@@ -293,11 +305,9 @@ class AppTranslations {
     },
   };
 
-  /// Returns the translated string for [key] in the currently active
-  /// language, falling back to English, then to the key itself.
+  /// Returns the translated string strictly in Telugu.
   static String t(String key) {
-    final lang = AppState.instance.language;
-    return _values[lang]?[key] ?? _values['English']?[key] ?? key;
+    return _values['Telugu']?[key] ?? _values['English']?[key] ?? key;
   }
 }
 
@@ -327,6 +337,10 @@ String categoryLabel(String category) {
     'Spiritual': 'cat_spiritual',
     'Videos': 'cat_videos',
     'Photos': 'cat_photos',
+    'General': 'cat_general',
+    'general': 'cat_general',
+    'ai': 'cat_ai',
+    'AI': 'cat_ai',
   };
   final translationKey = keyMap[category];
   return translationKey != null ? tr(translationKey) : category;

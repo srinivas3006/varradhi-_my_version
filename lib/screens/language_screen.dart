@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
-import 'spotlight_screen.dart';
+import 'home_screen.dart';
 
 class LanguageScreen extends StatefulWidget {
   const LanguageScreen({super.key});
@@ -232,7 +232,7 @@ class _LanguageScreenState extends State<LanguageScreen> with SingleTickerProvid
                             Navigator.of(context).pushReplacement(
                               PageRouteBuilder(
                                 transitionDuration: const Duration(milliseconds: 500),
-                                pageBuilder: (_, __, ___) => const SpotlightScreen(),
+                                pageBuilder: (_, __, ___) => const HomeScreen(),
                                 transitionsBuilder: (_, anim, __, child) =>
                                     FadeTransition(opacity: anim, child: child),
                               ),
@@ -254,7 +254,7 @@ class _LanguageScreenState extends State<LanguageScreen> with SingleTickerProvid
                             Navigator.of(context).pushReplacement(
                               PageRouteBuilder(
                                 transitionDuration: const Duration(milliseconds: 500),
-                                pageBuilder: (_, __, ___) => const SpotlightScreen(),
+                                pageBuilder: (_, __, ___) => const HomeScreen(),
                                 transitionsBuilder: (_, anim, __, child) =>
                                     FadeTransition(opacity: anim, child: child),
                               ),

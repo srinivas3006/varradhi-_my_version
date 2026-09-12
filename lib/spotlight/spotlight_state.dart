@@ -8,6 +8,11 @@ class SpotlightState {
   final bool isLocalNews;
   final bool showOverlays;
   final bool isFetching;
+  final String? errorMessage;
+
+  final String? selectedCategory;
+  final String locationName;
+  final int generation;
 
   const SpotlightState({
     required this.feed,
@@ -17,17 +22,25 @@ class SpotlightState {
     this.isLocalNews = false,
     this.showOverlays = true,
     this.isFetching = false,
+    this.errorMessage,
+    this.selectedCategory,
+    this.locationName = '',
+    this.generation = 0,
   });
 
-  factory SpotlightState.initial() {
-    return const SpotlightState(
-      feed: [],
+  factory SpotlightState.initial({String? category, String? locationName}) {
+    return SpotlightState(
+      feed: const [],
       isLoading: true,
       hasMore: true,
       nextCursor: null,
       isLocalNews: false,
       showOverlays: true,
       isFetching: false,
+      errorMessage: null,
+      selectedCategory: category,
+      locationName: locationName ?? '',
+      generation: 0,
     );
   }
 
@@ -39,6 +52,12 @@ class SpotlightState {
     bool? isLocalNews,
     bool? showOverlays,
     bool? isFetching,
+    String? errorMessage,
+    bool clearError = false,
+    String? selectedCategory,
+    bool clearCategory = false,
+    String? locationName,
+    int? generation,
   }) {
     return SpotlightState(
       feed: feed ?? this.feed,
@@ -48,6 +67,10 @@ class SpotlightState {
       isLocalNews: isLocalNews ?? this.isLocalNews,
       showOverlays: showOverlays ?? this.showOverlays,
       isFetching: isFetching ?? this.isFetching,
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      selectedCategory: clearCategory ? null : (selectedCategory ?? this.selectedCategory),
+      locationName: locationName ?? this.locationName,
+      generation: generation ?? this.generation,
     );
   }
 }

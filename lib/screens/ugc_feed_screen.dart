@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
-import '../services/api_service.dart';
+import '../repositories/ugc_repository.dart';
 import '../theme/app_theme.dart';
+import 'news_detail_screen.dart';
 
 class UgcFeedScreen extends StatefulWidget {
   const UgcFeedScreen({super.key});
@@ -13,7 +15,8 @@ class UgcFeedScreen extends StatefulWidget {
 class _UgcFeedScreenState extends State<UgcFeedScreen> {
   final List<NewsArticle> _reports = [];
   bool _isLoading = false;
-  int _page = 1;
+  String? _errorMessage;
+  String? _cursor;
   bool _hasMore = true;
   final ScrollController _scrollController = ScrollController();
 
@@ -30,38 +33,40 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
 
   Future<void> _loadMore() async {
     if (_isLoading || !_hasMore) return;
-    setState(() => _isLoading = true);
-
-    final response = await ApiService.instance.getUgcFeed(page: _page);
-
-    if (!mounted) return;
     setState(() {
-      final newArticles = response.map((u) => NewsArticle(
-        id: u.id,
-        title: u.title,
-        summary: u.summary,
-        body: u.summary,
-        imageUrl: u.thumbnailUrl,
-        imageUrls: [u.thumbnailUrl],
-        source: u.source,
-        category: 'UGC',
-        publishedAt: u.createdAt,
-        likes: 0,
-        comments: 0,
-        shares: 0,
-        viewCount: 0,
-        readTimeMinutes: 1,
-      )).toList();
-      
-      _reports.addAll(newArticles);
-      if (newArticles.isNotEmpty) {
-        _page++;
-      } else {
-        _page = 1;
-      }
-      _hasMore = true;
-      _isLoading = false;
+      _isLoading = true;
+      _errorMessage = null;
     });
+
+    try {
+      final response = await UgcRepository.instance.getUgcFeed(cursor: _cursor, pageSize: 20);
+
+      if (!mounted) return;
+      setState(() {
+        _reports.addAll(response.data ?? []);
+        _isLoading = false;
+        _cursor = response.nextCursor;
+        _hasMore = response.nextCursor != null && response.nextCursor!.isNotEmpty;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          if (_reports.isEmpty) {
+            _errorMessage = 'రిపోర్ట్‌లను లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _reports.clear();
+      _cursor = null;
+      _hasMore = true;
+    });
+    await _loadMore();
   }
 
   @override
@@ -80,26 +85,76 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
         foregroundColor: AppColors.textDark,
         elevation: 0.5,
       ),
-      body: _reports.isEmpty && _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.separated(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              itemCount: _reports.length + (_hasMore ? 1 : 0),
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                if (index == _reports.length) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
-                final report = _reports[index];
-                return _UgcReportCard(report: report);
-              },
-            ),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        color: AppColors.primary,
+        child: _reports.isEmpty && _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _reports.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+                      Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _errorMessage != null ? Icons.error_outline_rounded : Icons.dynamic_feed_rounded,
+                              size: 56,
+                              color: _errorMessage != null ? AppColors.error : AppColors.textMuted.withValues(alpha: 0.4),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _errorMessage != null ? 'కథనాలు లోడ్ చేయడం విఫలమైంది' : 'No citizen reports yet',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _errorMessage ?? 'Pull down to check for new updates.',
+                              style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                            ),
+                            if (_errorMessage != null) ...[
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                onPressed: _refresh,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('మళ్ళీ ప్రయత్నించండి'),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    itemCount: _reports.length + (_hasMore ? 1 : 0),
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      if (index == _reports.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
+                      final report = _reports[index];
+                      return _UgcReportCard(report: report);
+                    },
+                  ),
+      ),
     );
   }
 }
@@ -111,85 +166,115 @@ class _UgcReportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: AppColors.primary.withValues(alpha: 0.1),
-                child: const Icon(Icons.person, color: AppColors.primary),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final textColor = isDark ? Colors.white : AppColors.textDark;
+    final mutedColor = isDark ? Colors.white60 : AppColors.textMuted;
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => NewsDetailScreen(article: report, slug: report.slug),
+          ),
+        );
+      },
+      child: Container(
+        color: cardColor,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                  child: const Icon(Icons.person, color: AppColors.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        report.source,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: textColor,
+                        ),
+                      ),
+                      Text(
+                        'Local Reporter • ${report.timeAgo}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: mutedColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              report.title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+                height: 1.3,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      report.source,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                        color: AppColors.textDark,
-                      ),
-                    ),
-                    const Text(
-                      'Local Reporter • Just now',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
+            ),
+            if (report.body.isNotEmpty && report.body != report.title) ...[
+              const SizedBox(height: 8),
+              Text(
+                report.body,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : AppColors.textDark,
+                  height: 1.4,
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.more_horiz),
-                onPressed: () {},
-                color: AppColors.textMuted,
+            ],
+            if (report.imageUrl.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: CachedNetworkImage(
+                  imageUrl: report.imageUrl,
+                  width: double.infinity,
+                  height: 200,
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) => Container(
+                    height: 200,
+                    color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                    child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                  ),
+                  errorWidget: (context, url, error) => Container(
+                    height: 140,
+                    color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                    child: Center(
+                      child: Icon(Icons.broken_image_rounded, size: 36, color: mutedColor),
+                    ),
+                  ),
+                ),
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            report.title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textDark,
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _ActionItem(icon: Icons.thumb_up_alt_outlined, count: report.likes.toString()),
+                _ActionItem(icon: Icons.comment_outlined, count: report.comments.toString()),
+                _ActionItem(icon: Icons.share_outlined, count: report.shares.toString()),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            report.body,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14, color: AppColors.textDark),
-          ),
-          const SizedBox(height: 12),
-          if (report.imageUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                report.imageUrl,
-                width: double.infinity,
-                height: 200,
-                fit: BoxFit.cover,
-              ),
-            ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _ActionItem(icon: Icons.thumb_up_alt_outlined, count: report.likes.toString()),
-              _ActionItem(icon: Icons.comment_outlined, count: report.comments.toString()),
-              _ActionItem(icon: Icons.share_outlined, count: report.shares.toString()),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1,8 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
-import 'spotlight_screen.dart';
-import 'language_screen.dart';
+import 'home_screen.dart';
+import '../services/api_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -21,54 +22,72 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-    // 1200ms allows the elastic animation to settle perfectly before the 1.6s route
+    // 600ms allows the elastic animation to settle smoothly without blocking first useful frame
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 600),
     );
 
     // Premium elastic pop for scale
     _scaleAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: Curves.elasticOut, 
+        curve: Curves.easeOutCubic,
       ),
     );
 
-    // Quick, smooth fade in during the first 40% of the animation
+    // Quick, smooth fade in
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
       ),
     );
 
     // Subtle slide up effect for dynamic entry
-    _slideAnimation = Tween<double>(begin: 30.0, end: 0.0).animate(
+    _slideAnimation = Tween<double>(begin: 24.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
+        curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),
       ),
     );
 
-    _controller.forward();
+    _bootstrapApp();
+  }
 
-    Future.delayed(const Duration(milliseconds: 1600), () {
-      if (!mounted) return;
-      
-      final nextScreen = AppState.instance.hasOnboarded 
-          ? const SpotlightScreen() 
-          : const LanguageScreen();
-          
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 500),
-          pageBuilder: (_, __, ___) => nextScreen,
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
-        ),
+  Future<void> _bootstrapApp() async {
+    final state = AppState.instance;
+
+    // Fire non-critical background bootstrap tasks asynchronously without stalling cold boot
+    unawaited(ApiService.instance.checkHealth().catchError((_) => false));
+    if (!state.isLoggedIn) {
+      unawaited(
+        ApiService.instance
+            .registerGuestDevice(
+              deviceId: state.deviceId,
+              fcmToken: state.fcmToken,
+            )
+            .catchError((_) => null),
       );
-    });
+    } else {
+      unawaited(state.refreshRolesFromServer().catchError((_) => null));
+    }
+
+    // Await smooth animation completion before presenting HomeScreen
+    await _controller.forward();
+
+    if (!mounted) return;
+
+    const nextScreen = HomeScreen(openSpotlightOnStart: true);
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (_, __, ___) => nextScreen,
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
   }
 
   @override

@@ -16,6 +16,7 @@ class AppColors {
   static const textLight = Color(0xFFF8FAFC); // crisp off-white
   static const cardDarkSlate = Color(0xFF1E293B);
   static const chipBgDark = Color(0xFF334155);
+  static const error = Color(0xFFDC2626); // Alert red
 }
 
 class AppTheme {
@@ -23,7 +24,7 @@ class AppTheme {
   /// Poppins only covers Latin glyphs, so Hindi/Telugu/Tamil/etc. need a
   /// Noto Sans variant that actually has glyphs for that script — otherwise
   /// text renders with a mismatched fallback font or tofu boxes.
-  static ThemeData light([String language = 'English']) {
+  static ThemeData light([String language = 'Telugu']) {
     final base = ThemeData.light();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
@@ -47,7 +48,7 @@ class AppTheme {
     );
   }
 
-  static ThemeData dark([String language = 'English']) {
+  static ThemeData dark([String language = 'Telugu']) {
     final base = ThemeData.dark();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
@@ -80,24 +81,11 @@ class AppTheme {
 
   static TextTheme _textThemeFor(String language, ThemeData base) {
     switch (language) {
-      case 'Hindi':
-      case 'Marathi':
-        return GoogleFonts.notoSansDevanagariTextTheme(base.textTheme);
-      case 'Telugu':
-        return GoogleFonts.notoSansTeluguTextTheme(base.textTheme);
-      case 'Tamil':
-        return GoogleFonts.notoSansTamilTextTheme(base.textTheme);
-      case 'Kannada':
-        return GoogleFonts.notoSansKannadaTextTheme(base.textTheme);
-      case 'Bengali':
-        return GoogleFonts.notoSansBengaliTextTheme(base.textTheme);
-      case 'Malayalam':
-        return GoogleFonts.notoSansMalayalamTextTheme(base.textTheme);
-      case 'Gujarati':
-        return GoogleFonts.notoSansGujaratiTextTheme(base.textTheme);
       case 'English':
-      default:
         return GoogleFonts.poppinsTextTheme(base.textTheme);
+      case 'Telugu':
+      default:
+        return GoogleFonts.notoSansTeluguTextTheme(base.textTheme);
     }
   }
 }
