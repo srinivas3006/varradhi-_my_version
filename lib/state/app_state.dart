@@ -48,7 +48,8 @@ class AppState extends ChangeNotifier {
   static final AppState instance = AppState._internal();
 
   String language = 'Telugu';
-  String get contentLanguage => 'te';
+  String get contentLanguage =>
+      language.toLowerCase().startsWith('en') ? 'en' : 'te';
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -178,8 +179,7 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
-    language = 'Telugu';
-    await prefs.setString('language', 'Telugu');
+    language = prefs.getString('language') ?? 'Telugu';
     stateName = prefs.getString('stateName') ?? stateName;
     district = prefs.getString('district') ?? district;
     city = prefs.getString('city') ?? city;
@@ -377,9 +377,10 @@ class AppState extends ChangeNotifier {
       if (me['phone'] != null) userPhone = me['phone'].toString();
       if (me['id'] != null) userId = me['id'].toString();
       if (me['is_reporter'] == true) isReporter = true;
-      if (me['tokens'] != null)
+      if (me['tokens'] != null) {
         reporterTokens =
             int.tryParse(me['tokens'].toString()) ?? reporterTokens;
+      }
       notifyListeners();
       await _persist();
     } catch (e) {
@@ -402,7 +403,9 @@ class AppState extends ChangeNotifier {
   static bool _hasAdminSignal(Map<String, dynamic> me) {
     if (me['is_admin'] == true ||
         me['is_staff'] == true ||
-        me['is_superuser'] == true) return true;
+        me['is_superuser'] == true) {
+      return true;
+    }
     const keywords = ['admin', 'staff', 'superuser'];
     return _matchesKeyword(me['role'], keywords) ||
         _matchesKeyword(me['roles'], keywords) ||
@@ -422,9 +425,12 @@ class AppState extends ChangeNotifier {
   /// Marks onboarding (language + location) as done. Login stays optional/
   /// skippable on every future launch, matching Way2News's "no login
   /// required" behavior — only language+location gate the splash skip.
-  void completeOnboarding([String? _]) {
+  void completeOnboarding([String? selectedLanguage]) {
     hasOnboarded = true;
-    language = 'Telugu';
+    final normalizedLanguage = selectedLanguage?.trim();
+    if (normalizedLanguage != null && normalizedLanguage.isNotEmpty) {
+      language = normalizedLanguage;
+    }
     themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
@@ -436,12 +442,12 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  void setLanguage(String _) {
-    language = 'Telugu';
+  void setLanguage(String lang) {
+    language = lang;
     themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
-    _syncProfileToBackend(preferredLanguage: 'te');
+    _syncProfileToBackend(preferredLanguage: contentLanguage);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -599,6 +605,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleLike(String itemId) {
+    if (!isLoggedIn) return;
     if (likedItemIds.contains(itemId)) {
       likedItemIds.remove(itemId);
     } else {
@@ -609,6 +616,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleBookmark(String itemId) {
+    if (!isLoggedIn) return;
     if (bookmarkedItemIds.contains(itemId)) {
       bookmarkedItemIds.remove(itemId);
     } else {
@@ -729,6 +737,14 @@ class AppState extends ChangeNotifier {
     unawaited(NotificationService.instance.registerAsGuest());
   }
 
+  /// Permanently deletes user account from server and clears all local session data.
+  Future<bool> deleteAccount() async {
+    final success = await ApiService.instance.deleteAccount();
+    await _clearLocalSession();
+    unawaited(NotificationService.instance.registerAsGuest());
+    return success;
+  }
+
   Future<void> logoutAllDevices() async {
     final tokenToRevoke = await _clearLocalSession();
     if (tokenToRevoke != null && tokenToRevoke.isNotEmpty) {
@@ -761,8 +777,7 @@ class AppState extends ChangeNotifier {
     final newComment = Comment(
       id: 'c_${DateTime.now().millisecondsSinceEpoch}',
       username: isLoggedIn ? userName : 'Guest User',
-      avatarUrl:
-          'https://i.pravatar.cc/150?u=${(isLoggedIn ? userName : 'Guest User').hashCode}',
+      avatarUrl: profileImagePath ?? '',
       text: text,
       postedAt: DateTime.now(),
       likes: 0,
@@ -790,7 +805,7 @@ class AppState extends ChangeNotifier {
         comment.replies.add(Comment(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           username: userName.isNotEmpty ? userName : 'Guest User',
-          avatarUrl: 'https://i.pravatar.cc/150?u=${userName.hashCode}',
+          avatarUrl: profileImagePath ?? '',
           text: text,
           postedAt: DateTime.now(),
         ));

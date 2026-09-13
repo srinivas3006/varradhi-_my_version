@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/navigation/auth_guard.dart';
 import '../services/api_service.dart';
 
 enum Reaction { like, dislike, none }
@@ -8,8 +9,10 @@ class ReactionButtons extends StatefulWidget {
   final Reaction initialReaction;
   final int initialLikeCount;
   final int initialDislikeCount;
-  final Future<void> Function(String articleId, Reaction reaction)? onServerSync;
+  final Future<void> Function(String articleId, Reaction reaction)?
+      onServerSync;
   final void Function(Reaction newReaction, int likes, int dislikes)? onChanged;
+  final bool requireLogin;
 
   const ReactionButtons({
     super.key,
@@ -19,6 +22,7 @@ class ReactionButtons extends StatefulWidget {
     this.initialDislikeCount = 0,
     this.onServerSync,
     this.onChanged,
+    this.requireLogin = true,
   });
 
   @override
@@ -53,6 +57,11 @@ class _ReactionButtonsState extends State<ReactionButtons> {
 
   Future<void> _onTap(Reaction tapped) async {
     if (_syncing) return;
+    if (widget.requireLogin) {
+      final allowed = await ensureAuth(context);
+      if (!allowed) return;
+    }
+
     final prev = _reaction;
     final next = prev == tapped ? Reaction.none : tapped;
 
@@ -68,7 +77,8 @@ class _ReactionButtonsState extends State<ReactionButtons> {
         await widget.onServerSync!(widget.articleId, _reaction);
       } else {
         // fallback: try ApiService default endpoint
-        await ApiService.instance.postArticleReaction(widget.articleId, _reaction);
+        await ApiService.instance
+            .postArticleReaction(widget.articleId, _reaction);
       }
     } catch (e) {
       // rollback
@@ -76,7 +86,8 @@ class _ReactionButtonsState extends State<ReactionButtons> {
         // naive rollback to initial values when server fails
         _reaction = prev;
         _likes = widget.initialLikeCount + (prev == Reaction.like ? 1 : 0);
-        _dislikes = widget.initialDislikeCount + (prev == Reaction.dislike ? 1 : 0);
+        _dislikes =
+            widget.initialDislikeCount + (prev == Reaction.dislike ? 1 : 0);
       });
       widget.onChanged?.call(_reaction, _likes, _dislikes);
     } finally {
@@ -98,17 +109,21 @@ class _ReactionButtonsState extends State<ReactionButtons> {
             size: 20,
           ),
         ),
-        Text('$_likes', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        Text('$_likes',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         const SizedBox(width: 8),
         IconButton(
           onPressed: _syncing ? null : () => _onTap(Reaction.dislike),
           icon: Icon(
-            _reaction == Reaction.dislike ? Icons.thumb_down : Icons.thumb_down_outlined,
+            _reaction == Reaction.dislike
+                ? Icons.thumb_down
+                : Icons.thumb_down_outlined,
             color: _reaction == Reaction.dislike ? color : null,
             size: 20,
           ),
         ),
-        Text('$_dislikes', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        Text('$_dislikes',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
       ],
     );
   }

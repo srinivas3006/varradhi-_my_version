@@ -33,19 +33,19 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
     final confirmPassword = _confirmPasswordController.text;
 
     if (name.isEmpty) {
-      setState(() => _error = 'Enter your full name.');
+      setState(() => _error = 'మీ పూర్తి పేరు నమోదు చేయండి.');
       return;
     }
     if (email.isEmpty || !email.contains('@')) {
-      setState(() => _error = 'Enter a valid email address.');
+      setState(() => _error = 'చెల్లుబాటు అయ్యే ఇమెయిల్ చిరునామా నమోదు చేయండి.');
       return;
     }
     if (password.length < 8) {
-      setState(() => _error = 'Password must be at least 8 characters.');
+      setState(() => _error = 'పాస్‌వర్డ్ కనీసం 8 అక్షరాలు ఉండాలి.');
       return;
     }
     if (password != confirmPassword) {
-      setState(() => _error = 'Passwords do not match.');
+      setState(() => _error = 'పాస్‌వర్డ్‌లు సరిపోలడం లేదు.');
       return;
     }
 
@@ -55,20 +55,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
     });
 
     try {
-      String langCode = 'en';
-      switch (AppState.instance.language) {
-        case 'Telugu':
-          langCode = 'te';
-          break;
-        case 'Hindi':
-          langCode = 'hi';
-          break;
-        case 'Tamil':
-          langCode = 'ta';
-          break;
-        default:
-          langCode = 'en';
-      }
+      String langCode = 'te';
 
       final data = await ApiService.instance.register({
         'email': email,
@@ -78,7 +65,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         'preferred_language': langCode,
         'device_id': AppState.instance.deviceId,
         'device_name': 'Mobile Device',
-        'device_type': 'android',
+        'device_type': ApiService.deviceType,
         'fcm_token': AppState.instance.fcmToken ?? 'device-fcm-token',
       });
 
@@ -121,10 +108,10 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'Registration failed. Please try again.';
+        String errorMsg = 'రిజిస్ట్రేషన్ విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException) {
           if (e.response?.statusCode == 429) {
-            errorMsg = 'Too many attempts. Please wait and try again.';
+            errorMsg = 'చాలా ఎక్కువ ప్రయత్నాలు జరిగాయి. దయచేసి కాసేపు ఆగి మళ్లీ ప్రయత్నించండి.';
           } else if (e.response?.data is Map) {
             final resp = e.response!.data as Map;
             if (resp['errors'] is Map) {
@@ -162,7 +149,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('Create Account')),
+      appBar: AppBar(title: const Text('ఖాతాను సృష్టించండి')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
@@ -170,7 +157,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Create your account',
+                'మీ ఖాతాను సృష్టించండి',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -179,7 +166,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Sign up to customize news topics, save stories, and engage.',
+                'వార్తలను అనుకూలీకరించడానికి, కథనాలను సేవ్ చేసుకోవడానికి సైన్ అప్ చేయండి.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -187,7 +174,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                 controller: _nameController,
                 autofillHints: const [AutofillHints.name],
                 decoration: InputDecoration(
-                  labelText: 'Full name',
+                  labelText: 'పూర్తి పేరు',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -202,7 +189,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                 keyboardType: TextInputType.emailAddress,
                 autofillHints: const [AutofillHints.email],
                 decoration: InputDecoration(
-                  labelText: 'Email address',
+                  labelText: 'ఇమెయిల్ చిరునామా',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -217,7 +204,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                 obscureText: _obscurePassword,
                 autofillHints: const [AutofillHints.newPassword],
                 decoration: InputDecoration(
-                  labelText: 'Password (min 8 characters)',
+                  labelText: 'పాస్‌వర్డ్ (కనీసం 8 అక్షరాలు)',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -238,7 +225,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                 controller: _confirmPasswordController,
                 obscureText: _obscureConfirmPassword,
                 decoration: InputDecoration(
-                  labelText: 'Confirm password',
+                  labelText: 'పాస్‌వర్డ్ నిర్ధారించండి',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -286,7 +273,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                           ),
                         )
                       : const Text(
-                          'Create Account',
+                          'ఖాతాను సృష్టించండి',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -300,15 +287,14 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text.rich(
                     TextSpan(
-                      text: 'Already have an account? ',
+                      text: 'ఇప్పటికే ఖాతా ఉందా? ',
                       style: TextStyle(color: AppColors.textMuted),
                       children: [
                         TextSpan(
-                          text: 'Log In',
+                          text: 'లాగిన్',
                           style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                          ),
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w700),
                         ),
                       ],
                     ),

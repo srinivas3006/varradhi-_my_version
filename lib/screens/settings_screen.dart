@@ -157,8 +157,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ListTile(
                       leading: const Icon(Icons.language_rounded, color: AppColors.primary),
                       title: Text(tr('app_language'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
-                      subtitle: Text(tr('telugu'), style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
-                      trailing: const Icon(Icons.check_circle_rounded, color: AppColors.primary),
+                      subtitle: Text(state.language, style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                      onTap: () => _showLanguageDialog(context, state, isDark),
                     ),
                     const Divider(height: 1),
 
@@ -266,16 +267,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 20),
 
-              // 4. Session & Logout
+              // 4. Session & Logout & Delete Account
               if (state.isLoggedIn) ...[
                 _buildCard(
                   isDark,
-                  child: ListTile(
-                    leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                    title: Text(tr('log_out'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                    onTap: () {
-                      _showLogoutDialog(context, state, isDark);
-                    },
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+                        title: Text(tr('log_out'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                        onTap: () {
+                          _showLogoutDialog(context, state, isDark);
+                        },
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                        title: Text(
+                          state.language == 'Telugu' ? 'ఖాతా శాశ్వతంగా తొలగించండి' : 'Delete Account Permanently',
+                          style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.red),
+                        ),
+                        subtitle: Text(
+                          state.language == 'Telugu' ? 'డేటా మరియు ప్రొఫైల్ తొలగించబడుతుంది' : 'Erase all personal data and profile',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                        onTap: () {
+                          _showDeleteAccountDialog(context, state, isDark);
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 24),
@@ -344,9 +364,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text(tr('edit_profile_name')),
         content: TextField(
           controller: _nameController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: tr('full_name_hint'),
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -391,6 +411,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
               state.logout();
             },
             child: Text(tr('log_out')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLanguageDialog(BuildContext context, AppState state, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(tr('app_language')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('తెలుగు (Telugu)'),
+              trailing: state.language == 'Telugu'
+                  ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+                  : null,
+              onTap: () {
+                state.setLanguage('Telugu');
+                Navigator.pop(ctx);
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              title: const Text('English'),
+              trailing: state.language == 'English'
+                  ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+                  : null,
+              onTap: () {
+                state.setLanguage('English');
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(BuildContext context, AppState state, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          state.language == 'Telugu' ? 'ఖాతా తొలగించాలా?' : 'Delete Account?',
+          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          state.language == 'Telugu'
+              ? 'మీ ఖాతా, బుక్‌మార్క్‌లు, పోస్ట్‌లు మరియు ప్రొఫైల్ వివరాలు శాశ్వతంగా తొలగించబడతాయి. ఈ చర్యను రద్దు చేయడం సాధ్యం కాదు.'
+              : 'Your account, bookmarks, posts, and profile data will be permanently deleted. This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('cancel')),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final success = await state.deleteAccount();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      state.language == 'Telugu'
+                          ? (success ? 'ఖాతా విజయవంతంగా తొలగించబడింది.' : 'స్థానిక ఖాతా డేటా తొలగించబడింది.')
+                          : (success ? 'Account deleted successfully.' : 'Local account data cleared.'),
+                    ),
+                  ),
+                );
+              }
+            },
+            child: Text(
+              state.language == 'Telugu' ? 'తొలగించు' : 'Delete',
+            ),
           ),
         ],
       ),

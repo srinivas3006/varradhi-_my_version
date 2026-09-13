@@ -4,6 +4,7 @@ import '../../data/repositories/admin_ugc_repository.dart';
 import 'admin_load_status.dart';
 
 class AdminReportsController extends ChangeNotifier {
+  static const _requestTimeout = Duration(seconds: 8);
   final AdminUgcRepository _repository = AdminUgcRepository();
 
   final List<AdminReportModel> _items = [];
@@ -28,7 +29,9 @@ class AdminReportsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await _repository.getReports(status: statusFilter == 'ALL' ? null : statusFilter);
+      final response = await _repository
+          .getReports(status: statusFilter == 'ALL' ? null : statusFilter)
+          .timeout(_requestTimeout);
       _items
         ..clear()
         ..addAll(response.items);
@@ -36,7 +39,7 @@ class AdminReportsController extends ChangeNotifier {
       _hasMore = response.hasMore;
       _status = _items.isEmpty ? AdminLoadStatus.empty : AdminLoadStatus.loaded;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = 'నివేదికలు లోడ్ కాలేదు. కనెక్షన్ చూసి మళ్లీ ప్రయత్నించండి.';
       _status = AdminLoadStatus.error;
     } finally {
       _isFetching = false;
@@ -51,7 +54,9 @@ class AdminReportsController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await _repository.getReports(cursor: _nextCursor, status: statusFilter == 'ALL' ? null : statusFilter);
+      final response = await _repository
+          .getReports(cursor: _nextCursor, status: statusFilter == 'ALL' ? null : statusFilter)
+          .timeout(_requestTimeout);
       _items.addAll(response.items);
       _nextCursor = response.next;
       _hasMore = response.hasMore;

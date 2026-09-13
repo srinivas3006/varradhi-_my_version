@@ -194,6 +194,7 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
     try {
       final loc = await LocationService.detectLocation();
       final match = await ApiService.instance.resolveCanonicalLocation(loc);
+      if (!mounted) return;
       final confirmed = await LocationService.showCanonicalConfirmation(
         context,
         match,
@@ -298,13 +299,18 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
 
     // Prepare canonical patch payload as required by appcode.md
     final patchData = <String, dynamic>{};
-    if (villageId != null && villageId.isNotEmpty)
+    if (villageId != null && villageId.isNotEmpty) {
       patchData['village_id'] = villageId;
-    if (subdistrictId != null && subdistrictId.isNotEmpty)
+    }
+    if (subdistrictId != null && subdistrictId.isNotEmpty) {
       patchData['subdistrict_id'] = subdistrictId;
-    if (districtId != null && districtId.isNotEmpty)
+    }
+    if (districtId != null && districtId.isNotEmpty) {
       patchData['district_id'] = districtId;
-    if (stateId != null && stateId.isNotEmpty) patchData['state_id'] = stateId;
+    }
+    if (stateId != null && stateId.isNotEmpty) {
+      patchData['state_id'] = stateId;
+    }
 
     if (patchData.isNotEmpty) {
       try {
@@ -531,7 +537,7 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _selectedState,
+          initialValue: _selectedState,
           isExpanded: true,
           decoration: const InputDecoration(
             prefixIcon: Icon(Icons.map_outlined),
@@ -570,7 +576,7 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
                     );
                   },
             icon: const Icon(Icons.check_circle_outline_rounded),
-            label: Text('${_selectedState} ప్రాంతాన్ని ఎంచుకోండి'),
+            label: Text('$_selectedState ప్రాంతాన్ని ఎంచుకోండి'),
           ),
         ],
         if (_isLoadingHierarchy) ...[

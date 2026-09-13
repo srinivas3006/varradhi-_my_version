@@ -62,7 +62,7 @@ class _BlogsScreenState extends State<BlogsScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Blogs'),
+        title: const Text('బ్లాగులు (Blogs)'),
         backgroundColor: Colors.white,
         foregroundColor: AppColors.textDark,
         elevation: 0.5,
@@ -169,7 +169,7 @@ class _BlogsScreenState extends State<BlogsScreen> {
                                   ),
                                   const Spacer(),
                                   Text(
-                                    '${blog.readTimeMinutes} min read',
+                                    '${blog.readTimeMinutes} నిమిషాల చదువు',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: AppColors.textMuted,

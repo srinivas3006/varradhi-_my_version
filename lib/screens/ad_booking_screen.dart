@@ -17,9 +17,12 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   final _businessController = TextEditingController();
   final _messageController = TextEditingController();
   late final _nameController = TextEditingController(
-    text: AppState.instance.userName == 'Guest User' ? '' : AppState.instance.userName,
+    text: AppState.instance.userName == 'Guest User'
+        ? ''
+        : AppState.instance.userName,
   );
-  late final _phoneController = TextEditingController(text: AppState.instance.userPhone);
+  late final _phoneController =
+      TextEditingController(text: AppState.instance.userPhone);
 
   String _adType = 'local'; // 'local' or 'main'
   int _durationDays = 7;
@@ -29,7 +32,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   bool _isLoadingAreas = false;
 
   String? _quotedPrice;
-  String? _currency = '₹';
+  String? _currency;
   String? _error;
 
   List<dynamic> _areas = [];
@@ -61,7 +64,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         setState(() {
           _areas = areas;
           _isLoadingAreas = false;
-          if (_adType == 'local' && _selectedAreaId == null && areas.isNotEmpty) {
+          if (_adType == 'local' &&
+              _selectedAreaId == null &&
+              areas.isNotEmpty) {
             _selectedAreaId = areas.first['id']?.toString();
           }
         });
@@ -73,12 +78,13 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   }
 
   Future<void> _fetchPricing() async {
-    if (_adType == 'local' && (_selectedAreaId == null || _selectedAreaId!.isEmpty)) {
+    if (_adType == 'local' &&
+        (_selectedAreaId == null || _selectedAreaId!.isEmpty)) {
       setState(() {
         _quotedPrice = null;
         _error = _areas.isEmpty && !_isLoadingAreas
-            ? 'No advertisement areas available right now.'
-            : 'Please select an area for local advertisements.';
+            ? 'ప్రస్తుతం ప్రకటన ప్రాంతాలు అందుబాటులో లేవు.'
+            : 'దయచేసి స్థానిక ప్రకటనల కోసం ఒక ప్రాంతాన్ని ఎంచుకోండి.';
       });
       return;
     }
@@ -94,10 +100,17 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         areaId: _adType == 'local' ? _selectedAreaId : null,
         durationDays: _durationDays,
       );
+      final backendPrice = data['price'];
+      final backendCurrency = data['currency'];
+      if (backendPrice == null || backendCurrency == null) {
+        throw StateError(
+          'Backend pricing response is missing price or currency.',
+        );
+      }
       if (mounted) {
         setState(() {
-          _currency = data['currency']?.toString() ?? '₹';
-          _quotedPrice = '${data['price'] ?? '0.00'}';
+          _currency = backendCurrency.toString();
+          _quotedPrice = backendPrice.toString();
           _isFetchingPrice = false;
         });
       }
@@ -106,7 +119,8 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         setState(() {
           _quotedPrice = null;
           _isFetchingPrice = false;
-          _error = 'Failed to calculate quote. Please try again.';
+          _error =
+              'ధర వివరాలను పొందడంలో విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         });
       }
     }
@@ -114,13 +128,17 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
   Future<void> _submitBooking() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_quotedPrice == null && !_isFetchingPrice) {
-      setState(() => _error = 'Please wait for price calculation.');
+
+    if (_adType == 'local' &&
+        (_selectedAreaId == null || _selectedAreaId!.isEmpty)) {
+      setState(() => _error = 'దయచేసి ప్రకటన కోసం మీ ప్రాంతాన్ని ఎంచుకోండి');
       return;
     }
 
-    if (_adType == 'local' && (_selectedAreaId == null || _selectedAreaId!.isEmpty)) {
-      setState(() => _error = 'Please select an area for local advertisements.');
+    if (_quotedPrice == null || _currency == null) {
+      setState(() => _error =
+          'à°§à°° à°µà°¿à°µà°°à°¾à°²à± à°¸à°°à±à°µà°°à± à°¨à±à°‚à°¡à°¿ à°²à±‹à°¡à± à°•à°¾à°²à±‡à°¦à±. à°¦à°¯à°šà±‡à°¸à°¿ à°®à°³à±à°²à±€ à°ªà±à°°à°¯à°¤à±à°¨à°¿à°‚à°šà°‚à°¡à°¿.');
+      _fetchPricing();
       return;
     }
 
@@ -153,7 +171,8 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to submit booking request. Please check your network and try again.';
+          _error =
+              'బుకింగ్ అభ్యర్థన సమర్పించడంలో విఫలమైంది. దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.';
           _isSubmitting = false;
         });
       }
@@ -175,13 +194,15 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     final String text = Uri.encodeComponent(
       "Hello, I booked an ad for '${_businessController.text.trim()}'. "
       "Ref: ${_bookingSuccessData?['id'] ?? 'New'}. "
-      "Ad Type: $_adType, Duration: $_durationDays days. Quoted: $_currency $_quotedPrice.",
+      "Ad Type: $_adType, Duration: $_durationDays days."
+      "${_currency != null && _quotedPrice != null ? ' Quoted: $_currency $_quotedPrice.' : ''}",
     );
     final Uri waUri = Uri.parse("https://wa.me/$phone?text=$text");
     if (await canLaunchUrl(waUri)) {
       await launchUrl(waUri, mode: LaunchMode.externalApplication);
     } else {
-      final Uri fallbackUri = Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$text");
+      final Uri fallbackUri =
+          Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$text");
       if (await canLaunchUrl(fallbackUri)) {
         await launchUrl(fallbackUri, mode: LaunchMode.inAppBrowserView);
       }
@@ -209,10 +230,14 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               decoration: BoxDecoration(
                 color: _adType == 'main'
                     ? AppColors.primary.withValues(alpha: 0.12)
-                    : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100),
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.grey.shade100),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: _adType == 'main' ? AppColors.primary : Colors.transparent,
+                  color: _adType == 'main'
+                      ? AppColors.primary
+                      : Colors.transparent,
                   width: 2,
                 ),
               ),
@@ -224,16 +249,18 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     children: [
                       Icon(
                         Icons.public_rounded,
-                        color: _adType == 'main' ? AppColors.primary : Colors.grey,
+                        color:
+                            _adType == 'main' ? AppColors.primary : Colors.grey,
                         size: 22,
                       ),
                       if (_adType == 'main')
-                        const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 18),
+                        const Icon(Icons.check_circle_rounded,
+                            color: AppColors.primary, size: 18),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'State-wide',
+                    'రాష్ట్రవ్యాప్తంగా',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
@@ -242,7 +269,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Main News Feed',
+                    'ప్రధాన వార్తల ఫీడ్',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.white60 : Colors.black54,
@@ -275,10 +302,14 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               decoration: BoxDecoration(
                 color: _adType == 'local'
                     ? AppColors.primary.withValues(alpha: 0.12)
-                    : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100),
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.grey.shade100),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: _adType == 'local' ? AppColors.primary : Colors.transparent,
+                  color: _adType == 'local'
+                      ? AppColors.primary
+                      : Colors.transparent,
                   width: 2,
                 ),
               ),
@@ -290,16 +321,19 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     children: [
                       Icon(
                         Icons.location_city_rounded,
-                        color: _adType == 'local' ? AppColors.primary : Colors.grey,
+                        color: _adType == 'local'
+                            ? AppColors.primary
+                            : Colors.grey,
                         size: 22,
                       ),
                       if (_adType == 'local')
-                        const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 18),
+                        const Icon(Icons.check_circle_rounded,
+                            color: AppColors.primary, size: 18),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Local Area',
+                    'స్థానిక ప్రాంతం',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
@@ -308,7 +342,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Targeted District',
+                    'ఎంచుకున్న జిల్లా / ప్రాంతం',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? Colors.white60 : Colors.black54,
@@ -325,9 +359,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
   Widget _buildDurationPills(bool isDark) {
     final durations = [
-      {'days': 7, 'label': '7 Days', 'sub': '1 Week'},
-      {'days': 14, 'label': '14 Days', 'sub': '2 Weeks'},
-      {'days': 30, 'label': '30 Days', 'sub': '1 Month'},
+      {'days': 7, 'label': '7 రోజులు', 'sub': '1 వారం'},
+      {'days': 14, 'label': '14 రోజులు', 'sub': '2 వారాలు'},
+      {'days': 30, 'label': '30 రోజులు', 'sub': '1 నెల'},
     ];
 
     return Row(
@@ -349,7 +383,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               decoration: BoxDecoration(
                 color: isSelected
                     ? AppColors.primary
-                    : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.grey.shade100),
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.grey.shade100),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: isSelected ? AppColors.primary : Colors.transparent,
@@ -360,7 +396,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   Text(
                     d['label'] as String,
                     style: TextStyle(
-                      color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.black87),
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.white : Colors.black87),
                       fontWeight: FontWeight.w800,
                       fontSize: 14,
                     ),
@@ -385,24 +423,24 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   Widget _buildSuccessScreen(bool isDark) {
     final data = _bookingSuccessData ?? {};
     final bookingId = data['id']?.toString() ?? 'Pending';
-    final price = data['quoted_price']?.toString() ?? _quotedPrice ?? '0.00';
-    final currency = data['currency']?.toString() ?? _currency ?? '₹';
+    final price = data['quoted_price']?.toString() ?? _quotedPrice;
+    final currency = data['currency']?.toString() ?? _currency;
     final whatsappUrl = data['whatsapp_url']?.toString();
 
-    String areaName = 'State-wide (All Feeds)';
+    String areaName = 'రాష్ట్రవ్యాప్తంగా (అన్ని ఫీడ్‌లు)';
     if (_adType == 'local') {
       final areaObj = _areas.firstWhere(
         (a) => a['id']?.toString() == _selectedAreaId,
         orElse: () => null,
       );
       if (areaObj != null) {
-        areaName = areaObj['name']?.toString() ?? 'Local';
+        areaName = areaObj['name']?.toString() ?? 'స్థానిక ప్రాంతం';
       }
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Booking Received'),
+        title: const Text('బుకింగ్ స్వీకరించబడింది'),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -422,18 +460,19 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   border: Border.all(color: const Color(0xFF10B981), width: 3),
                 ),
                 child: const Center(
-                  child: Icon(Icons.check_rounded, color: Color(0xFF10B981), size: 48),
+                  child: Icon(Icons.check_rounded,
+                      color: Color(0xFF10B981), size: 48),
                 ),
               ),
               const SizedBox(height: 24),
               const Text(
-                'Ad Booking Submitted!',
+                'ప్రకటన బుకింగ్ సమర్పించబడింది!',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 8),
               Text(
-                'Your request has been registered. Connect directly on WhatsApp to submit your creative banners and finalize the schedule.',
+                'మీ అభ్యర్థన నమోదు చేయబడింది. మీ బ్యానర్లు సమర్పించడానికి మరియు షెడ్యూల్‌ను ఖరారు చేయడానికి నేరుగా WhatsApp లో సంప్రదించండి.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -448,7 +487,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade50,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: isDark ? Colors.white12 : Colors.grey.shade200,
@@ -461,17 +502,19 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          'Quoted Price',
-                          style: TextStyle(fontWeight: FontWeight.w600, color: Colors.grey),
+                          'అంచనా వేసిన ధర',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, color: Colors.grey),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: Colors.orange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(
-                            'Pending Review',
+                            'పరిశీలనలో ఉంది',
                             style: TextStyle(
                               color: Colors.orange,
                               fontWeight: FontWeight.w700,
@@ -482,24 +525,37 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      '$currency $price',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.primary,
+                    if (price != null && currency != null)
+                      Text(
+                        '$currency $price',
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.primary,
+                        ),
+                      )
+                    else
+                      const Text(
+                        'Price pending from backend',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.orange,
+                        ),
                       ),
-                    ),
                     const Divider(height: 28),
-                    _buildDetailRow('Reference ID', '#${bookingId.length > 8 ? bookingId.substring(0, 8) : bookingId}'),
+                    _buildDetailRow('రిఫరెన్స్ ఐడీ',
+                        '#${bookingId.length > 8 ? bookingId.substring(0, 8) : bookingId}'),
                     const SizedBox(height: 10),
-                    _buildDetailRow('Business', _businessController.text.trim()),
+                    _buildDetailRow(
+                        'వ్యాపారం', _businessController.text.trim()),
                     const SizedBox(height: 10),
-                    _buildDetailRow('Ad Visibility', areaName),
+                    _buildDetailRow('ప్రకటన పరిధి', areaName),
                     const SizedBox(height: 10),
-                    _buildDetailRow('Duration', '$_durationDays Days'),
+                    _buildDetailRow('కాలపరిమితి', '$_durationDays రోజులు'),
                     const SizedBox(height: 10),
-                    _buildDetailRow('Contact', _phoneController.text.trim()),
+                    _buildDetailRow(
+                        'సంప్రదింపు నంబర్', _phoneController.text.trim()),
                   ],
                 ),
               ),
@@ -512,13 +568,15 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.chat_bubble_rounded, size: 22),
                   label: const Text(
-                    'Chat on WhatsApp',
+                    'WhatsApp లో చాట్ చేయండి',
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366), // WhatsApp Brand Color
+                    backgroundColor:
+                        const Color(0xFF25D366), // WhatsApp Brand Color
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                     elevation: 2,
                   ),
                   onPressed: () => _launchWhatsApp(whatsappUrl),
@@ -532,11 +590,12 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 height: 50,
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
                   ),
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text(
-                    'Done',
+                    'పూర్తయింది',
                     style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -576,7 +635,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Advertise With Us'),
+        title: const Text('మాతో ప్రకటనలు ఇవ్వండి'),
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -588,19 +647,21 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
             children: [
               // Header
               const Text(
-                'Grow Your Business',
+                'మీ వ్యాపారాన్ని విస్తరించండి',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
               Text(
-                'Promote your brand on Varadhi to reach hyper-local and state-wide audiences directly.',
-                style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 14),
+                'మీ బ్రాండ్‌ను నేరుగా స్థానిక మరియు రాష్ట్రవ్యాప్త పాఠకులకు చేరవేయడానికి వారధిలో ప్రకటనలు ఇవ్వండి.',
+                style: TextStyle(
+                    color: isDark ? Colors.white60 : Colors.black54,
+                    fontSize: 14),
               ),
               const SizedBox(height: 24),
 
               // 1. Choose Main vs Local
               const Text(
-                '1. Select Ad Placement',
+                '1. ప్రకటన స్థానాన్ని ఎంచుకోండి',
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
               ),
               const SizedBox(height: 10),
@@ -610,7 +671,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               // If Local, Area Dropdown
               if (_adType == 'local') ...[
                 const Text(
-                  'Target Area / District',
+                  'లక్ష్య ప్రాంతం / జిల్లా',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                 ),
                 const SizedBox(height: 8),
@@ -619,18 +680,27 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         padding: EdgeInsets.symmetric(vertical: 12),
                         child: Row(
                           children: [
-                            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                            SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2)),
                             SizedBox(width: 12),
-                            Text('Loading available areas...', style: TextStyle(color: Colors.grey)),
+                            Text('అందుబాటులో ఉన్న ప్రాంతాలను లోడ్ చేస్తోంది...',
+                                style: TextStyle(color: Colors.grey)),
                           ],
                         ),
                       )
                     : DropdownButtonFormField<String>(
                         initialValue: _selectedAreaId,
                         decoration: InputDecoration(
-                          hintText: _areas.isEmpty ? 'No areas available' : 'Select target area',
+                          hintText: _areas.isEmpty
+                              ? 'ప్రాంతాలు అందుబాటులో లేవు'
+                              : 'ప్రాంతాన్ని ఎంచుకోండి',
                           filled: true,
-                          fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.grey.shade100,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,
@@ -640,7 +710,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         items: _areas.map((area) {
                           return DropdownMenuItem<String>(
                             value: area['id']?.toString(),
-                            child: Text(area['name']?.toString() ?? 'Area'),
+                            child: Text(area['name']?.toString() ?? 'ప్రాంతం'),
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -649,7 +719,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         },
                         validator: (v) {
                           if (_adType == 'local' && (v == null || v.isEmpty)) {
-                            return 'Please select a target area';
+                            return 'దయచేసి ఒక ప్రాంతాన్ని ఎంచుకోండి';
                           }
                           return null;
                         },
@@ -659,7 +729,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
               // 2. Choose Duration
               const Text(
-                '2. Choose Campaign Duration',
+                '2. ప్రకటన కాలపరిమితిని ఎంచుకోండి',
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
               ),
               const SizedBox(height: 10),
@@ -673,7 +743,8 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+                  border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -681,16 +752,22 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     const Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Estimated Quote', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        Text('అంచనా వేసిన కోట్',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
                         SizedBox(height: 2),
-                        Text('Based on duration & placement', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                        Text('కాలపరిమితి & ప్రదేశం ఆధారంగా',
+                            style: TextStyle(color: Colors.grey, fontSize: 11)),
                       ],
                     ),
                     if (_isFetchingPrice)
-                      const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                    else if (_quotedPrice != null)
+                      const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                    else if (_quotedPrice != null && _currency != null)
                       Text(
-                        '$_currency $_quotedPrice',
+                        '${_currency!} $_quotedPrice',
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           color: AppColors.primary,
@@ -698,7 +775,8 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         ),
                       )
                     else
-                      const Text('Unavailable', style: TextStyle(color: Colors.redAccent)),
+                      const Text('అందుబాటులో లేదు',
+                          style: TextStyle(color: Colors.redAccent)),
                   ],
                 ),
               ),
@@ -706,7 +784,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
               // 4. Advertiser Details Form
               const Text(
-                '3. Advertiser Details',
+                '3. ప్రకటనదారు వివరాలు',
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
               ),
               const SizedBox(height: 12),
@@ -715,16 +793,22 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               TextFormField(
                 controller: _businessController,
                 decoration: InputDecoration(
-                  labelText: 'Business / Brand Name',
-                  hintText: 'e.g. Ravi Mobiles',
+                  labelText: 'వ్యాపారం / బ్రాండ్ పేరు',
+                  hintText: 'ఉదా. రవి మొబైల్స్',
                   prefixIcon: const Icon(Icons.storefront_rounded),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Enter your business name';
-                  if (v.trim().length < 2) return 'Enter a valid business name';
+                  if (v == null || v.trim().isEmpty)
+                    return 'మీ వ్యాపారం పేరు నమోదు చేయండి';
+                  if (v.trim().length < 2)
+                    return 'సరైన వ్యాపారం పేరు నమోదు చేయండి';
                   return null;
                 },
               ),
@@ -734,15 +818,20 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               TextFormField(
                 controller: _nameController,
                 decoration: InputDecoration(
-                  labelText: 'Contact Person Name',
-                  hintText: 'e.g. Ramesh',
+                  labelText: 'సంప్రదించవలసిన వ్యక్తి పేరు',
+                  hintText: 'ఉదా. రమేష్',
                   prefixIcon: const Icon(Icons.person_outline_rounded),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Enter contact person name';
+                  if (v == null || v.trim().isEmpty)
+                    return 'సంప్రదించవలసిన వ్యక్తి పేరు నమోదు చేయండి';
                   return null;
                 },
               ),
@@ -753,16 +842,22 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
-                  labelText: 'Phone / WhatsApp Number',
-                  hintText: 'e.g. 9876543210',
+                  labelText: 'ఫోన్ / WhatsApp నంబర్',
+                  hintText: 'ఉదా. 9876543210',
                   prefixIcon: const Icon(Icons.phone_outlined),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Enter phone number';
-                  if (v.trim().length < 10) return 'Enter a valid 10-digit phone number';
+                  if (v == null || v.trim().isEmpty)
+                    return 'ఫోన్ నంబర్ నమోదు చేయండి';
+                  if (v.trim().length < 10)
+                    return 'సరైన 10 అంకెల ఫోన్ నంబర్ నమోదు చేయండి';
                   return null;
                 },
               ),
@@ -773,12 +868,16 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 controller: _messageController,
                 maxLines: 2,
                 decoration: InputDecoration(
-                  labelText: 'Special Requirements / Notes (Optional)',
-                  hintText: 'e.g. Festive banner for Dussehra',
+                  labelText: 'ప్రత్యేక వివరాలు / సూచనలు (ఐచ్ఛికం)',
+                  hintText: 'ఉదా. పండుగ ప్రత్యేక బ్యానర్',
                   prefixIcon: const Icon(Icons.notes_rounded),
                   filled: true,
-                  fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none),
                 ),
               ),
               const SizedBox(height: 16),
@@ -790,14 +889,18 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   decoration: BoxDecoration(
                     color: Colors.red.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: Colors.red.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20),
+                      const Icon(Icons.error_outline_rounded,
+                          color: Colors.redAccent, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(_error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+                        child: Text(_error!,
+                            style: const TextStyle(
+                                color: Colors.redAccent, fontSize: 13)),
                       ),
                     ],
                   ),
@@ -811,19 +914,27 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                     elevation: 0,
                   ),
-                  onPressed: (_isSubmitting || _isFetchingPrice) ? null : _submitBooking,
+                  onPressed: (_isSubmitting ||
+                          _isFetchingPrice ||
+                          _quotedPrice == null ||
+                          _currency == null)
+                      ? null
+                      : _submitBooking,
                   child: _isSubmitting
                       ? const SizedBox(
                           width: 22,
                           height: 22,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2),
                         )
                       : const Text(
-                          'Submit Booking Request',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          'బుకింగ్ అభ్యర్థనను సమర్పించండి',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                 ),
               ),

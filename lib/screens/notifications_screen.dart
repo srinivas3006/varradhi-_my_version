@@ -57,7 +57,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(
-            'Notifications',
+            'నోటిఫికేషన్లు',
             style: TextStyle(
               color: isDark ? Colors.white : Colors.black87,
               fontWeight: FontWeight.bold,
@@ -70,8 +70,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             indicatorColor: AppColors.primary,
             indicatorWeight: 3,
             tabs: const [
-              Tab(text: 'Inbox'),
-              Tab(text: 'Activity Digest'),
+              Tab(text: 'ఇన్‌బాక్స్'),
+              Tab(text: 'యాక్టివిటీ డైజెస్ట్'),
             ],
           ),
           actions: [
@@ -86,13 +86,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     HapticFeedback.lightImpact();
                     AppState.instance.markAllNotificationsRead();
                   },
-                  child: const Text('Mark all read', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                  child: const Text('అన్నీ చదివినట్లు గుర్తించు', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
                 );
               },
             ),
             IconButton(
               icon: Icon(Icons.tune_rounded, color: isDark ? Colors.white70 : Colors.black87),
-              tooltip: 'Notification Settings',
+              tooltip: 'నోటిఫికేషన్ సెట్టింగ్‌లు',
               onPressed: () {
                 Navigator.push(
                   context,
@@ -163,7 +163,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             Icon(Icons.mark_email_unread_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
             const SizedBox(height: 16),
             Text(
-              'Sign in for Notifications',
+              'నోటిఫికేషన్ల కోసం లాగిన్ అవ్వండి',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -172,7 +172,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Sign in to receive breaking news alerts, editorial digests, and submission status updates.',
+              'తాజా వార్తల అలర్ట్‌లు, సంపాదకీయ సమాచారం మరియు మీ వార్తల స్థితి అప్‌డేట్‌లను పొందడానికి లాగిన్ అవ్వండి.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -196,7 +196,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text('Log In / Register', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('లాగిన్ / రిజిస్టర్', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -212,7 +212,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           Icon(Icons.notifications_off_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
           const SizedBox(height: 16),
           Text(
-            'No notifications yet',
+            'ఇంకా ఎలాంటి నోటిఫికేషన్లు లేవు',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -221,7 +221,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'We\'ll let you know when something new arrives.',
+            'కొత్త అప్‌డేట్‌లు వచ్చినప్పుడు మీకు ఇక్కడ తెలియజేస్తాము.',
             style: TextStyle(
               fontSize: 14,
               color: isDark ? Colors.white38 : Colors.black38,
@@ -369,11 +369,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final now = DateTime.now();
     final diff = now.difference(time);
     if (diff.inMinutes < 60) {
-      return '${diff.inMinutes}m ago';
+      return '${diff.inMinutes} నిమిషాల కిందట';
     } else if (diff.inHours < 24) {
-      return '${diff.inHours}h ago';
+      return '${diff.inHours} గంటల కిందట';
     } else if (diff.inDays < 7) {
-      return '${diff.inDays}d ago';
+      return '${diff.inDays} రోజుల కిందట';
     } else {
       return DateFormat('MMM d').format(time);
     }

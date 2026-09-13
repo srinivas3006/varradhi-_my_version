@@ -52,7 +52,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
-          'Live Broadcasts',
+          'ప్రత్యక్ష ప్రసారాలు',
           style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
         ),
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
@@ -61,7 +61,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Refresh',
+            tooltip: 'రిఫ్రెష్',
             onPressed: _fetchLiveNews,
           ),
         ],
@@ -92,7 +92,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                                 ),
                                 const SizedBox(width: 8),
                                 const Text(
-                                  'HAPPENING NOW',
+                                  'ప్రస్తుతం ప్రసారమవుతున్నవి',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w900,
@@ -128,7 +128,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                                 Icon(Icons.schedule_rounded, size: 16, color: Color(0xFFF59E0B)),
                                 SizedBox(width: 6),
                                 Text(
-                                  'SCHEDULED BROADCASTS',
+                                  'షెడ్యూల్ చేసిన ప్రసారాలు',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w900,
@@ -171,7 +171,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'No Live Broadcasts Right Now',
+                'ప్రస్తుతానికి ప్రత్యక్ష ప్రసారాలు లేవు',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w800,
@@ -181,7 +181,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 40),
                 child: Text(
-                  'There are no active or scheduled live streams at the moment. Please check back later.',
+                  'ప్రస్తుతం ఎలాంటి ప్రత్యక్ష ప్రసారాలు అందుబాటులో లేవు. దయచేసి కాసేపటి తర్వాత మళ్లీ చూడండి.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
@@ -194,7 +194,7 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
               OutlinedButton.icon(
                 onPressed: _fetchLiveNews,
                 icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Refresh'),
+                label: const Text('రిఫ్రెష్ చేయండి'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   side: const BorderSide(color: AppColors.primary),
@@ -239,6 +239,8 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
         params: const YoutubePlayerParams(
           mute: false,
           showFullscreenButton: true,
+          origin: 'https://www.youtube.com',
+          privacyEnhancedMode: false,
         ),
       );
     }
@@ -340,15 +342,15 @@ class _UpcomingLiveBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    String scheduledText = 'Coming soon';
+    String scheduledText = 'త్వరలో';
     if (stream.scheduledAt != null) {
       final diff = stream.scheduledAt!.difference(DateTime.now());
       if (diff.inMinutes > 0 && diff.inMinutes < 60) {
-        scheduledText = 'Starts in ${diff.inMinutes} mins';
+        scheduledText = '${diff.inMinutes} నిమిషాల్లో ప్రారంభం';
       } else if (diff.inHours > 0 && diff.inHours < 24) {
-        scheduledText = 'Starts in ${diff.inHours} hours';
+        scheduledText = '${diff.inHours} గంటల్లో ప్రారంభం';
       } else if (diff.inDays > 0) {
-        scheduledText = 'Scheduled for ${stream.scheduledAt!.day}/${stream.scheduledAt!.month}';
+        scheduledText = '${stream.scheduledAt!.day}/${stream.scheduledAt!.month} న షెడ్యూల్ చేయబడింది';
       }
     }
 
@@ -410,7 +412,7 @@ class _UpcomingLiveBanner extends StatelessWidget {
               HapticFeedback.lightImpact();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Reminder set for this broadcast'),
+                  content: Text('ఈ ప్రత్యక్ష ప్రసారం కోసం రిమైండర్ సెట్ చేయబడింది'),
                   duration: Duration(seconds: 2),
                 ),
               );
@@ -422,7 +424,7 @@ class _UpcomingLiveBanner extends StatelessWidget {
               side: const BorderSide(color: Color(0xFFD97706)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            child: const Text('Remind', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+            child: const Text('రిమైండర్', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),

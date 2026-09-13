@@ -30,12 +30,12 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
     final accountName = _accountNameController.text.trim();
 
     if (upi.isEmpty || !upi.contains('@')) {
-      setState(() => _error = 'Please enter a valid UPI ID (e.g. name@bank or 9876543210@upi).');
+      setState(() => _error = 'దయచేసి సరైన UPI ID నమోదు చేయండి (ఉదా: name@bank లేదా 9876543210@upi).');
       return;
     }
 
     if (widget.availableCoins < widget.minimumCoins) {
-      setState(() => _error = 'You need at least ${widget.minimumCoins} coins to request a payout.');
+      setState(() => _error = 'నగదు బదిలీకి కనీసం ${widget.minimumCoins} కాయిన్లు ఉండాలి.');
       return;
     }
 
@@ -57,7 +57,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
         Navigator.of(context).pop(true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Payout request for ₹${(widget.minimumCoins * widget.coinValue).toStringAsFixed(0)} submitted successfully!'),
+            content: Text('₹${(widget.minimumCoins * widget.coinValue).toStringAsFixed(0)} నగదు బదిలీ అభ్యర్థన విజయవంతంగా సమర్పించబడింది!'),
             backgroundColor: const Color(0xFF10B981),
             behavior: SnackBarBehavior.floating,
           ),
@@ -65,7 +65,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
       }
     } catch (e) {
       if (mounted) {
-        String msg = 'Failed to submit payout request. Please try again.';
+        String msg = 'నగదు బదిలీ అభ్యర్థన విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException) {
           final data = e.response?.data;
           if (data is Map) {
@@ -92,7 +92,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Request Payout'),
+        title: const Text('నగదు బదిలీ అభ్యర్థన'),
         elevation: 0,
       ),
       body: SafeArea(
@@ -117,12 +117,12 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Redeeming $coins Coins',
+                            '$coins కాయిన్ల రిడీమ్',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Payout Amount: ₹$amount directly to your UPI account',
+                            'మొత్తం: ₹$amount నేరుగా మీ UPI ఖాతాకు జమ అవుతుంది',
                             style: TextStyle(
                               fontSize: 12.5,
                               color: isDark ? Colors.white70 : Colors.black87,
@@ -137,7 +137,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
               const SizedBox(height: 24),
 
               const Text(
-                'UPI ID *',
+                'UPI ఐడీ *',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
               ),
               const SizedBox(height: 8),
@@ -145,7 +145,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                 controller: _upiController,
                 enabled: !_isSubmitting,
                 decoration: InputDecoration(
-                  hintText: 'e.g. yourname@oksbi or mobile@upi',
+                  hintText: 'ఉదా: yourname@oksbi లేదా mobile@upi',
                   prefixIcon: const Icon(Icons.account_balance_wallet_outlined, size: 20),
                   filled: true,
                   fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.02),
@@ -166,7 +166,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
               const SizedBox(height: 16),
 
               const Text(
-                'Account Holder Name (Optional)',
+                'ఖాతాదారుని పేరు (ఐచ్ఛికం)',
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
               ),
               const SizedBox(height: 8),
@@ -174,7 +174,7 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                 controller: _accountNameController,
                 enabled: !_isSubmitting,
                 decoration: InputDecoration(
-                  hintText: 'As per bank / UPI records',
+                  hintText: 'బ్యాంక్ / UPI రికార్డుల ప్రకారం',
                   prefixIcon: const Icon(Icons.person_outline, size: 20),
                   filled: true,
                   fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.02),
@@ -232,13 +232,13 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
                           height: 22,
                           child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
                         )
-                      : const Text('Confirm Payout Request',
+                      : const Text('నగదు బదిలీని నిర్ధారించండి',
                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(height: 16),
               const Text(
-                'Payout requests are verified and transferred directly to your bank account via UPI within 24 to 48 business hours.',
+                'నగదు బదిలీ అభ్యర్థనలు ధృవీకరించబడి, 24 నుండి 48 పని గంటలలోపు UPI ద్వారా నేరుగా మీ బ్యాంక్ ఖాతాకు జమ చేయబడతాయి.',
                 style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
               ),
             ],

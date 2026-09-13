@@ -20,7 +20,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
   Future<void> _verifyToken() async {
     final token = _tokenController.text.trim();
     if (token.isEmpty) {
-      setState(() => _error = 'Please enter the reset code sent to your email.');
+      setState(() => _error = 'దయచేసి మీ ఇమెయిల్‌కు పంపిన రీసెట్ కోడ్‌ను నమోదు చేయండి.');
       return;
     }
 
@@ -43,7 +43,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'Invalid or expired verification code.';
+        String errorMsg = 'చెల్లని లేదా గడువు ముగిసిన ధృవీకరణ కోడ్.';
         if (e is DioException && e.response?.data is Map) {
           final resp = e.response!.data as Map;
           if (resp['errors'] is Map && resp['errors']['message'] != null) {
@@ -62,7 +62,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('Verify Code')),
+      appBar: AppBar(title: const Text('కోడ్ ధృవీకరించండి')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
@@ -70,7 +70,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Enter Verification Code',
+                'ధృవీకరణ కోడ్‌ను నమోదు చేయండి',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -79,7 +79,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'We sent a reset code to ${widget.email}. Enter it below to proceed.',
+                'మేము ${widget.email} కి రీసెట్ కోడ్‌ను పంపాము. కొనసాగడానికి దాన్ని కింద నమోదు చేయండి.',
                 style: const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -87,7 +87,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
                 controller: _tokenController,
                 keyboardType: TextInputType.text,
                 decoration: InputDecoration(
-                  labelText: 'Verification Code',
+                  labelText: 'ధృవీకరణ కోడ్',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -123,7 +123,7 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Verify Code',
+                      : const Text('కోడ్‌ను ధృవీకరించండి',
                           style: TextStyle(
                               fontSize: 15, fontWeight: FontWeight.w700)),
                 ),

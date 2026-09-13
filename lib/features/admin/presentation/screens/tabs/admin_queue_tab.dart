@@ -67,15 +67,15 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
         final c = widget.controller;
         return Column(
           children: [
-            if (widget.showSearch) AdminSearchBar(hintText: 'Search title, district, mobile...', onChanged: c.setSearchQuery),
+            if (widget.showSearch) AdminSearchBar(hintText: 'శీర్షిక, జిల్లా, మొబైల్ వెతకండి...', onChanged: c.setSearchQuery),
             const SizedBox(height: 4),
             AdminFilterChipRow<AdminUgcStatus?>(
               options: const [
-                AdminFilterChipOption(null, 'ALL'),
-                AdminFilterChipOption(AdminUgcStatus.pending, 'PENDING'),
-                AdminFilterChipOption(AdminUgcStatus.flagged, 'FLAGGED'),
-                AdminFilterChipOption(AdminUgcStatus.approved, 'APPROVED'),
-                AdminFilterChipOption(AdminUgcStatus.rejected, 'REJECTED'),
+                AdminFilterChipOption(null, 'అన్నీ'),
+                AdminFilterChipOption(AdminUgcStatus.pending, 'పెండింగ్'),
+                AdminFilterChipOption(AdminUgcStatus.flagged, 'ఫ్లాగ్డ్'),
+                AdminFilterChipOption(AdminUgcStatus.approved, 'ఆమోదించినవి'),
+                AdminFilterChipOption(AdminUgcStatus.rejected, 'తిరస్కరించినవి'),
               ],
               selected: c.statusFilter,
               onSelect: c.setStatusFilter,
@@ -83,9 +83,9 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
             const SizedBox(height: 8),
             AdminFilterChipRow<AdminQueueRefinement>(
               options: const [
-                AdminFilterChipOption(AdminQueueRefinement.all, 'ALL'),
-                AdminFilterChipOption(AdminQueueRefinement.duplicatesOnly, 'Duplicates'),
-                AdminFilterChipOption(AdminQueueRefinement.reported, 'Reported'),
+                AdminFilterChipOption(AdminQueueRefinement.all, 'అన్నీ'),
+                AdminFilterChipOption(AdminQueueRefinement.duplicatesOnly, 'డూప్లికేట్‌లు'),
+                AdminFilterChipOption(AdminQueueRefinement.reported, 'రిపోర్ట్ చేసినవి'),
               ],
               selected: c.refinementFilter,
               onSelect: c.setRefinement,
@@ -107,16 +107,16 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(c.errorMessage ?? 'Failed to load queue', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))),
+            Text(c.errorMessage ?? 'క్యూ లోడ్ చేయడం విఫలమైంది', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))),
             const SizedBox(height: 12),
-            ElevatedButton(onPressed: c.refresh, child: const Text('Retry')),
+            ElevatedButton(onPressed: c.refresh, child: const Text('మళ్లీ ప్రయత్నించండి')),
           ],
         ),
       );
     }
     final items = c.filteredItems;
     if (items.isEmpty) {
-      return Center(child: Text('No items in this view.', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))));
+      return Center(child: Text('ఈ విభాగంలో అంశాలు ఏవీ లేవు.', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))));
     }
     return RefreshIndicator(
       onRefresh: c.refresh,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/navigation/auth_guard.dart';
 import '../../models/spotlight_item.dart';
 import '../../theme/app_theme.dart';
 import '../../screens/comments_screen.dart';
@@ -117,20 +118,24 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                       return CachedNetworkImage(
                         imageUrl: images[index],
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: AppColors.chipBg),
+                        placeholder: (context, url) =>
+                            Container(color: AppColors.chipBg),
                         errorWidget: (context, url, error) => Container(
                           color: AppColors.chipBg,
                           child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted, size: 40),
+                            child: Icon(Icons.image_not_supported_outlined,
+                                color: AppColors.textMuted, size: 40),
                           ),
                         ),
                       );
                     },
                   ),
-                  
+
                   // Top Gradient & Actions
                   Positioned(
-                    top: 0, left: 0, right: 0,
+                    top: 0,
+                    left: 0,
+                    right: 0,
                     height: 120,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
@@ -146,7 +151,8 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                     ),
                   ),
                   Positioned(
-                    top: 8 + MediaQuery.of(context).padding.top, right: 8,
+                    top: 8 + MediaQuery.of(context).padding.top,
+                    right: 8,
                     child: _iconPill(
                       icon: Icons.close_rounded,
                       onTap: widget.onClose,
@@ -167,7 +173,9 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                           height: _currentIndex == index ? 8 : 6,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: _currentIndex == index ? AppColors.primary : Colors.white.withValues(alpha: 0.5),
+                            color: _currentIndex == index
+                                ? AppColors.primary
+                                : Colors.white.withValues(alpha: 0.5),
                           ),
                         );
                       }),
@@ -181,7 +189,8 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
             Expanded(
               flex: 4,
               child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 12 + MediaQuery.of(context).padding.bottom),
+                padding: EdgeInsets.fromLTRB(
+                    16, 16, 16, 12 + MediaQuery.of(context).padding.bottom),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -197,7 +206,7 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                       ),
                     ),
                     const Spacer(),
-                    
+
                     // Bottom Info & Actions
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -212,8 +221,12 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                                     radius: 12,
                                     backgroundColor: AppColors.chipBg,
                                     child: Text(
-                                      article.source.isNotEmpty ? article.source[0] : '?',
-                                      style: const TextStyle(color: AppColors.textDark, fontSize: 12),
+                                      article.source.isNotEmpty
+                                          ? article.source[0]
+                                          : '?',
+                                      style: const TextStyle(
+                                          color: AppColors.textDark,
+                                          fontSize: 12),
                                     ),
                                   ),
                                   const SizedBox(width: 6),
@@ -249,29 +262,34 @@ class _SpotlightCarouselCardState extends State<SpotlightCarouselCard> {
                               label: 'Report',
                               onTap: () {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Reported for review.')),
+                                  const SnackBar(
+                                      content: Text('Reported for review.')),
                                 );
                               },
                             ),
                             const SizedBox(width: 16),
                             AnimatedBuilder(
-                              animation: AppState.instance,
-                              builder: (context, _) {
-                                final count = AppState.instance.getCommentCount(article.id);
-                                return _actionButton(
-                                  icon: Icons.mode_comment_outlined,
-                                  label: _formatCount(count),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => CommentsScreen(article: article),
-                                      ),
-                                    );
-                                  },
-                                );
-                              }
-                            ),
+                                animation: AppState.instance,
+                                builder: (context, _) {
+                                  final count = AppState.instance
+                                      .getCommentCount(article.id);
+                                  return _actionButton(
+                                    icon: Icons.mode_comment_outlined,
+                                    label: _formatCount(count),
+                                    onTap: () {
+                                      requireAuth(
+                                        context,
+                                        () => Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => CommentsScreen(
+                                                article: article),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }),
                             const SizedBox(width: 16),
                             _actionButton(
                               icon: Icons.share_outlined,

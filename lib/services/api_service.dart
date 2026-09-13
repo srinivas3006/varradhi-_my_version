@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
@@ -23,6 +24,11 @@ class ApiService {
 
   final Dio _dio = DioClient().dio;
 
+  static String get deviceType {
+    if (kIsWeb) return 'web';
+    return Platform.isIOS ? 'ios' : 'android';
+  }
+
   // --- System Bootstrap & Guest Device ---
   Future<bool> checkHealth() async {
     try {
@@ -36,15 +42,41 @@ class ApiService {
   // --- Auth ---
   Future<Map<String, dynamic>> login(String email, String password,
       {String? fcmToken}) async {
-    final response = await _dio.post('/api/v1/auth/login/', data: {
+    Map<String, dynamic> buildPayload() => {
       'email': email,
       'password': password,
       'device_id': AppState.instance.deviceId,
       'device_name': 'Mobile Device',
       'device_type': 'android',
       if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
-    });
-    return response.data['data'] as Map<String, dynamic>;
+      if (AppState.instance.installationSecret != null &&
+          AppState.instance.installationSecret!.isNotEmpty)
+        'installation_secret': AppState.instance.installationSecret,
+    };
+
+    try {
+      final response = await _dio.post('/api/v1/auth/login/', data: buildPayload());
+      final data = response.data['data'] as Map<String, dynamic>;
+      if (data['installation_secret'] != null) {
+        await AppState.instance
+            .setInstallationSecret(data['installation_secret'].toString());
+      }
+      return data;
+    } on DioException catch (dioErr) {
+      if (dioErr.response?.statusCode == 403 ||
+          dioErr.response?.data.toString().contains('Installation') == true) {
+        await registerGuestDevice(fcmToken: fcmToken);
+        final retryResponse =
+            await _dio.post('/api/v1/auth/login/', data: buildPayload());
+        final data = retryResponse.data['data'] as Map<String, dynamic>;
+        if (data['installation_secret'] != null) {
+          await AppState.instance
+              .setInstallationSecret(data['installation_secret'].toString());
+        }
+        return data;
+      }
+      rethrow;
+    }
   }
 
   /// 1. APK Guest Notification Flow: POST /api/v1/notifications/guest-device/
@@ -197,6 +229,29 @@ class ApiService {
   Future<Map<String, dynamic>> register(Map<String, dynamic> data) async {
     final response = await _dio.post('/api/v1/auth/register/', data: data);
     return response.data['data'] as Map<String, dynamic>;
+  }
+
+  /// Initiates account deletion for Play Store compliance
+  Future<bool> deleteAccount() async {
+    for (final endpoint in const [
+      '/api/v1/auth/delete-account/',
+      '/api/v1/auth/me/',
+    ]) {
+      try {
+        final response = await _dio.delete(endpoint);
+        if (response.statusCode == 200 || response.statusCode == 204) {
+          return true;
+        }
+      } catch (_) {
+        // Try the next supported backend contract below.
+      }
+    }
+    try {
+      final fallback = await _dio.post('/api/v1/auth/account/delete/');
+      return fallback.statusCode == 200 || fallback.statusCode == 204;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {

@@ -22,7 +22,8 @@ class UrlNormalizer {
     }
 
     // Handle relative backend URLs (e.g. "/media/articles/photo.jpg" or "media/...")
-    if (trimmed.startsWith('/') || (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))) {
+    if (trimmed.startsWith('/') ||
+        (!trimmed.startsWith('http://') && !trimmed.startsWith('https://'))) {
       // Check if it's actually an absolute URL without scheme or just a path
       if (!trimmed.contains('://')) {
         final base = AppConfig.baseUrl.endsWith('/')
@@ -35,7 +36,9 @@ class UrlNormalizer {
 
     // Validate URI structure
     final uri = Uri.tryParse(trimmed);
-    if (uri != null && uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https')) {
+    if (uri != null &&
+        uri.hasScheme &&
+        (uri.scheme == 'http' || uri.scheme == 'https')) {
       return trimmed;
     }
 
@@ -55,12 +58,53 @@ class UrlNormalizer {
     if (videoUrl == null || videoUrl.trim().isEmpty) return null;
     final trimmed = videoUrl.trim();
 
-    if (!trimmed.contains('youtube.com') && !trimmed.contains('youtu.be')) {
+    final directId = RegExp(r'^[A-Za-z0-9_-]{11}$').firstMatch(trimmed);
+    if (directId != null) {
+      return 'https://i.ytimg.com/vi/$trimmed/hqdefault.jpg';
+    }
+
+    if (!trimmed.contains('youtube.com') &&
+        !trimmed.contains('youtu.be') &&
+        !trimmed.contains('youtube-nocookie.com')) {
       return null;
     }
 
+    final uri = Uri.tryParse(trimmed);
+    final host =
+        uri?.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '') ?? '';
+    if (uri != null && host == 'youtu.be' && uri.pathSegments.isNotEmpty) {
+      final id = uri.pathSegments.first;
+      if (RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id)) {
+        return 'https://i.ytimg.com/vi/$id/hqdefault.jpg';
+      }
+    }
+
+    if (uri != null &&
+        (host == 'youtube.com' ||
+            host == 'm.youtube.com' ||
+            host == 'music.youtube.com' ||
+            host == 'youtube-nocookie.com')) {
+      final queryId = uri.queryParameters['v'];
+      if (queryId != null && RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(queryId)) {
+        return 'https://i.ytimg.com/vi/$queryId/hqdefault.jpg';
+      }
+
+      for (var i = 0; i < uri.pathSegments.length - 1; i++) {
+        final marker = uri.pathSegments[i].toLowerCase();
+        if (marker == 'embed' ||
+            marker == 'v' ||
+            marker == 'shorts' ||
+            marker == 'live') {
+          final id = uri.pathSegments[i + 1];
+          if (RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id)) {
+            return 'https://i.ytimg.com/vi/$id/hqdefault.jpg';
+          }
+        }
+      }
+    }
+
     final regExp = RegExp(
-      r'(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})',
+      r'(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([A-Za-z0-9_-]{11})',
       caseSensitive: false,
     );
     final match = regExp.firstMatch(trimmed);

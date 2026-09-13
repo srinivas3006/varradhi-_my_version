@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
 import '../widgets/bottom_nav_bar.dart';
-import '../state/app_state.dart';
+import '../widgets/ads/bottom_sticky_ad_banner.dart';
+import '../models/ad_banner.dart';
 import 'local_news_tab.dart';
 import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
 import 'profile_tab.dart';
 import 'video_tab.dart';
-import 'account_login_screen.dart';
 import '../services/notification_service.dart';
+import '../services/ad_manager.dart';
 
 import 'spotlight_screen.dart';
 import '../core/navigation/notification_navigation_gate.dart';
@@ -32,13 +34,15 @@ class _HomeScreenState extends State<HomeScreen> {
   late int _navIndex;
   late final Set<int> _activatedIndices;
   DateTime? _lastBackPressTime;
+  AdBanner? _homeBottomAd;
 
   @override
   void initState() {
     super.initState();
     _navIndex = widget.initialTabIndex;
     _activatedIndices = {widget.initialTabIndex};
-    final hadPendingNotification = NotificationNavigationGate.instance.hasPendingTarget;
+    final hadPendingNotification =
+        NotificationNavigationGate.instance.hasPendingTarget;
     NotificationService.instance.onNavigationReady(context);
 
     if (widget.openSpotlightOnStart && !hadPendingNotification) {
@@ -46,11 +50,38 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           AppNavigator.pushSafe(
             context,
-            MaterialPageRoute(builder: (_) => const SpotlightScreen(isLocal: false)),
+            MaterialPageRoute(
+                builder: (_) => const SpotlightScreen(isLocal: false)),
           );
         }
       });
     }
+
+    Future.microtask(_loadHomeBottomAd);
+  }
+
+  Future<void> _loadHomeBottomAd() async {
+    final ad = await _selectFirstAvailableAd(
+      zones: const ['home_bottom', 'bottom_sticky'],
+      preferType: 'bottom_sticky',
+    );
+    if (!mounted || ad == null) return;
+    setState(() => _homeBottomAd = ad);
+  }
+
+  Future<AdBanner?> _selectFirstAvailableAd({
+    required List<String> zones,
+    required String preferType,
+  }) async {
+    for (final zone in zones) {
+      final ads = await AdManager.instance.getAdsForZone(zone);
+      final selected =
+          AdManager.instance.selectAd(ads, preferType: preferType) ??
+              AdManager.instance.selectAd(ads, preferType: 'banner') ??
+              AdManager.instance.selectAd(ads);
+      if (selected != null) return selected;
+    }
+    return null;
   }
 
   void _handleBack(bool didPop) {
@@ -65,7 +96,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // 2. We are at root (Tab 0). Apply 2-second double-back exit confirmation.
     final now = DateTime.now();
     if (_lastBackPressTime == null ||
-        now.difference(_lastBackPressTime!) > const Duration(milliseconds: 2000)) {
+        now.difference(_lastBackPressTime!) >
+            const Duration(milliseconds: 2000)) {
       _lastBackPressTime = now;
       ScaffoldMessenger.of(context).removeCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -88,10 +120,18 @@ class _HomeScreenState extends State<HomeScreen> {
     // UI thread starvation and duplicate network calls on cold launch.
     final tabs = [
       const NewsFeedTab(),
-      _activatedIndices.contains(1) ? const LocalNewsTab() : const SizedBox.shrink(),
-      _activatedIndices.contains(2) ? const CreatePostScreen() : const SizedBox.shrink(),
-      _activatedIndices.contains(3) ? VideoTab(isActive: _navIndex == 3) : const SizedBox.shrink(),
-      _activatedIndices.contains(4) ? const ProfileTab() : const SizedBox.shrink(),
+      _activatedIndices.contains(1)
+          ? const LocalNewsTab()
+          : const SizedBox.shrink(),
+      _activatedIndices.contains(2)
+          ? const CreatePostScreen()
+          : const SizedBox.shrink(),
+      _activatedIndices.contains(3)
+          ? VideoTab(isActive: _navIndex == 3)
+          : const SizedBox.shrink(),
+      _activatedIndices.contains(4)
+          ? const ProfileTab()
+          : const SizedBox.shrink(),
     ];
 
     return PopScope(
@@ -99,28 +139,43 @@ class _HomeScreenState extends State<HomeScreen> {
       onPopInvokedWithResult: (didPop, _) => _handleBack(didPop),
       child: Scaffold(
         extendBody: true,
-        body: IndexedStack(
-          index: _navIndex,
-          children: tabs,
+        body: Stack(
+          children: [
+            IndexedStack(
+              index: _navIndex,
+              children: tabs,
+            ),
+            if (_navIndex == 0 && _homeBottomAd != null)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: MediaQuery.of(context).padding.bottom + 78,
+                child: SafeArea(
+                  top: false,
+                  child: BottomStickyAdBanner(
+                    key: ValueKey('home_bottom_${_homeBottomAd!.id}'),
+                    ad: _homeBottomAd!,
+                    placementZone: 'home_bottom',
+                    onDismiss: () {
+                      if (mounted) setState(() => _homeBottomAd = null);
+                    },
+                  ),
+                ),
+              ),
+          ],
         ),
         bottomNavigationBar: BottomNavBar(
           currentIndex: _navIndex,
           onTap: (index) {
             if (index == 2) {
-              if (!AppState.instance.isLoggedIn) {
-                AppNavigator.pushSafe<bool>(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                ).then((loggedIn) {
-                  if (loggedIn == true && mounted) {
-                    setState(() {
-                      _activatedIndices.add(2);
-                      _navIndex = 2;
-                    });
-                  }
+              requireAuth(context, () {
+                if (!mounted) return;
+                setState(() {
+                  _activatedIndices.add(2);
+                  _navIndex = 2;
                 });
-                return;
-              }
+              });
+              return;
             }
             setState(() {
               _activatedIndices.add(index);

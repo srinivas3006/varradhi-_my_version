@@ -48,7 +48,7 @@ class _LiveCricketScreenState extends State<LiveCricketScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Live Cricket')),
+      appBar: AppBar(title: const Text('ప్రత్యక్ష క్రికెట్ (Live Cricket)')),
       body: Column(
         children: [
           Expanded(
@@ -64,12 +64,12 @@ class _LiveCricketScreenState extends State<LiveCricketScreen> {
                               Icon(Icons.sports_cricket_rounded, size: 48, color: AppColors.textMuted),
                               SizedBox(height: 12),
                               Text(
-                                'No live matches available',
+                                'ప్రస్తుతానికి ప్రత్యక్ష మ్యాచ్‌లు లేవు',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                               SizedBox(height: 6),
                               Text(
-                                'Live scores and updates will display when matches are active.',
+                                'మ్యాచ్‌లు ప్రారంభమైనప్పుడు లైవ్ స్కోర్‌లు మరియు తాజా వివరాలు ఇక్కడ కనిపిస్తాయి.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                               ),

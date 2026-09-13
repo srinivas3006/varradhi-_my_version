@@ -30,12 +30,12 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
     final confirmPass = _confirmPasswordController.text;
 
     if (newPass.length < 8) {
-      setState(() => _error = 'Password must be at least 8 characters long.');
+      setState(() => _error = 'పాస్‌వర్డ్ కనీసం 8 అక్షరాలు ఉండాలి.');
       return;
     }
 
     if (newPass != confirmPass) {
-      setState(() => _error = 'Passwords do not match.');
+      setState(() => _error = 'పాస్‌వర్డ్‌లు సరిపోలడం లేదు.');
       return;
     }
 
@@ -54,7 +54,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset successfully. Please log in.')),
+        const SnackBar(content: Text('పాస్‌వర్డ్ విజయవంతంగా రీసెట్ చేయబడింది. దయచేసి లాగిన్ అవ్వండి.')),
       );
 
       // Navigate back to LoginScreen
@@ -64,7 +64,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'Failed to reset password. Please try again.';
+        String errorMsg = 'పాస్‌వర్డ్ రీసెట్ చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException && e.response?.data is Map) {
           final resp = e.response!.data as Map;
           if (resp['errors'] is Map && resp['errors']['message'] != null) {
@@ -83,7 +83,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('New Password')),
+      appBar: AppBar(title: const Text('కొత్త పాస్‌వర్డ్')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
@@ -91,7 +91,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Set New Password',
+                'కొత్త పాస్‌వర్డ్‌ను సెట్ చేయండి',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -100,7 +100,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
               ),
               const SizedBox(height: 6),
               const Text(
-                'Create a strong new password for your account.',
+                'మీ ఖాతా కోసం బలమైన కొత్త పాస్‌వర్డ్‌ను సృష్టించండి.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -108,7 +108,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
                 controller: _newPasswordController,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  labelText: 'New Password',
+                  labelText: 'కొత్త పాస్‌వర్డ్',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -129,7 +129,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
                 controller: _confirmPasswordController,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  labelText: 'Confirm Password',
+                  labelText: 'పాస్‌వర్డ్ నిర్ధారించండి',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -165,7 +165,7 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Reset Password & Log In',
+                      : const Text('పాస్‌వర్డ్ రీసెట్ చేసి లాగిన్ అవ్వండి',
                           style: TextStyle(
                               fontSize: 15, fontWeight: FontWeight.w700)),
                 ),

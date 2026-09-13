@@ -250,8 +250,11 @@ class AdManager extends ChangeNotifier {
   }) {
     if (contentItems.isEmpty) return [];
 
-    final result = <FeedPresentationItem<T>>[];
-    if (adsPool.isEmpty) {
+    final feedEligibleAds = adsPool
+        .where((ad) => !ad.isInterstitial && !ad.isFullScreen)
+        .toList();
+
+    if (feedEligibleAds.isEmpty) {
       return contentItems
           .map((item) => FeedPresentationItem<T>.content(
                 item,
@@ -260,9 +263,10 @@ class AdManager extends ChangeNotifier {
           .toList();
     }
 
+    final result = <FeedPresentationItem<T>>[];
     // Use display_frequency from the pool or fallback to 5
     final frequency = overrideFrequency ??
-        (adsPool.first.displayFrequency > 0 ? adsPool.first.displayFrequency : 5);
+        (feedEligibleAds.first.displayFrequency > 0 ? feedEligibleAds.first.displayFrequency : 5);
 
     int contentSinceLastAd = 0;
     int adSlotIndex = 0;
@@ -277,7 +281,7 @@ class AdManager extends ChangeNotifier {
 
       // Check if after minArticlesBeforeFirstAd and interval reached
       if (i >= (minArticlesBeforeFirstAd - 1) && contentSinceLastAd >= frequency) {
-        final ad = selectAd(adsPool, excludeIds: inFeedAssignedAdIds);
+        final ad = selectAd(feedEligibleAds, excludeIds: inFeedAssignedAdIds);
         if (ad != null) {
           result.add(FeedPresentationItem<T>.ad(
             ad,

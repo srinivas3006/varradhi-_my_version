@@ -30,7 +30,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
     final email = _usernameController.text.trim();
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Enter your email address and password.');
+      setState(() => _error = 'మీ ఇమెయిల్ చిరునామా మరియు పాస్‌వర్డ్ నమోదు చేయండి.');
       return;
     }
 
@@ -56,6 +56,10 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
       if (sessionId != null && sessionId.isNotEmpty) {
         await AppState.instance.setSessionId(sessionId);
       }
+      if (data['installation_secret'] != null) {
+        await AppState.instance
+            .setInstallationSecret(data['installation_secret'].toString());
+      }
 
       final user = data['user'] as Map<String, dynamic>?;
       AppState.instance.accountLogin(
@@ -67,15 +71,19 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
 
       // Handoff guest device token to logged-in user (Backend Flow 2)
       if (AppState.instance.fcmToken != null) {
-        await ApiService.instance.handoffDeviceToken(
-          sessionId: sessionId,
-          fcmToken: AppState.instance.fcmToken,
-          installationSecret: AppState.instance.installationSecret,
-        );
+        try {
+          await ApiService.instance.handoffDeviceToken(
+            sessionId: sessionId,
+            fcmToken: AppState.instance.fcmToken,
+            installationSecret: AppState.instance.installationSecret,
+          );
+        } catch (_) {}
       }
 
       // Sync user location
-      await ApiService.instance.syncUserLocation();
+      try {
+        await ApiService.instance.syncUserLocation();
+      } catch (_) {}
 
       if (!mounted) return;
 
@@ -94,10 +102,10 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
       }
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'Invalid email or password.';
+        String errorMsg = 'చెల్లని ఇమెయిల్ లేదా పాస్‌వర్డ్.';
         if (e is DioException) {
           if (e.response?.statusCode == 429) {
-            errorMsg = 'Too many attempts. Please wait and try again.';
+            errorMsg = 'చాలా ఎక్కువ ప్రయత్నాలు జరిగాయి. దయచేసి కాసేపు ఆగి మళ్లీ ప్రయత్నించండి.';
           } else if (e.response?.data is Map) {
             final resp = e.response!.data as Map;
             if (resp['errors'] is Map) {
@@ -128,7 +136,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('Log In')),
+      appBar: AppBar(title: const Text('లాగిన్')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
@@ -146,7 +154,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'Welcome back',
+                'స్వాగతం',
                 style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
@@ -154,7 +162,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Log in to access your account, preferences, and submissions.',
+                'మీ ఖాతా, ప్రాధాన్యతలు మరియు కథనాలను యాక్సెస్ చేయడానికి లాగిన్ అవ్వండి.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -163,7 +171,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                 keyboardType: TextInputType.emailAddress,
                 autofillHints: const [AutofillHints.email],
                 decoration: InputDecoration(
-                  labelText: 'Email Address',
+                  labelText: 'ఇమెయిల్ చిరునామా',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -178,7 +186,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                 obscureText: _obscurePassword,
                 autofillHints: const [AutofillHints.password],
                 decoration: InputDecoration(
-                  labelText: 'Password',
+                  labelText: 'పాస్‌వర్డ్',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -204,7 +212,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                     );
                   },
                   child: const Text(
-                    'Forgot Password?',
+                    'పాస్‌వర్డ్ మర్చిపోయారా?',
                     style: TextStyle(
                       color: AppColors.primary,
                       fontSize: 13,
@@ -241,7 +249,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Log In',
+                      : const Text('లాగిన్',
                           style:
                               TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
@@ -256,11 +264,11 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                   ),
                   child: const Text.rich(
                     TextSpan(
-                      text: 'New here? ',
+                      text: 'కొత్త వారా? ',
                       style: TextStyle(color: AppColors.textMuted),
                       children: [
                         TextSpan(
-                          text: 'Create an account',
+                          text: 'ఖాతాను సృష్టించండి',
                           style: TextStyle(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w700),

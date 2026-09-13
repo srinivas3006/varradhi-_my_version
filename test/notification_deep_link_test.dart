@@ -259,7 +259,7 @@ void main() {
         MaterialApp(
           home: Builder(
             builder: (context) {
-              gate.onNavigationReady(context, (t, _) {
+              gate.onNavigationReady(context, (t, _) async {
                 dispatchedTarget = t;
               });
               return const Scaffold(body: Text('Home'));
@@ -273,6 +273,47 @@ void main() {
       expect(dispatchedTarget, isNotNull);
       expect(dispatchedTarget?.identifier, equals('news-slug'));
       expect(gate.hasPendingTarget, isFalse);
+    });
+
+    test('acquireDispatchLock rejects concurrent in-flight dispatch', () {
+      final gate = NotificationNavigationGate.instance;
+      final target1 = NotificationTarget.article(slugOrId: 'article-1');
+      final target2 = NotificationTarget.article(slugOrId: 'article-2');
+
+      expect(gate.acquireDispatchLock(target1), isTrue);
+      expect(gate.isDispatching, isTrue);
+
+      // Second target while target1 is in-flight must be rejected
+      expect(gate.acquireDispatchLock(target2), isFalse);
+
+      gate.releaseDispatchLock();
+      expect(gate.isDispatching, isFalse);
+
+      // Now target2 can be dispatched
+      expect(gate.acquireDispatchLock(target2), isTrue);
+      gate.releaseDispatchLock();
+    });
+
+    test('acquireDispatchLock deduplicates rapid taps on identical target', () {
+      final gate = NotificationNavigationGate.instance;
+      final target = NotificationTarget.article(slugOrId: 'same-article');
+
+      expect(gate.acquireDispatchLock(target), isTrue);
+      gate.releaseDispatchLock();
+
+      // Immediate subsequent tap on exact same target within dedup window is suppressed
+      expect(gate.acquireDispatchLock(target), isFalse);
+    });
+
+    test('Nested JSON string payload is safely unwrapped', () {
+      final payload = {
+        'data': '{"content_type":"article","slug":"nested-article-slug","notification_id":"notif-nested"}',
+      };
+
+      final target = NotificationDeepLinkResolver.resolveFromPayload(payload);
+      expect(target.type, equals(NotificationTargetType.article));
+      expect(target.identifier, equals('nested-article-slug'));
+      expect(target.notificationId, equals('notif-nested'));
     });
   });
 }

@@ -4,6 +4,7 @@ import '../models/news_article.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
+import '../widgets/ads/banner_ad_slot.dart';
 import 'news_detail_screen.dart';
 
 /// Screen 08: CategoryScreen
@@ -105,7 +106,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not load more stories. Please try again.')),
+          const SnackBar(content: Text('మరిన్ని కథనాలను లోడ్ చేయడం సాధ్యం కాలేదు. దయచేసి మళ్లీ ప్రయత్నించండి.')),
         );
       }
     } finally {
@@ -156,7 +157,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        child: const Text('Retry'),
+                        child: const Text('మళ్లీ ప్రయత్నించండి'),
                       ),
                     ],
                   ),
@@ -170,10 +171,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
                               size: 56,
                               color: isDark ? Colors.white24 : Colors.black26),
                           const SizedBox(height: 12),
-                          Text(
-                            'No stories in this category yet.',
+                          const Text(
+                            'ఈ విభాగంలో కథనాలు ఏవీ లేవు.',
                             style: TextStyle(
-                              color: isDark ? Colors.white54 : Colors.black54,
+                              color: Colors.grey,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
@@ -209,7 +210,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                             }
 
                             final article = _articles[index];
-                            return GestureDetector(
+                            final showAd = (index > 0 && index % 5 == 0);
+
+                            final card = GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onTap: () {
                                 Navigator.push(
@@ -340,6 +343,18 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                   ),
                                 ],
                               ),
+                            );
+
+                            if (!showAd) return card;
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(bottom: 14.0),
+                                  child: BannerAdSlot(placementZone: 'category_feed', maxHeight: 72),
+                                ),
+                                card,
+                              ],
                             );
                           },
                         ),

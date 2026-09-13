@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import '../core/navigation/auth_guard.dart';
 import '../state/app_state.dart';
 import '../models/reporter_post.dart';
 import 'account_login_screen.dart';
@@ -9,7 +10,6 @@ import 'reporter_intro_screen.dart';
 import '../features/admin/presentation/screens/admin_ugc_screen.dart';
 import 'bookmarks_screen.dart';
 import 'preferences_screen.dart';
-import 'settings_screen.dart';
 import 'about_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_screen.dart';
@@ -17,10 +17,7 @@ import 'notifications_screen.dart';
 import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
-import 'blogs_screen.dart';
-import 'ugc_feed_screen.dart';
 import 'device_sessions_screen.dart';
-import 'video_feed_screen.dart';
 import '../localization/app_translations.dart';
 
 class ProfileTab extends StatefulWidget {
@@ -162,33 +159,6 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                   ),
                   _buildListTile(
                     isDark: isDark,
-                    icon: Icons.article_outlined,
-                    title: 'Blogs & Editorials',
-                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const BlogsScreen()));
-                    },
-                  ),
-                  _buildListTile(
-                    isDark: isDark,
-                    icon: Icons.record_voice_over_outlined,
-                    title: 'Citizen Journalism Feed',
-                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const UgcFeedScreen()));
-                    },
-                  ),
-                  _buildListTile(
-                    isDark: isDark,
-                    icon: Icons.ondemand_video_rounded,
-                    title: 'Videos & Shorts',
-                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const VideoFeedScreen()));
-                    },
-                  ),
-                  _buildListTile(
-                    isDark: isDark,
                     icon: Icons.campaign_outlined,
                     title: tr('advertise_with_us'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
@@ -200,7 +170,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     _buildListTile(
                       isDark: isDark,
                       icon: Icons.devices_rounded,
-                      title: 'Active Device Sessions',
+                      title: 'యాక్టివ్ పరికర సెషన్‌లు',
                       trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                       onTap: () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceSessionsScreen()));
@@ -210,7 +180,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
                 const SizedBox(height: 20),
 
-                _buildSectionTitle('PREFERENCES', isDark),
+                _buildSectionTitle(tr('preferences'), isDark),
                 _buildSettingsGroup(isDark, [
                   _buildListTile(
                     isDark: isDark,
@@ -218,13 +188,6 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     title: tr('news_preferences'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen())),
-                  ),
-                  _buildListTile(
-                    isDark: isDark,
-                    icon: Icons.settings_outlined,
-                    title: 'App Settings',
-                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
                   ),
                   // Push Notifications Toggle
                   // Premium Notifications Tile
@@ -300,7 +263,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                   _buildListTile(
                     isDark: isDark,
                     icon: Icons.description_outlined,
-                    title: 'Terms & Conditions',
+                    title: tr('terms_of_service'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsScreen())),
                   ),
@@ -348,12 +311,135 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
   /// Identity Header Card (Guest vs Logged-In)
   Widget _buildIdentityCard(AppState state, bool isDark) {
+    if (!state.isLoggedIn) {
+      // Premium Guest User Card
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
+          ),
+        ),
+        child: Row(
+          children: [
+            // Avatar (Size 58, vibrant red gradient, clean centered G)
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFF6A6A), Color(0xFFFF3D3D)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFFF3D3D).withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  'G',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+
+            // Text Block (Greeting + User State)
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'స్వాగతం',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'గెస్ట్ యూజర్',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF1A1A1A),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Login Button (Primary CTA)
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF3D3D),
+                foregroundColor: Colors.white,
+                elevation: 2,
+                shadowColor: const Color(0xFFFF3D3D).withValues(alpha: 0.4),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.login_rounded, size: 16, color: Colors.white),
+              label: const Text(
+                'లాగిన్ అవ్వండి',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Logged-In User Card
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
+        ),
       ),
       child: Row(
         children: [
@@ -361,52 +447,49 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
             children: [
               GestureDetector(
                 onTap: () {
-                  if (state.isLoggedIn) {
-                    HapticFeedback.lightImpact();
-                    _showEditProfilePopup(state, isDark);
-                  }
+                  HapticFeedback.lightImpact();
+                  _showEditProfilePopup(state, isDark);
                 },
                 child: CircleAvatar(
                   radius: 28,
-                  backgroundColor: Colors.redAccent,
+                  backgroundColor: const Color(0xFFFF3D3D),
                   backgroundImage: state.profileImagePath != null && state.profileImagePath!.isNotEmpty
                       ? FileImage(File(state.profileImagePath!))
                       : null,
                   child: state.profileImagePath == null || state.profileImagePath!.isEmpty
                       ? Text(
-                          !state.isLoggedIn ? 'G' : (state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U'),
+                          state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U',
                           style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                         )
                       : null,
                 ),
               ),
-              if (state.isLoggedIn)
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                    child: GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        _showEditProfilePopup(state, isDark);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: isDark ? Colors.grey.shade800 : Colors.white,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.edit_rounded,
-                          size: 12,
-                          color: isDark ? Colors.white70 : Colors.black87,
-                        ),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    _showEditProfilePopup(state, isDark);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey.shade800 : Colors.white,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isDark ? Colors.grey.shade700 : Colors.grey.shade200,
+                        width: 1.5,
                       ),
                     ),
+                    child: Icon(
+                      Icons.edit_rounded,
+                      size: 12,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
                 ),
+              ),
             ],
           ),
           const SizedBox(width: 14),
@@ -418,7 +501,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                   children: [
                     Flexible(
                       child: Text(
-                        !state.isLoggedIn ? tr('guest_user') : state.userName,
+                        state.userName,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
@@ -429,7 +512,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
                         child: const Text(
-                          'అడ్మిన్ (Admin)',
+                          'అడ్మిన్',
                           style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
                         ),
                       ),
@@ -438,24 +521,12 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  !state.isLoggedIn ? tr('not_logged_in') : '+91 ${state.userPhone}',
+                  '+91 ${state.userPhone}',
                   style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 13),
                 ),
               ],
             ),
           ),
-          if (!state.isLoggedIn)
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
-              },
-              child: Text(tr('log_in').toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
         ],
       ),
     );
@@ -575,7 +646,13 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     return GestureDetector(
       onTap: () {
         HapticFeedback.lightImpact();
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const ReporterWalletScreen()));
+        requireAuth(
+          context,
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ReporterWalletScreen()),
+          ),
+        );
       },
       child: Container(
         padding: const EdgeInsets.all(18),
@@ -755,7 +832,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                           ),
                         ),
                         Text(
-                          'Edit Profile',
+                          'ప్రొఫైల్ సవరణ',
                           style: TextStyle(
                             color: isDark ? Colors.white : Colors.black87,
                             fontSize: 20,
@@ -804,7 +881,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                           controller: nameController,
                           style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                           decoration: InputDecoration(
-                            labelText: 'Full Name',
+                            labelText: 'పూర్తి పేరు',
                             labelStyle: TextStyle(color: isDark ? Colors.white54 : Colors.black54),
                             filled: true,
                             fillColor: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
@@ -828,7 +905,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                               state.updateProfile(name: nameController.text.trim(), imagePath: tempImagePath);
                               Navigator.pop(context);
                             },
-                            child: const Text('Save Changes', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            child: const Text('మార్పులను సేవ్ చేయండి', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                         const SizedBox(height: 16),

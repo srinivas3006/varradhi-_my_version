@@ -27,6 +27,17 @@ class SpotlightController extends ChangeNotifier {
   Map<String, dynamic>? _cachedQuote;
   Timer? _overlayTimer;
   int _requestGeneration = 0;
+  int _paginationSequence = 0;
+
+  // Performance caches & debouncers
+  final Map<String, NewsArticle> _detailCache = {};
+  DateTime? _lastPrefetchTime;
+  static const Duration _prefetchDebounce = Duration(milliseconds: 600);
+
+  NewsArticle? getCachedDetail(String key) => _detailCache[key];
+  void cacheDetail(String key, NewsArticle article) {
+    _detailCache[key] = article;
+  }
 
   SpotlightController({
     FeedRepository? feedRepository,
@@ -97,6 +108,7 @@ class SpotlightController extends ChangeNotifier {
     if (!_state.hasMore && !refresh) return;
 
     final gen = refresh ? ++_requestGeneration : _requestGeneration;
+    final seq = ++_paginationSequence;
     final completer = Completer<void>();
     _currentFetchCompleter = completer;
 
@@ -187,9 +199,9 @@ class SpotlightController extends ChangeNotifier {
                   : null,
             );
 
-      // Stale request guard: if generation changed during async fetch, discard result
-      if (gen != _requestGeneration) {
-        debugPrint('[SpotlightController] Discarding stale response for gen $gen (current: $_requestGeneration)');
+      // Stale request guard: if generation or sequence changed during async fetch, discard result
+      if (gen != _requestGeneration || seq != _paginationSequence) {
+        debugPrint('[SpotlightController] Discarding stale or out-of-order response (gen: $gen vs $_requestGeneration, seq: $seq vs $_paginationSequence)');
         return;
       }
 
@@ -312,6 +324,11 @@ class SpotlightController extends ChangeNotifier {
         AdDeliveryService.instance.selectAd(_adsPool);
     if (adToInsert == null) return false;
 
+    // Hardened ID-based deduplication: prevent injecting the same ad twice in feed deck
+    if (_state.feed.any((item) => item.type == SpotlightType.ad && item.adBanner?.id == adToInsert.id)) {
+      return false;
+    }
+
     final updated = List<SpotlightItem>.from(_state.feed);
     updated.insert(targetIndex, SpotlightItem.ad(adToInsert));
     _state = _state.copyWith(feed: updated);
@@ -400,5 +417,18 @@ class SpotlightController extends ChangeNotifier {
 
   Future<void> refreshFeed() async {
     await loadFeed(refresh: true);
+  }
+
+  /// Debounced prefetch ensuring network requests are never fired in bursts on rapid flings.
+  void prefetchNextPageIfNeeded(int currentIndex) {
+    if (currentIndex < _state.feed.length - 6) return;
+    if (_state.isFetching || !_state.hasMore) return;
+
+    final now = DateTime.now();
+    if (_lastPrefetchTime != null && now.difference(_lastPrefetchTime!) < _prefetchDebounce) {
+      return;
+    }
+    _lastPrefetchTime = now;
+    loadFeed();
   }
 }

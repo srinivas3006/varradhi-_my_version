@@ -59,7 +59,9 @@ class VideoItem {
     // 2. Video & YouTube URL resolution
     final rawYtUrl = json['youtube_url']?.toString();
     final rawVideoUrl = json['video_url']?.toString();
-    String? resolvedYtId = json['youtube_video_id']?.toString().trim();
+    String? resolvedYtId = MediaResolver.extractYoutubeVideoId(
+      json['youtube_video_id']?.toString(),
+    );
 
     if (resolvedYtId == null || resolvedYtId.isEmpty) {
       resolvedYtId = MediaResolver.extractYoutubeVideoId(rawYtUrl) ??

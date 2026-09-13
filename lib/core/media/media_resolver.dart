@@ -8,11 +8,11 @@ class MediaResolver {
   MediaResolver._();
 
   static final RegExp _ytRegex = RegExp(
-    r'(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})',
+    r'(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([A-Za-z0-9_-]{11})',
     caseSensitive: false,
   );
 
-  static final RegExp _ytIdRegex = RegExp(r'^[\w-]{11}$');
+  static final RegExp _ytIdRegex = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
   /// Resolves any combination of video URL, YouTube ID, and thumbnail into a [MediaSource].
   static MediaSource resolve({
@@ -24,13 +24,13 @@ class MediaResolver {
     bool isVideoFlag = false,
   }) {
     // 1. Sanitize raw strings
-    final rawYtId = youtubeVideoId?.trim();
+    final rawYtId = extractYoutubeVideoId(youtubeVideoId);
     final rawYtUrl = youtubeUrl?.trim();
     final rawVideoUrl = videoUrl?.trim();
     final effectiveThumb = UrlNormalizer.normalize(thumbnailUrl);
 
     // 2. Check if a valid YouTube Video ID is provided directly
-    if (rawYtId != null && rawYtId.isNotEmpty && _ytIdRegex.hasMatch(rawYtId)) {
+    if (rawYtId != null && rawYtId.isNotEmpty) {
       final thumb = effectiveThumb.isNotEmpty
           ? effectiveThumb
           : 'https://i.ytimg.com/vi/$rawYtId/hqdefault.jpg';
@@ -124,10 +124,48 @@ class MediaResolver {
     if (_ytIdRegex.hasMatch(cleaned)) {
       return cleaned;
     }
+    final uri = Uri.tryParse(cleaned);
+    final idFromUri = _extractYoutubeVideoIdFromUri(uri);
+    if (idFromUri != null) return idFromUri;
+
     final match = _ytRegex.firstMatch(cleaned);
     if (match != null && match.groupCount >= 1) {
-      return match.group(1);
+      final matchId = match.group(1);
+      return matchId != null && _ytIdRegex.hasMatch(matchId) ? matchId : null;
     }
+    return null;
+  }
+
+  static String? _extractYoutubeVideoIdFromUri(Uri? uri) {
+    if (uri == null) return null;
+    final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final segments = uri.pathSegments;
+
+    if (host == 'youtu.be' && segments.isNotEmpty) {
+      final id = segments.first.trim();
+      return _ytIdRegex.hasMatch(id) ? id : null;
+    }
+
+    final isYoutubeHost = host == 'youtube.com' ||
+        host == 'm.youtube.com' ||
+        host == 'music.youtube.com' ||
+        host == 'youtube-nocookie.com';
+    if (!isYoutubeHost) return null;
+
+    final watchId = uri.queryParameters['v']?.trim();
+    if (watchId != null && _ytIdRegex.hasMatch(watchId)) return watchId;
+
+    for (var i = 0; i < segments.length - 1; i++) {
+      final marker = segments[i].toLowerCase();
+      if (marker == 'shorts' ||
+          marker == 'embed' ||
+          marker == 'v' ||
+          marker == 'live') {
+        final id = segments[i + 1].trim();
+        return _ytIdRegex.hasMatch(id) ? id : null;
+      }
+    }
+
     return null;
   }
 }

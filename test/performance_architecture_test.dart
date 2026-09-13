@@ -14,12 +14,14 @@ import 'package:flutter/services.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const MethodChannel secureStorageChannel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+  const MethodChannel secureStorageChannel =
+      MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
   final Map<String, String> mockSecureStorage = {};
 
   setUpAll(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, (MethodCall methodCall) async {
+        .setMockMethodCallHandler(secureStorageChannel,
+            (MethodCall methodCall) async {
       if (methodCall.method == 'read') {
         return mockSecureStorage[methodCall.arguments?['key']];
       } else if (methodCall.method == 'write') {
@@ -41,7 +43,8 @@ void main() {
   });
 
   group('Performance Architecture: Rebuild Scoping Tests', () {
-    test('themeAndLocaleNotifier only notifies on theme or language changes', () {
+    test('themeAndLocaleNotifier only notifies on theme or language changes',
+        () {
       int themeLocaleNotifiedCount = 0;
       int appStateNotifiedCount = 0;
 
@@ -52,16 +55,18 @@ void main() {
       AppState.instance.addListener(stateSub);
 
       try {
-        // 1. Content state updates: like, bookmark, user profile edits
+        // 1. Authenticated content state updates: like, bookmark, user profile edits
+        AppState.instance.isLoggedIn = true;
+        AppState.instance.authToken = 'test-token';
         AppState.instance.toggleLike('test_article_1');
         AppState.instance.toggleBookmark('test_article_1');
         AppState.instance.setUserName('Test User');
-        AppState.instance.login('9876543210');
 
         // Should notify AppState listeners, but NOT themeAndLocaleNotifier
-        expect(appStateNotifiedCount, greaterThanOrEqualTo(4));
+        expect(appStateNotifiedCount, greaterThanOrEqualTo(3));
         expect(themeLocaleNotifiedCount, equals(0),
-            reason: 'ThemeAndLocaleNotifier must NOT fire on likes, bookmarks, or coins');
+            reason:
+                'ThemeAndLocaleNotifier must NOT fire on likes, bookmarks, or coins');
 
         // 2. Language and Theme updates: should notify both
         AppState.instance.setLanguage('English');
@@ -80,7 +85,8 @@ void main() {
   });
 
   group('Performance Architecture: HomeScreen Lazy Tab Activation Tests', () {
-    testWidgets('Inactive secondary tabs are NOT mounted on cold launch', (tester) async {
+    testWidgets('Inactive secondary tabs are NOT mounted on cold launch',
+        (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: HomeScreen(initialTabIndex: 0),

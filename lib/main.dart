@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/navigation/app_navigator_observer.dart';
+import 'screens/account_login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
 import 'services/deep_link_service.dart';
@@ -101,6 +102,9 @@ class Way2NewsCloneApp extends StatelessWidget {
           themeAnimationDuration: const Duration(milliseconds: 400),
           themeAnimationCurve: Curves.easeInOut,
           home: const SplashScreen(),
+          routes: {
+            '/login': (_) => const AccountLoginScreen(),
+          },
         );
       },
     );

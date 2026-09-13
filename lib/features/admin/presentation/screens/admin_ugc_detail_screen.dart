@@ -61,7 +61,7 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
             backgroundColor: AdminColors.scaffold(isDark),
             foregroundColor: AdminColors.textPrimary(isDark),
             elevation: 0,
-            title: const Text('UGC Moderation Detail', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            title: const Text('యూజర్ కథనం సమగ్ర వివరాలు', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             actions: [
               IconButton(icon: const Icon(Icons.edit_outlined), onPressed: () => showAdminEditMetadataSheet(context, controller: _controller)),
               IconButton(icon: const Icon(Icons.refresh), onPressed: _controller.loadDetail),
@@ -97,13 +97,13 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
           Icon(Icons.shield_outlined, color: color, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('STATUS: ${s.status.label.toUpperCase()}', style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 13.5)),
+            child: Text('స్థితి: ${s.status.teluguLabel}', style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 13.5)),
           ),
           if (s.moderationLevel.isNotEmpty)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(color: AdminColors.card(isDark), borderRadius: BorderRadius.circular(10)),
-              child: Text('Level: ${s.moderationLevel.toUpperCase()}', style: TextStyle(color: AdminColors.textPrimary(isDark), fontSize: 11, fontWeight: FontWeight.w700)),
+              child: Text('స్థాయి: ${s.moderationLevel}', style: TextStyle(color: AdminColors.textPrimary(isDark), fontSize: 11, fontWeight: FontWeight.w700)),
             ),
         ],
       ),
@@ -126,7 +126,7 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
   Widget _buildContentDetailsCard(AdminUgcSubmissionModel s, bool isDark) {
     return _card(isDark, children: [
       AdminSectionLabel(
-        'Content Details',
+        'కథన వివరాలు',
         trailing: s.category.isNotEmpty
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -143,7 +143,7 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
       ],
       if (s.editorNotes.isNotEmpty) ...[
         const SizedBox(height: 10),
-        Text('Editor Notes: "${s.editorNotes}"', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12.5, fontStyle: FontStyle.italic)),
+        Text('ఎడిటర్ నోట్స్: "${s.editorNotes}"', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12.5, fontStyle: FontStyle.italic)),
       ],
     ]);
   }
@@ -151,9 +151,9 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
   Widget _buildLocationCard(AdminUgcSubmissionModel s, bool isDark) {
     final parts = [s.village, s.mandal, s.district, s.stateName].where((e) => e.isNotEmpty).join(' · ');
     return _card(isDark, children: [
-      const AdminSectionLabel('Location Hierarchy'),
+      const AdminSectionLabel('ప్రాంత వివరాలు'),
       const SizedBox(height: 10),
-      Text(parts.isEmpty ? 'No location data' : parts, style: TextStyle(color: AdminColors.textPrimary(isDark), fontSize: 13.5)),
+      Text(parts.isEmpty ? 'లొకేషన్ వివరాలు లేవు' : parts, style: TextStyle(color: AdminColors.textPrimary(isDark), fontSize: 13.5)),
       if (s.latitude != null && s.longitude != null) ...[
         const SizedBox(height: 6),
         Text('GPS: ${s.latitude!.toStringAsFixed(4)}, ${s.longitude!.toStringAsFixed(4)}',
@@ -165,25 +165,25 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
   Widget _buildReporterCard(AdminUgcSubmissionModel s, bool isDark) {
     return _card(isDark, children: [
       AdminSectionLabel(
-        'Reporter & Audit Verification',
+        'రిపోర్టర్ & ఆడిట్ ధృవీకరణ',
         trailing: TextButton(
           onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s),
-          child: const Text('View Profile'),
+          child: const Text('ప్రొఫైల్ చూడండి'),
         ),
       ),
       const SizedBox(height: 6),
-      _kv('Name', s.reporterName, isDark),
-      if (s.reporterEmail.isNotEmpty) _kv('Email', s.reporterEmail, isDark),
-      if (s.reporterMobile.isNotEmpty) _kv('Mobile', s.reporterMobile, isDark),
+      _kv('పేరు', s.reporterName, isDark),
+      if (s.reporterEmail.isNotEmpty) _kv('ఇమెయిల్', s.reporterEmail, isDark),
+      if (s.reporterMobile.isNotEmpty) _kv('మొబైల్', s.reporterMobile, isDark),
       Row(
         children: [
-          Expanded(child: _kv('Trust Level', '', isDark, trailing: AdminTrustBadge(level: s.trustLevel))),
+          Expanded(child: _kv('విశ్వసనీయత స్థాయి', '', isDark, trailing: AdminTrustBadge(level: s.trustLevel))),
         ],
       ),
-      _kv('Uploader Status', s.uploaderStatus, isDark),
-      if (s.duplicateFlagged) _kv('Duplicate Score', '${s.duplicateScore?.toStringAsFixed(0) ?? '?'}%', isDark),
-      _kv('Reports Count', s.reportCount.toString(), isDark),
-      _kv('Submitted At', s.submittedAt.toLocal().toString(), isDark),
+      _kv('అప్‌లోడర్ హోదా', s.uploaderStatus, isDark),
+      if (s.duplicateFlagged) _kv('డూప్లికేట్ స్కోర్', '${s.duplicateScore?.toStringAsFixed(0) ?? '?'}%', isDark),
+      _kv('నివేదికల సంఖ్య', s.reportCount.toString(), isDark),
+      _kv('సమర్పించిన సమయం', s.submittedAt.toLocal().toString(), isDark),
     ]);
   }
 
@@ -209,49 +209,49 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
           OutlinedButton(
             onPressed: _reject,
             style: OutlinedButton.styleFrom(foregroundColor: AdminColors.error, side: const BorderSide(color: AdminColors.error)),
-            child: const Text('Reject'),
+            child: const Text('తిరస్కరించు'),
           ),
           const SizedBox(width: 8),
           ElevatedButton(
             onPressed: _approve,
             style: ElevatedButton.styleFrom(backgroundColor: AdminColors.success, foregroundColor: Colors.white),
-            child: const Text('Approve'),
+            child: const Text('ఆమోదించు'),
           ),
         ],
       );
     } else if (s.status == AdminUgcStatus.flagged) {
       content = Row(
         children: [
-          TextButton(onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s), child: const Text('Profile')),
+          TextButton(onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s), child: const Text('రిపోర్టర్ ప్రొఫైల్')),
           const Spacer(),
           OutlinedButton(
             onPressed: _reject,
             style: OutlinedButton.styleFrom(foregroundColor: AdminColors.error, side: const BorderSide(color: AdminColors.error)),
-            child: const Text('Reject'),
+            child: const Text('తిరస్కరించు'),
           ),
           const SizedBox(width: 8),
           ElevatedButton(
             onPressed: _approve,
             style: ElevatedButton.styleFrom(backgroundColor: AdminColors.success, foregroundColor: Colors.white),
-            child: const Text('Approve'),
+            child: const Text('ఆమోదించు'),
           ),
         ],
       );
     } else {
       content = Row(
         children: [
-          TextButton(onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s), child: const Text('Reporter Profile')),
+          TextButton(onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s), child: const Text('రిపోర్టర్ ప్రొఫైల్')),
           const Spacer(),
           OutlinedButton(
             onPressed: _controller.decreaseTrust,
             style: OutlinedButton.styleFrom(foregroundColor: AdminColors.warning, side: const BorderSide(color: AdminColors.warning)),
-            child: const Text('Trust -10'),
+            child: const Text('ట్రస్ట్ -10'),
           ),
           const SizedBox(width: 8),
           OutlinedButton(
             onPressed: _controller.increaseTrust,
             style: OutlinedButton.styleFrom(foregroundColor: AdminColors.success, side: const BorderSide(color: AdminColors.success)),
-            child: const Text('Trust +10'),
+            child: const Text('ట్రస్ట్ +10'),
           ),
         ],
       );

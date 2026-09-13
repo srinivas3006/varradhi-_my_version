@@ -41,35 +41,35 @@ All core article actions are pinned directly inside the article card:
 
 ## 🛠️ Complete 27-Screen Matrix (from `appcode.md`)
 
-| # | Screen | Description & Connected APIs |
-|---|---|---|
-| **01** | `SplashScreen` | Health check, guest device registration, auth check (`/api/v1/auth/me/`) |
-| **02** | `LoginScreen` | Phone & Password / OTP login (`/api/v1/auth/login/`) |
-| **03** | `RegisterScreen` | New user account creation with language selection (`/api/v1/auth/register/`) |
-| **04** | `ForgotPasswordScreen` | Password reset request with phone/email verification (`/api/v1/password/reset/request/`) |
-| **05** | `ResetPasswordTokenScreen`| OTP verification step for password recovery (`/api/v1/password/reset/verify/`) |
-| **06** | `ResetPasswordConfirmScreen`| Set new password and redirect to login (`/api/v1/password/reset/confirm/`) |
-| **07** | `HomeScreen` | Main app shell hosting category tabs, reels, local news, notifications, and profile |
-| **08** | `CategoryScreen` | Filtered articles by category (`/api/v1/articles/feed/`) |
-| **09** | `ArticleDetailScreen` | Full article view with web view, related articles, comments, and TTS |
-| **10** | `SpotlightScreen` | Vertical flip feed with auto-hide overlays, 300-char preview, and in-article actions |
-| **11** | `LocationPromptSheet` | Location permission, district/mandal selector, and reverse geocoding |
-| **12** | `LocalNewsScreen` | Location-targeted feed with mandal/district chips |
-| **13** | `VideoFeedScreen` | Fullscreen vertical reels/shorts video feed (`/api/v1/shorts/feed/`) |
-| **14** | `SearchScreen` | Real-time search with trending tags and recent search history |
-| **15** | `CreatePostScreen` | Citizen journalism UGC posting with image upload, category, and location |
-| **16** | `MyPostsScreen` | Reporter's personal post list with status badges (Pending, Approved, Rejected) |
-| **17** | `AdminUgcModerationScreen`| Admin review queue for reviewing, approving, and rejecting citizen reports |
-| **18** | `CommentsScreen` | Nested comments bottom sheet with posting and like toggles |
-| **19** | `PollsListScreen` | Community opinion polls with real-time percentage graphs |
-| **20** | `PreferencesScreen` | Topic and category preference personalization (`/api/v1/users/preferences/`) |
-| **21** | `NotificationsScreen` | Inbox notifications with deep-links, thumbnail preview, and mark-as-read |
-| **22** | `NotificationSettingsScreen`| Granular push notification preferences (Breaking, Live, Quiet Hours) |
-| **23** | `BookmarksScreen` | Saved articles collection with offline cache and undo unbookmarking |
-| **24** | `ProfileScreen` | User profile, reporter status, coins balance, admin moderation entry point |
-| **25** | `SettingsScreen` | App settings (Theme mode, Font-size slider, Language, CMS links) |
-| **26** | `RewardsScreen` | Signature red gradient wallet card (5549 coins), ₹ cash estimate, UPI withdrawal |
-| **27** | `CMSPageScreen` | Dynamic legal & information pages (`/api/v1/cms/{slug}/`) |
+| # | Screen / Module | Code File & Architecture | Description & Connected APIs |
+|---|---|---|---|
+| **01** | `SplashScreen` | `lib/screens/splash_screen.dart` | Health check, guest device registration, auth check (`/api/v1/auth/me/`) |
+| **02** | `AccountLoginScreen` | `lib/screens/account_login_screen.dart` | Phone & Password / OTP login (`/api/v1/auth/login/`) |
+| **03** | `AccountSignupScreen` | `lib/screens/account_signup_screen.dart` | New user account creation with language selection (`/api/v1/auth/register/`) |
+| **04** | `ForgotPasswordScreen` | `lib/screens/forgot_password_screen.dart` | Password reset request with phone/email verification (`/api/v1/password/reset/request/`) |
+| **05** | `ResetPasswordTokenScreen`| `lib/screens/reset_password_token_screen.dart` | OTP verification step for password recovery (`/api/v1/password/reset/verify/`) |
+| **06** | `ResetPasswordConfirmScreen`| `lib/screens/reset_password_confirm_screen.dart` | Set new password and redirect to login (`/api/v1/password/reset/confirm/`) |
+| **07** | `HomeScreen` | `lib/screens/home_screen.dart` | Main app shell hosting category tabs, reels, local news, notifications, and profile |
+| **08** | `CategoryScreen` | `lib/screens/category_screen.dart` | Filtered articles by category (`/api/v1/articles/feed/`) |
+| **09** | `ArticleDetailScreen` | `lib/screens/article_detail_screen.dart` | Full article view with web view, related articles, comments, and TTS |
+| **10** | `SpotlightScreen` | `lib/spotlight/spotlight_screen.dart` | Vertical flip feed with auto-hide overlays, 300-char preview, and in-article actions |
+| **11** | `LocationPromptSheet` | `lib/widgets/spotlight/location_prompt_sheet.dart` | Location permission, district/mandal selector, and reverse geocoding |
+| **12** | `LocalNewsTab` | `lib/screens/local_news_tab.dart` | Location-targeted feed with mandal/district chips |
+| **13** | `VideoFeedScreen` | `lib/screens/video_feed_screen.dart` | Fullscreen vertical reels/shorts video feed (`/api/v1/shorts/feed/`) |
+| **14** | `SearchScreen` | `lib/screens/search_screen.dart` | Real-time search with trending tags and recent search history |
+| **15** | `CreatePostScreen` | `lib/screens/create_post_screen.dart` | Citizen journalism UGC posting with image upload, category, and location |
+| **16** | `MyPostsScreen` | `lib/screens/my_posts_screen.dart` | Reporter's personal post list with status badges (Pending, Approved, Rejected) |
+| **17** | `AdminUgcScreen` | `lib/features/admin/presentation/screens/admin_ugc_screen.dart` | Admin review queue for reviewing, approving, and rejecting citizen reports |
+| **18** | `CommentsScreen` | `lib/screens/comments_screen.dart` | Nested comments bottom sheet with posting and like toggles |
+| **19** | `In-Feed Interactive Polls` | `lib/widgets/poll_card.dart` & `FeedEngine` | Community opinion polls with real-time percentage graphs rendered directly in feed |
+| **20** | `PreferencesScreen` | `lib/screens/preferences_screen.dart` | Topic and category preference personalization (`/api/v1/users/preferences/`) |
+| **21** | `NotificationsScreen` | `lib/screens/notifications_screen.dart` | Inbox notifications with deep-links, thumbnail preview, and mark-as-read |
+| **22** | `NotificationSettingsScreen`| `lib/screens/notification_settings_screen.dart` | Granular push notification preferences (Breaking, Live, Quiet Hours) |
+| **23** | `BookmarksScreen` | `lib/screens/bookmarks_screen.dart` | Saved articles collection with offline cache and undo unbookmarking |
+| **24** | `ProfileTab` | `lib/screens/profile_tab.dart` | User profile, reporter status, coins balance, admin moderation entry point |
+| **25** | `SettingsScreen` | `lib/screens/settings_screen.dart` | App settings (Theme mode, Font-size slider, Language, Account Deletion, CMS links) |
+| **26** | `ReporterWalletScreen` | `lib/screens/reporter_wallet_screen.dart` | Signature red gradient wallet card (5549 coins), ₹ cash estimate, UPI withdrawal |
+| **27** | `CMSPageScreen` | `lib/screens/cms_page_screen.dart` | Dynamic legal & information pages (`/api/v1/cms/{slug}/`) |
 
 ---
 

@@ -10,13 +10,13 @@ class ReporterWalletScreen extends StatelessWidget {
   String _redeemStatusLabel(RedeemStatus status) {
     switch (status) {
       case RedeemStatus.requested:
-        return 'Pending';
+        return 'పెండింగ్';
       case RedeemStatus.processing:
-        return 'Processing';
+        return 'ప్రాసెసింగ్';
       case RedeemStatus.paid:
-        return 'Paid';
+        return 'చెల్లించబడింది';
       case RedeemStatus.rejected:
-        return 'Rejected';
+        return 'తిరస్కరించబడింది';
     }
   }
 
@@ -60,7 +60,7 @@ class ReporterWalletScreen extends StatelessWidget {
                 flexibleSpace: FlexibleSpaceBar(
                   titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
                   title: Text(
-                    'Rewards & Earnings',
+                    'రివార్డ్‌లు & ఆదాయాలు',
                     style: TextStyle(
                       color: isDark ? Colors.white : Colors.black87,
                       fontWeight: FontWeight.bold,
@@ -161,7 +161,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  'AVAILABLE COINS',
+                                  'అందుబాటులో ఉన్న కాయిన్లు',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w900,
@@ -224,8 +224,8 @@ class ReporterWalletScreen extends StatelessWidget {
                             // Subtext
                             Text(
                               canRedeem
-                                  ? 'You can withdraw now.'
-                                  : 'Need ${AppState.tokensNeededToRedeem - state.reporterTokens} more to withdraw',
+                                  ? 'మీరు ఇప్పుడు విత్‌డ్రా చేసుకోవచ్చు.'
+                                  : 'విత్‌డ్రా కోసం ఇంకా ${AppState.tokensNeededToRedeem - state.reporterTokens} కాయిన్లు కావాలి',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -268,7 +268,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                     ),
                                     SizedBox(width: 8),
                                     Text(
-                                      'Withdraw over UPI',
+                                      'UPI ద్వారా విత్‌డ్రా చేయండి',
                                       style: TextStyle(
                                         color: Color(0xFFBA0014),
                                         fontSize: 15,
@@ -315,7 +315,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 3),
                                   const Text(
-                                    'Lifetime',
+                                    'మొత్తం ఆదాయం',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -354,7 +354,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 3),
                                   const Text(
-                                    'Locked',
+                                    'లాక్ అయినవి',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -393,7 +393,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 3),
                                   const Text(
-                                    'Redeemed',
+                                    'విత్‌డ్రా చేసినవి',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -414,7 +414,7 @@ class ReporterWalletScreen extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Transaction History',
+                            'లావాదేవీల చరిత్ర',
                             style: TextStyle(
                               color: isDark ? Colors.white : Colors.black87,
                               fontSize: 16,
@@ -435,7 +435,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 Icon(Icons.receipt_long_rounded, size: 48, color: isDark ? Colors.white24 : Colors.black12),
                                 const SizedBox(height: 16),
                                 Text(
-                                  'No transactions yet.',
+                                  'ఇంకా లావాదేవీలు లేవు.',
                                   style: TextStyle(
                                     color: isDark ? Colors.white54 : Colors.black45,
                                     fontSize: 14,
@@ -505,7 +505,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    '-${r.tokensRedeemed} Tokens',
+                                    '-${r.tokensRedeemed} టోకెన్లు',
                                     style: const TextStyle(
                                       color: Colors.redAccent,
                                       fontWeight: FontWeight.bold,

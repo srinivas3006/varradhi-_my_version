@@ -58,11 +58,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
 
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(AppState.instance.language == 'Telugu' 
-            ? 'అభిరుచులు సేవ్ చేయబడ్డాయి' 
-            : 'Preferences saved'),
-        duration: const Duration(seconds: 2),
+      const SnackBar(
+        content: Text('అభిరుచులు సేవ్ చేయబడ్డాయి'),
+        duration: Duration(seconds: 2),
       ),
     );
   }
@@ -73,9 +71,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          AppState.instance.language == 'Telugu' ? 'కంటెంట్ అభిరుచులు' : 'News Preferences',
-          style: const TextStyle(fontWeight: FontWeight.w700),
+        title: const Text(
+          'కంటెంట్ అభిరుచులు',
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
         centerTitle: true,
       ),
@@ -84,9 +82,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Text(
-              AppState.instance.language == 'Telugu'
-                  ? 'మీకు ఆసక్తి ఉన్న అంశాలను ఎంచుకోండి. మేము మీ ఫీడ్‌ను అనుకూలీకరిస్తాము.'
-                  : 'Select topics you are interested in. We will personalize your feed.',
+              'మీకు ఆసక్తి ఉన్న అంశాలను ఎంచుకోండి. మేము మీ ఫీడ్‌ను అనుకూలీకరిస్తాము.',
               style: TextStyle(
                 fontSize: 15,
                 color: isDark ? AppColors.textMuted : Theme.of(context).textTheme.bodyMedium?.color,
@@ -146,9 +142,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : Text(
-                          AppState.instance.language == 'Telugu' ? 'సేవ్ చేయండి' : 'Save Preferences',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      : const Text(
+                          'సేవ్ చేయండి',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                 ),
               ),

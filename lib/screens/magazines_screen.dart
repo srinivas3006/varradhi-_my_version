@@ -33,7 +33,7 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Digital Magazines')),
+      appBar: AppBar(title: const Text('డిజిటల్ మ్యాగజైన్‌లు (Magazines)')),
       body: Column(
         children: [
           Expanded(
@@ -49,12 +49,12 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
                               Icon(Icons.menu_book_rounded, size: 48, color: AppColors.textMuted),
                               SizedBox(height: 12),
                               Text(
-                                'No digital magazines available',
+                                'ప్రస్తుతానికి మ్యాగజైన్‌లు అందుబాటులో లేవు',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                               SizedBox(height: 6),
                               Text(
-                                'New issues and EPapers will appear here automatically when published.',
+                                'కొత్త సంచికలు మరియు ఈ-పేపర్లు ప్రచురించబడినప్పుడు ఇక్కడ కనిపిస్తాయి.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                               ),

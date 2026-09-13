@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../core/navigation/notification_navigation_gate.dart';
@@ -237,6 +238,56 @@ class NotificationService {
     await navigateToTarget(target, context: context);
   }
 
+  OverlayEntry? _loadingOverlay;
+
+  void _showLoadingIndicator(BuildContext context) {
+    if (_loadingOverlay != null) return;
+    try {
+      final overlay = Overlay.maybeOf(context);
+      if (overlay == null) return;
+
+      _loadingOverlay = OverlayEntry(
+        builder: (_) => Container(
+          color: Colors.black.withValues(alpha: 0.35),
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(22),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const SizedBox(
+                width: 36,
+                height: 36,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      overlay.insert(_loadingOverlay!);
+    } catch (e) {
+      debugPrint('[NotificationService] Could not insert loading overlay: $e');
+    }
+  }
+
+  void _dismissLoadingIndicator() {
+    try {
+      _loadingOverlay?.remove();
+    } catch (_) {}
+    _loadingOverlay = null;
+  }
+
   /// Navigates to a typed [NotificationTarget] using [AppNavigator.pushSafe]
   /// to ensure STEP 5 navigation stack safety, debounce protection, and auth challenge preservation.
   Future<void> navigateToTarget(
@@ -249,40 +300,50 @@ class NotificationService {
       return;
     }
 
-    // Mark as read asynchronously on backend if notification ID is available
-    if (target.notificationId != null && target.notificationId!.isNotEmpty) {
-      unawaited(
-        ApiService.instance
-            .markNotificationRead(target.notificationId!)
-            .catchError((_) => false),
-      );
+    // Atomic concurrency guard: prevent double navigation if already in-flight or tapped in rapid succession
+    if (!NotificationNavigationGate.instance.acquireDispatchLock(target)) {
+      return;
     }
-
-    // Handle authentication gate for protected targets
-    if (target.requiresAuth && !AppState.instance.isLoggedIn) {
-      final loginSuccess = await AppNavigator.pushSafe<bool>(
-        navContext,
-        MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-      );
-
-      if (loginSuccess != true || !navContext.mounted) {
-        // User dismissed login or login failed; intent cancelled safely
-        return;
-      }
-    }
-
-    if (!navContext.mounted) return;
 
     try {
+      // Mark as read asynchronously on backend if notification ID is available
+      if (target.notificationId != null && target.notificationId!.isNotEmpty) {
+        unawaited(
+          ApiService.instance
+              .markNotificationRead(target.notificationId!)
+              .catchError((_) => false),
+        );
+      }
+
+      // Handle authentication gate for protected targets
+      if (target.requiresAuth && !AppState.instance.isLoggedIn) {
+        final loginSuccess = await AppNavigator.pushSafe<bool>(
+          navContext,
+          MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+        );
+
+        if (loginSuccess != true || !navContext.mounted) {
+          // User dismissed login or login failed; intent cancelled safely
+          return;
+        }
+      }
+
+      if (!navContext.mounted) return;
+
       switch (target.type) {
         case NotificationTargetType.article:
           final slug = target.identifier;
           if (slug != null && slug.isNotEmpty) {
+            _showLoadingIndicator(navContext);
             try {
-              final article =
-                  await NewsArticleRepository.instance.getDetail(slug);
+              final article = await NewsArticleRepository.instance
+                  .getDetail(slug)
+                  .timeout(const Duration(seconds: 8));
+
+              _dismissLoadingIndicator();
+
               if (navContext.mounted) {
-                AppNavigator.pushSafe(
+                await AppNavigator.pushSafe(
                   navContext,
                   MaterialPageRoute(
                     builder: (_) =>
@@ -291,13 +352,20 @@ class NotificationService {
                 );
               }
             } catch (e) {
+              _dismissLoadingIndicator();
+              debugPrint(
+                  '[NotificationService] Article load error for slug "$slug": $e');
               if (navContext.mounted) {
-                ScaffoldMessenger.of(navContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('This update is no longer available.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                ScaffoldMessenger.of(navContext)
+                  ..removeCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content:
+                          Text('ఈ కథనం అందుబాటులో లేదు లేదా తొలగించబడింది.'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
               }
             }
           }
@@ -311,7 +379,7 @@ class NotificationService {
             final categoryName = categorySlug.length > 1
                 ? '${categorySlug[0].toUpperCase()}${categorySlug.substring(1)}'
                 : categorySlug.toUpperCase();
-            AppNavigator.pushSafe(
+            await AppNavigator.pushSafe(
               navContext,
               MaterialPageRoute(
                 builder: (_) => CategoryScreen(
@@ -327,8 +395,14 @@ class NotificationService {
         case NotificationTargetType.poster:
           final posterId = target.identifier;
           if (posterId != null && posterId.isNotEmpty) {
+            _showLoadingIndicator(navContext);
             try {
-              final posters = await ApiService.instance.getPosters();
+              final posters = await ApiService.instance
+                  .getPosters()
+                  .timeout(const Duration(seconds: 6));
+
+              _dismissLoadingIndicator();
+
               final poster = posters.firstWhere(
                 (p) => p['id']?.toString() == posterId,
                 orElse: () => {
@@ -338,20 +412,25 @@ class NotificationService {
                 },
               );
               if (navContext.mounted) {
-                AppNavigator.pushSafe(
+                await AppNavigator.pushSafe(
                   navContext,
                   MaterialPageRoute(
                       builder: (_) => PosterDetailScreen(poster: poster)),
                 );
               }
             } catch (_) {
+              _dismissLoadingIndicator();
               if (navContext.mounted) {
-                ScaffoldMessenger.of(navContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('This update is no longer available.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                ScaffoldMessenger.of(navContext)
+                  ..removeCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content:
+                          Text('ఈ పోస్టర్ అందుబాటులో లేదు లేదా తొలగించబడింది.'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
               }
             }
           }
@@ -364,9 +443,12 @@ class NotificationService {
               MaterialPageRoute(builder: (_) => const MyPostsScreen()),
             );
           } else if (target.screenName == 'submit') {
-            AppNavigator.pushSafe(
+            requireAuth(
               navContext,
-              MaterialPageRoute(builder: (_) => const CreatePostScreen()),
+              () => AppNavigator.pushSafe(
+                navContext,
+                MaterialPageRoute(builder: (_) => const CreatePostScreen()),
+              ),
             );
           } else if (target.identifier != null &&
               target.identifier!.isNotEmpty) {
@@ -420,7 +502,10 @@ class NotificationService {
           break;
       }
     } catch (e) {
+      _dismissLoadingIndicator();
       debugPrint('[NotificationService] Error routing notification target: $e');
+    } finally {
+      NotificationNavigationGate.instance.releaseDispatchLock();
     }
   }
 

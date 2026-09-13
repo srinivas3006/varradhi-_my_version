@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../core/navigation/auth_guard.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
@@ -20,13 +21,13 @@ import '../state/app_state.dart';
 import '../localization/app_translations.dart';
 import '../screens/home_screen.dart';
 import '../screens/location_selection_screen.dart';
-import '../screens/account_login_screen.dart';
 import '../screens/create_post_screen.dart';
 import '../screens/profile_tab.dart';
 import '../services/tts_service.dart';
 
 import 'spotlight_controller.dart';
 import 'spotlight_state.dart';
+import 'spotlight_media_coordinator.dart';
 
 class SpotlightScreenView extends StatefulWidget {
   final String? initialStoryId;
@@ -46,9 +47,11 @@ class SpotlightScreenView extends StatefulWidget {
   State<SpotlightScreenView> createState() => _SpotlightScreenViewState();
 }
 
-class _SpotlightScreenViewState extends State<SpotlightScreenView> {
+class _SpotlightScreenViewState extends State<SpotlightScreenView>
+    with WidgetsBindingObserver {
   late final SpotlightController _controller;
-  final ParallaxPageFlipController _flipController = ParallaxPageFlipController();
+  final ParallaxPageFlipController _flipController =
+      ParallaxPageFlipController();
   int _lastPageIndex = 0;
   Timer? _dwellTimer;
   Timer? _locationPromptTimer;
@@ -57,6 +60,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = SpotlightController(
       initialCategory: widget.initialCategory,
       isLocal: widget.isLocal,
@@ -66,7 +70,17 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      SpotlightMediaCoordinator.instance.stopAll();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SpotlightMediaCoordinator.instance.stopAll();
     AppTtsService.instance.stop();
     _dwellTimer?.cancel();
     _locationPromptTimer?.cancel();
@@ -83,7 +97,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
     // Prompt location gently 1.8 seconds after app enters Spotlight if location is not set yet
     _locationPromptTimer = Timer(const Duration(milliseconds: 1800), () {
       if (!mounted) return;
-      if (AppState.instance.hasValidLocation || _hasPromptedLocationThisSession) {
+      if (AppState.instance.hasValidLocation ||
+          _hasPromptedLocationThisSession) {
         return;
       }
       if (AppTtsService.instance.isPlaying) return;
@@ -124,6 +139,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
     final bool isSwipingBack = index < _lastPageIndex;
     _lastPageIndex = index;
 
+    // Mutually exclusive playback: Stop active TTS/Video upon swiping
+    SpotlightMediaCoordinator.instance.stopAll();
+
     // Auto-hide overlays on swipe for clean, immersive reading
     if (_controller.state.showOverlays) {
       _controller.hideOverlay();
@@ -132,17 +150,16 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
     // Track dwell and page selection in AdDeliveryService
     AdDeliveryService.instance.onPageSelected(index);
 
-    // Early pre-fetch threshold: fetch next 25 articles 6 cards ahead in background
-    if (index >= _controller.state.feed.length - 6) {
-      _controller.loadFeed();
-    }
+    // Debounced early prefetch to avoid network burst spikes on rapid swipes
+    _controller.prefetchNextPageIfNeeded(index);
 
     _dwellTimer?.cancel();
 
     // Dwell logic: only consider meaningful read if user forward-swipes and stays >= 2 seconds
     if (!isSwipingBack && index < _controller.state.feed.length) {
       final currentType = _controller.state.feed[index].type;
-      if (currentType != SpotlightType.ad && currentType != SpotlightType.shimmer) {
+      if (currentType != SpotlightType.ad &&
+          currentType != SpotlightType.shimmer) {
         _dwellTimer = Timer(const Duration(milliseconds: 2100), () {
           if (!mounted) return;
           _controller.evaluateAndInjectAdAfter(index);
@@ -166,6 +183,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
   }
 
   void _closeSpotlight() {
+    SpotlightMediaCoordinator.instance.stopAll();
     AppTtsService.instance.stop();
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
@@ -173,7 +191,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           transitionDuration: const Duration(milliseconds: 300),
-          pageBuilder: (_, __, ___) => const HomeScreen(openSpotlightOnStart: false),
+          pageBuilder: (_, __, ___) =>
+              const HomeScreen(openSpotlightOnStart: false),
           transitionsBuilder: (_, anim, __, child) =>
               FadeTransition(opacity: anim, child: child),
         ),
@@ -181,14 +200,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
     }
   }
 
-  void _shareArticle(NewsArticle article) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-    await ShareService.shareArticle(article);
-    if (mounted) Navigator.pop(context);
+  void _shareArticle(NewsArticle article) {
+    ShareService.shareArticle(article);
   }
 
   Widget _buildItem(
@@ -204,10 +217,12 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
 
     final item = state.feed[index];
 
+    Widget child;
+
     switch (item.type) {
       case SpotlightType.standard:
         if (item.article == null) return const SizedBox();
-        return SpotlightNewsCard(
+        child = SpotlightNewsCard(
           article: item.article!,
           isCurrent: isCurrent,
           dragDelta: dragDelta,
@@ -217,42 +232,56 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
           onShare: () => _shareArticle(item.article!),
           onClose: _closeSpotlight,
         );
+        break;
 
       case SpotlightType.carousel:
         if (item.article == null) return const SizedBox();
-        return SpotlightCarouselCard(
+        child = SpotlightCarouselCard(
           item: item,
           onTap: _controller.toggleOverlay,
           onShare: () => _shareArticle(item.article!),
           onClose: _closeSpotlight,
         );
+        break;
 
       case SpotlightType.promo:
-        return SpotlightPromoCard(
+        child = SpotlightPromoCard(
           imageUrl: item.promoImageUrl ?? '',
         );
+        break;
 
       case SpotlightType.ad:
         if (item.adBanner == null) return const SizedBox();
-        return SponsoredSpotlightAdCard(
+        child = SponsoredSpotlightAdCard(
           ad: item.adBanner!,
           onClose: () => _controller.removeAdAt(index),
+          durationSeconds: item.adBanner!.durationSeconds,
+          placementZone: 'spotlight',
         );
+        break;
 
       case SpotlightType.poster:
-        return PosterCard(
+        child = PosterCard(
           mediaUrl: item.mediaUrl ?? '',
           onClose: () => _controller.removeAdAt(index),
         );
+        break;
 
       case SpotlightType.infoCard:
-        return InfoCard(
+        child = InfoCard(
           title: item.title ?? '',
         );
+        break;
 
       case SpotlightType.shimmer:
-        return const SpotlightShimmerCard();
+        child = const SpotlightShimmerCard();
+        break;
     }
+
+    return RepaintBoundary(
+      key: ValueKey('spotlight-card-${item.id}-$index'),
+      child: child,
+    );
   }
 
   Widget _buildLocationFallback() {
@@ -270,19 +299,22 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   color: AppColors.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.my_location_rounded, size: 48, color: AppColors.primary),
+                child: const Icon(Icons.my_location_rounded,
+                    size: 48, color: AppColors.primary),
               ),
               const SizedBox(height: 24),
               Text(
                 tr('location_fallback_title'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               Text(
                 tr('location_fallback_desc'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                style:
+                    const TextStyle(color: AppColors.textMuted, fontSize: 14),
               ),
               const SizedBox(height: 28),
               SizedBox(
@@ -290,11 +322,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                 height: 50,
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.location_on_rounded),
-                  label: Text(tr('set_location_btn'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  label: Text(tr('set_location_btn'),
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
                   onPressed: _openLocationSelector,
                 ),
@@ -323,7 +357,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  isLocal ? Icons.location_city_rounded : Icons.newspaper_rounded,
+                  isLocal
+                      ? Icons.location_city_rounded
+                      : Icons.newspaper_rounded,
                   size: 48,
                   color: AppColors.primary,
                 ),
@@ -356,11 +392,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   height: 50,
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.tune_rounded),
-                    label: Text(tr('change_location_btn'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                    label: Text(tr('change_location_btn'),
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
                       elevation: 0,
                     ),
                     onPressed: _openLocationSelector,
@@ -373,11 +411,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                 height: 50,
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.refresh_rounded),
-                  label: Text(tr('refresh'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  label: Text(tr('refresh'),
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
                     side: const BorderSide(color: AppColors.primary),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
                   onPressed: () {
                     HapticFeedback.lightImpact();
@@ -417,7 +457,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                     MaterialPageRoute(
                       builder: (context) => Scaffold(
                         appBar: AppBar(
-                          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                          backgroundColor:
+                              Theme.of(context).scaffoldBackgroundColor,
                           elevation: 0,
                           leading: const BackButton(),
                         ),
@@ -426,7 +467,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                     ),
                   );
                 },
-                icon: const Icon(Icons.person_outline_rounded, color: Colors.white, size: 28),
+                icon: const Icon(Icons.person_outline_rounded,
+                    color: Colors.white, size: 28),
                 tooltip: 'Profile',
               ),
 
@@ -437,7 +479,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(21),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.18)),
                 ),
                 child: Stack(
                   children: [
@@ -539,19 +582,17 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     _controller.resetOverlayTimer();
-                    if (!AppState.instance.isLoggedIn) {
-                      Navigator.push(
+                    requireAuth(
+                      context,
+                      () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                      );
-                    } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const CreatePostScreen()),
-                      );
-                    }
+                        MaterialPageRoute(
+                            builder: (_) => const CreatePostScreen()),
+                      ),
+                    );
                   },
-                  icon: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+                  icon: const Icon(Icons.add_rounded,
+                      color: Colors.white, size: 28),
                 ),
               ),
             ],
@@ -583,10 +624,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.location_on_rounded, color: AppColors.primary, size: 16),
+                const Icon(Icons.location_on_rounded,
+                    color: AppColors.primary, size: 16),
                 const SizedBox(width: 6),
                 Text(
-                  locationName.isNotEmpty ? locationName : tr('change_location'),
+                  locationName.isNotEmpty
+                      ? locationName
+                      : tr('change_location'),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -594,7 +638,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 18),
+                const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white70, size: 18),
               ],
             ),
           ),
@@ -632,7 +677,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   HapticFeedback.lightImpact();
                   _closeSpotlight();
                 },
-                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 22),
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 22),
                 tooltip: 'Back',
               ),
               IconButton(
@@ -641,7 +687,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   _controller.resetOverlayTimer();
                   _controller.refreshFeed();
                 },
-                icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 26),
+                icon: const Icon(Icons.refresh_rounded,
+                    color: Colors.white, size: 26),
                 tooltip: 'Refresh',
               ),
             ],
@@ -654,7 +701,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
-    final initialIndex = widget.initialStoryIndex ?? _controller.findInitialIndex(widget.initialStoryId);
+    final initialIndex = widget.initialStoryIndex ??
+        _controller.findInitialIndex(widget.initialStoryId);
 
     return PopScope(
       canPop: canPop,
@@ -679,14 +727,18 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                   behavior: HitTestBehavior.opaque,
                   child: state.isLoading && state.feed.isEmpty
                       ? const SpotlightShimmerCard()
-                      : (state.isLocalNews && !AppState.instance.hasValidLocation)
+                      : (state.isLocalNews &&
+                              !AppState.instance.hasValidLocation)
                           ? _buildLocationFallback()
                           : state.feed.isEmpty
                               ? _buildEmptyFeedState(state.isLocalNews)
                               : ParallaxPageFlip(
-                                  key: ValueKey('feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                                  key: ValueKey(
+                                      'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
                                   controller: _flipController,
-                                  initialIndex: initialIndex < state.feed.length ? initialIndex : 0,
+                                  initialIndex: initialIndex < state.feed.length
+                                      ? initialIndex
+                                      : 0,
                                   itemCount: state.feed.length,
                                   onPageChanged: _handlePageChanged,
                                   onTap: _controller.toggleOverlay,
@@ -725,7 +777,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView> {
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 220),
                       curve: Curves.easeOutCubic,
-                      opacity: (state.showOverlays && state.isLocalNews) ? 1.0 : 0.0,
+                      opacity:
+                          (state.showOverlays && state.isLocalNews) ? 1.0 : 0.0,
                       child: IgnorePointer(
                         ignoring: !(state.showOverlays && state.isLocalNews),
                         child: _buildLocationStrip(),

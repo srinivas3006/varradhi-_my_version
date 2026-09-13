@@ -13,11 +13,12 @@ import 'live_news_screen.dart';
 import '../services/api_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/ad_banner.dart';
-import '../widgets/ads/native_ad_card.dart';
+import '../widgets/ads/unified_ad_widget.dart';
 import '../services/ad_delivery_service.dart';
 import '../services/ad_manager.dart';
 import '../repositories/ad_repository.dart';
 import '../services/notification_service.dart';
+import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/feed/daily_greeting_widget.dart';
 import '../models/category.dart';
 import '../models/poll.dart';
@@ -58,6 +59,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   List<NewsArticle> _districtUgc = [];
   List<NewsArticle> _stateUgc = [];
   bool _locationSectionsLoaded = false;
+  bool _isProgressivelyHydrated = false;
   int _sectionGeneration = 0;
   int _feedGeneration = 0;
   String get _feedLocationKey => [
@@ -74,21 +76,24 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   void initState() {
     super.initState();
     _articles = [];
-    // 1. Critical primary feed and ad pool requests
+    // 1. Critical primary feed requests for first paint.
     _loadMore();
-    _loadLocationSections();
-    _loadFeedAds();
     _loadCategories();
 
-    // 2. Secondary ancillary metadata loaded asynchronously after initial frame
+    // 2. Progressive hydration: defer secondary ancillary metadata past initial frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _loadFeatured();
-      _loadRecommendations();
-      _loadPoll();
-      _loadPosters();
-      _loadLiveNews();
-      _loadDailyQuote();
+      setState(() => _isProgressivelyHydrated = true);
+      Future.microtask(() {
+        _loadLocationSections();
+        _loadFeedAds();
+        _loadFeatured();
+        _loadRecommendations();
+        _loadPoll();
+        _loadPosters();
+        _loadLiveNews();
+        _loadDailyQuote();
+      });
     });
   }
 
@@ -930,7 +935,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: const Text(
-                              'SPOTLIGHT FEED',
+                              'స్పాట్‌లైట్',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 9,
@@ -1830,13 +1835,27 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                               sliver: SliverToBoxAdapter(
                                 child: Column(
                                   children: [
-                                    _buildCategorySelector(),
+                                    RepaintBoundary(
+                                      child: _buildCategorySelector(),
+                                    ),
                                     _buildLiveSection(),
                                     _buildSpotlightHeroBanner(),
-                                    _buildBreakingNewsSection(breakingNews),
+                                    if (_articles.isNotEmpty)
+                                      const Padding(
+                                        padding:
+                                            EdgeInsets.fromLTRB(16, 4, 16, 12),
+                                        child: BannerAdSlot(
+                                          placementZone: 'home_banner',
+                                        ),
+                                      ),
+                                    RepaintBoundary(
+                                      child: _buildBreakingNewsSection(
+                                          breakingNews),
+                                    ),
                                     if (selectedVillage.isNotEmpty)
                                       _buildLocationSection(
-                                        title: '$selectedVillage Local News',
+                                        title:
+                                            '$selectedVillage స్థానిక వార్తలు',
                                         location: selectedVillage,
                                         icon: Icons.holiday_village_outlined,
                                         accent: AppColors.primary,
@@ -1847,79 +1866,82 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         emptyMessage:
                                             'ఈ ప్రాంతానికి ఇంకా స్థానిక వార్తలు లేవు. దగ్గరి ప్రాంతాల వార్తలు కింద కనిపిస్తాయి.',
                                       ),
-                                    if (selectedSubdistrict.isNotEmpty)
+                                    if (_isProgressivelyHydrated) ...[
+                                      if (selectedSubdistrict.isNotEmpty)
+                                        _buildLocationSection(
+                                          title:
+                                              '$selectedSubdistrict మండల వార్తలు',
+                                          location: selectedSubdistrict,
+                                          icon: Icons.location_city_outlined,
+                                          accent: Colors.teal,
+                                          articles: _mandalSection,
+                                          cardColor: cardColor,
+                                          borderColor: borderColor,
+                                          showWhenEmpty: true,
+                                          emptyMessage:
+                                              'ఈ మండలంలో ఇంకా వార్తలు లేవు. జిల్లా మరియు రాష్ట్ర వార్తలు కింద కనిపిస్తాయి.',
+                                        ),
+                                      if (selectedDistrict.isNotEmpty)
+                                        _buildLocationSection(
+                                          title:
+                                              '$selectedDistrict జిల్లా వార్తలు',
+                                          location: '$selectedDistrict జిల్లా',
+                                          icon: Icons.domain_outlined,
+                                          accent: Colors.indigo,
+                                          articles: districtSection,
+                                          cardColor: cardColor,
+                                          borderColor: borderColor,
+                                          showWhenEmpty: true,
+                                        ),
+                                      if (selectedState.isNotEmpty)
+                                        _buildLocationSection(
+                                          title: '$selectedState ముఖ్యాంశాలు',
+                                          location: selectedState,
+                                          icon: Icons.map_outlined,
+                                          accent: Colors.deepOrange,
+                                          articles: stateSection,
+                                          cardColor: cardColor,
+                                          borderColor: borderColor,
+                                          showWhenEmpty: true,
+                                        ),
                                       _buildLocationSection(
-                                        title:
-                                            '$selectedSubdistrict Mandal News',
-                                        location: selectedSubdistrict,
-                                        icon: Icons.location_city_outlined,
-                                        accent: Colors.teal,
-                                        articles: _mandalSection,
+                                        title: 'జాతీయ / అంతర్జాతీయ వార్తలు',
+                                        location: 'జాతీయం / అంతర్జాతీయం',
+                                        icon: Icons.public_outlined,
+                                        accent: Colors.blueGrey,
+                                        articles: globalSection,
                                         cardColor: cardColor,
                                         borderColor: borderColor,
                                         showWhenEmpty: true,
-                                        emptyMessage:
-                                            'No mandal news yet. District and state news are shown below.',
                                       ),
-                                    if (selectedDistrict.isNotEmpty)
-                                      _buildLocationSection(
-                                        title:
-                                            '$selectedDistrict District News',
-                                        location: '$selectedDistrict District',
-                                        icon: Icons.domain_outlined,
-                                        accent: Colors.indigo,
-                                        articles: districtSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                        showWhenEmpty: true,
-                                      ),
-                                    if (selectedState.isNotEmpty)
-                                      _buildLocationSection(
-                                        title: '$selectedState Headlines',
-                                        location: selectedState,
-                                        icon: Icons.map_outlined,
-                                        accent: Colors.deepOrange,
-                                        articles: stateSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                        showWhenEmpty: true,
-                                      ),
-                                    _buildLocationSection(
-                                      title: 'India / Global News',
-                                      location: 'India / Global',
-                                      icon: Icons.public_outlined,
-                                      accent: Colors.blueGrey,
-                                      articles: globalSection,
-                                      cardColor: cardColor,
-                                      borderColor: borderColor,
-                                      showWhenEmpty: true,
-                                    ),
-                                    if (_dailyQuote != null &&
-                                        (_dailyQuote!['text'] != null ||
-                                            _dailyQuote!['quote'] != null)) ...[
-                                      const SizedBox(height: 16),
-                                      DailyGreetingWidget(
-                                        imageUrl: _dailyQuote!['image_url'] ??
-                                            _dailyQuote!['imageUrl'] ??
-                                            '',
-                                        title: _dailyQuote!['author'] ??
-                                            'Daily Quote',
-                                        quote: _dailyQuote!['text'] ??
-                                            _dailyQuote!['quote'] ??
-                                            '',
-                                      ),
-                                    ],
-                                    if (_poll != null) ...[
-                                      const SizedBox(height: 16),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 16),
-                                        child: PollCard(poll: _poll!),
-                                      ),
-                                    ],
-                                    if (_posters.isNotEmpty) ...[
-                                      const SizedBox(height: 16),
-                                      _buildPostersStrip(),
+                                      if (_dailyQuote != null &&
+                                          (_dailyQuote!['text'] != null ||
+                                              _dailyQuote!['quote'] !=
+                                                  null)) ...[
+                                        const SizedBox(height: 16),
+                                        DailyGreetingWidget(
+                                          imageUrl: _dailyQuote!['image_url'] ??
+                                              _dailyQuote!['imageUrl'] ??
+                                              '',
+                                          title: _dailyQuote!['author'] ??
+                                              'Daily Quote',
+                                          quote: _dailyQuote!['text'] ??
+                                              _dailyQuote!['quote'] ??
+                                              '',
+                                        ),
+                                      ],
+                                      if (_poll != null) ...[
+                                        const SizedBox(height: 16),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16),
+                                          child: PollCard(poll: _poll!),
+                                        ),
+                                      ],
+                                      if (_posters.isNotEmpty) ...[
+                                        const SizedBox(height: 16),
+                                        _buildPostersStrip(),
+                                      ],
                                     ],
                                     const SizedBox(height: 16),
                                     if (recommended.isNotEmpty)
@@ -1949,9 +1971,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
                                     final item = presentationItems[index];
                                     if (item.isAd && item.ad != null) {
-                                      return NativeAdCard(
+                                      return UnifiedAdWidget(
                                         key: ValueKey(item.stableKey),
-                                        ad: item.ad,
+                                        ad: item.ad!,
                                         placementZone: 'feed',
                                         exposureKey: item.stableKey,
                                       );

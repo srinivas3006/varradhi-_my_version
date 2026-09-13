@@ -40,11 +40,13 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
       final deviceLocation = await LocationService.detectLocation();
       final match =
           await ApiService.instance.resolveCanonicalLocation(deviceLocation);
+      if (!mounted) return;
       final confirmed = await LocationService.showCanonicalConfirmation(
         context,
         match,
       );
-      if (!confirmed || !mounted) {
+      if (!mounted) return;
+      if (!confirmed) {
         setState(() => _isLoading = false);
         final changed = await Navigator.push<bool>(
           context,

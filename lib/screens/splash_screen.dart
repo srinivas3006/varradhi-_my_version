@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'location_selection_screen.dart';
 import '../services/api_service.dart';
+import '../core/navigation/notification_navigation_gate.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -79,8 +80,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
+    final hasPendingNotif = NotificationNavigationGate.instance.hasPendingTarget;
     final Widget nextScreen = state.hasOnboarded
-        ? const HomeScreen(openSpotlightOnStart: true)
+        ? HomeScreen(openSpotlightOnStart: !hasPendingNotif)
         : const LocationSelectionScreen();
 
     Navigator.of(context).pushReplacement(

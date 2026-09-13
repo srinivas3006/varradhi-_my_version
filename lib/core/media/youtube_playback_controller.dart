@@ -42,11 +42,16 @@ class YouTubePlaybackController extends VideoPlaybackController {
         videoId: videoId,
         autoPlay: autoPlay,
         params: YoutubePlayerParams(
-          showControls: false,
-          showFullscreenButton: false,
+          showControls: true,
+          showFullscreenButton: true,
           mute: value.isMuted,
           loop: loop,
           enableCaption: false,
+          enableJavaScript: true,
+          playsInline: true,
+          origin: 'https://www.youtube.com',
+          privacyEnhancedMode: false,
+          strictRelatedVideos: false,
         ),
       );
 
@@ -72,9 +77,13 @@ class YouTubePlaybackController extends VideoPlaybackController {
     if (_isDisposed) return;
 
     if (ctrlValue.hasError) {
+      debugPrint('[YouTubePlaybackController] YouTube error: ${ctrlValue.error}');
+      final isRestricted = ctrlValue.error == YoutubeError.notEmbeddable;
       value = value.copyWith(
         status: PlaybackStatus.error,
-        errorMessage: 'యూట్యూబ్ ప్లేబ్యాక్ లోపం: ${ctrlValue.error}',
+        errorMessage: isRestricted
+            ? 'ఈ వీడియో కాపీరైట్ పరిమితుల వల్ల యూట్యూబ్‌లో మాత్రమే చూడగలరు.'
+            : 'యూట్యూబ్ వీడియో ప్లే చేయడం సాధ్యపడలేదు.',
       );
       return;
     }

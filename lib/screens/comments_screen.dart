@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
 import '../state/app_state.dart';
@@ -28,7 +29,19 @@ class _CommentsScreenState extends State<CommentsScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchComments();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || AppState.instance.isLoggedIn) return;
+      requireAuth(context, () {
+        if (!mounted) return;
+        _fetchComments();
+        setState(() {});
+      });
+    });
+    if (AppState.instance.isLoggedIn) {
+      _fetchComments();
+    } else {
+      _isLoading = false;
+    }
   }
 
   Future<void> _fetchComments() async {
@@ -62,21 +75,26 @@ class _CommentsScreenState extends State<CommentsScreen> {
     if (text.isEmpty) return;
 
     if (!AppState.instance.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(tr('login_to_comment')),
-          action: SnackBarAction(
-            label: tr('login'),
-            textColor: Colors.amber,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-              ).then((_) => _fetchComments());
-            },
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(tr('login_to_comment')),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            action: SnackBarAction(
+              label: tr('login'),
+              textColor: Colors.amber,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+                ).then((_) => _fetchComments());
+              },
+            ),
           ),
-        ),
-      );
+        );
       return;
     }
 
@@ -92,7 +110,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
       if (mounted) {
         setState(() {
           if (_replyingToCommentId != null) {
-            final parentIdx = _comments.indexWhere((c) => c.id == _replyingToCommentId);
+            final parentIdx =
+                _comments.indexWhere((c) => c.id == _replyingToCommentId);
             if (parentIdx != -1) {
               _comments[parentIdx].replies.add(newComment);
             } else {
@@ -111,9 +130,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
         AppState.instance.setComments(widget.article.id, _comments);
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(tr('comment_posted')),
-            backgroundColor: Color(0xFF10B981),
+            backgroundColor: const Color(0xFF10B981),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -156,8 +175,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
   void _showCommentOptions(Comment comment, {bool isReply = false}) {
     final currentUserId = AppState.instance.userId;
     final currentUserName = AppState.instance.userName;
-    final isOwnComment = (comment.authorId != null && comment.authorId == currentUserId) ||
-        (comment.username == currentUserName && currentUserName.isNotEmpty);
+    final isOwnComment =
+        (comment.authorId != null && comment.authorId == currentUserId) ||
+            (comment.username == currentUserName && currentUserName.isNotEmpty);
 
     showModalBottomSheet(
       context: context,
@@ -181,16 +201,22 @@ class _CommentsScreenState extends State<CommentsScreen> {
               const SizedBox(height: 16),
               if (isOwnComment) ...[
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined, color: AppColors.primary),
-                  title: Text(tr('edit_comment'), style: const TextStyle(fontWeight: FontWeight.w600)),
+                  leading:
+                      const Icon(Icons.edit_outlined, color: AppColors.primary),
+                  title: Text(tr('edit_comment'),
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     _showEditDialog(comment);
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  title: Text(tr('delete_comment'), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                  leading:
+                      const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: Text(tr('delete_comment'),
+                      style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     _confirmDeleteComment(comment);
@@ -198,8 +224,12 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 ),
               ] else ...[
                 ListTile(
-                  leading: const Icon(Icons.flag_outlined, color: AppColors.primary),
-                  title: Text(tr('report_comment'), style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                  leading:
+                      const Icon(Icons.flag_outlined, color: AppColors.primary),
+                  title: Text(tr('report_comment'),
+                      style: const TextStyle(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     _showReportReasonDialog(comment);
@@ -207,11 +237,16 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.block, color: AppColors.textDark),
-                  title: Text(tr('block_user'), style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.w600)),
+                  title: Text(tr('block_user'),
+                      style: const TextStyle(
+                          color: AppColors.textDark,
+                          fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('${comment.username} ${tr('blocked')}')),
+                      SnackBar(
+                          content:
+                              Text('${comment.username} ${tr('blocked')}')),
                     );
                   },
                 ),
@@ -235,7 +270,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
           maxLines: 3,
           decoration: InputDecoration(
             hintText: tr('updated_comment_hint'),
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -244,7 +279,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
             child: Text(tr('cancel')),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white),
             onPressed: () async {
               final newText = editController.text.trim();
               if (newText.isEmpty) return;
@@ -282,7 +319,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
             child: Text(tr('cancel')),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.pop(ctx);
               try {
@@ -338,12 +377,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
             children: [
               Text(
                 tr('report_comment'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
                 tr('report_reason_prompt'),
-                style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                style:
+                    const TextStyle(fontSize: 13, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
               ...reasons.map((r) => ListTile(
@@ -353,11 +394,13 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     onTap: () async {
                       Navigator.pop(ctx);
                       try {
-                        await ApiService.instance.reportComment(comment.id, reason: r.$1);
+                        await ApiService.instance
+                            .reportComment(comment.id, reason: r.$1);
                         if (!mounted) return;
                         setState(() => comment.isReported = true);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(tr('comment_reported_hidden'))),
+                          SnackBar(
+                              content: Text(tr('comment_reported_hidden'))),
                         );
                       } catch (e) {
                         if (!mounted) return;
@@ -387,7 +430,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
           children: [
             const Icon(Icons.info_outline, size: 16, color: Colors.grey),
             const SizedBox(width: 8),
-            Text(tr('comment_hidden'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+            Text(tr('comment_hidden'),
+                style: const TextStyle(
+                    color: Colors.grey, fontStyle: FontStyle.italic)),
           ],
         ),
       );
@@ -401,11 +446,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
           color: Theme.of(context).dividerColor.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text(tr('comment_deleted'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 13)),
+        child: Text(tr('comment_deleted'),
+            style: const TextStyle(
+                color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 13)),
       );
     }
 
-    final isPendingReview = comment.status == 'pending' || comment.visibility == 'author_only';
+    final isPendingReview =
+        comment.status == 'pending' || comment.visibility == 'author_only';
 
     return Padding(
       padding: EdgeInsets.only(left: isReply ? 48 : 0, bottom: 16),
@@ -442,23 +490,29 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     if (isPendingReview) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.amber.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           tr('pending_review'),
-                          style: const TextStyle(fontSize: 10, color: Colors.amber, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.amber,
+                              fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
                     const Spacer(),
                     InkWell(
-                      onTap: () => _showCommentOptions(comment, isReply: isReply),
+                      onTap: () =>
+                          _showCommentOptions(comment, isReply: isReply),
                       child: const Padding(
                         padding: EdgeInsets.all(4.0),
-                        child: Icon(Icons.more_horiz, size: 16, color: AppColors.textMuted),
+                        child: Icon(Icons.more_horiz,
+                            size: 16, color: AppColors.textMuted),
                       ),
                     ),
                   ],
@@ -482,15 +536,21 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           if (comment.isLikedByUser) {
                             comment.likes += 1;
                           } else {
-                            comment.likes = (comment.likes - 1).clamp(0, 999999);
+                            comment.likes =
+                                (comment.likes - 1).clamp(0, 999999);
                           }
                         });
-                        AppState.instance.toggleCommentLike(widget.article.id, comment.id);
+                        AppState.instance
+                            .toggleCommentLike(widget.article.id, comment.id);
                       },
                       child: Icon(
-                        comment.isLikedByUser ? Icons.favorite : Icons.favorite_border,
+                        comment.isLikedByUser
+                            ? Icons.favorite
+                            : Icons.favorite_border,
                         size: 16,
-                        color: comment.isLikedByUser ? AppColors.primary : AppColors.textMuted,
+                        color: comment.isLikedByUser
+                            ? AppColors.primary
+                            : AppColors.textMuted,
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -527,18 +587,25 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!AppState.instance.isLoggedIn) {
+      return _buildLoginRequiredScreen();
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
+          icon:
+              Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           tr('comments_title'),
-          style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontWeight: FontWeight.bold),
         ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
@@ -560,7 +627,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                             Center(
                               child: Text(
                                 tr('no_comments'),
-                                style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                                style: const TextStyle(
+                                    color: AppColors.textMuted, fontSize: 14),
                               ),
                             ),
                           ],
@@ -574,90 +642,191 @@ class _CommentsScreenState extends State<CommentsScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 _buildCommentItem(comment, isReply: false),
-                                ...comment.replies.map((reply) => _buildCommentItem(reply, isReply: true)),
+                                ...comment.replies.map((reply) =>
+                                    _buildCommentItem(reply, isReply: true)),
                               ],
                             );
                           },
                         ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -4),
+          _buildCommentComposer(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoginRequiredScreen() {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+        leading: IconButton(
+          icon:
+              Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          tr('comments_title'),
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontWeight: FontWeight.bold),
+        ),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline_rounded,
+                    size: 48, color: AppColors.primary),
+                const SizedBox(height: 16),
+                Text(
+                  tr('login_to_comment'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: () => requireAuth(context, () {
+                    if (!mounted) return;
+                    _fetchComments();
+                    setState(() {});
+                  }),
+                  icon: const Icon(Icons.login_rounded),
+                  label: Text(tr('login')),
                 ),
               ],
             ),
-            child: SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_replyingToUsername != null) ...[
-                    Row(
-                      children: [
-                        Text(
-                          '${tr('replying_to')} $_replyingToUsername',
-                          style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        GestureDetector(
-                          onTap: _cancelReply,
-                          child: const Icon(Icons.close, size: 16, color: AppColors.textMuted),
-                        )
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundImage: NetworkImage(
-                            'https://i.pravatar.cc/150?u=${AppState.instance.userName.hashCode}'),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _commentController,
-                          focusNode: _focusNode,
-                          enabled: !_isPosting,
-                          decoration: InputDecoration(
-                            hintText: tr('add_comment_hint'),
-                            hintStyle: const TextStyle(fontSize: 14, color: AppColors.textMuted),
-                            filled: true,
-                            fillColor: AppColors.chipBg,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
-                            ),
-                          ),
-                          onSubmitted: (_) => _postComment(),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _isPosting
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2.5),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.send, color: AppColors.primary),
-                              onPressed: _postComment,
-                            ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuestCommentPrompt(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: OutlinedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+            ).then((_) => _fetchComments());
+          },
+          icon: const Icon(Icons.login_rounded, size: 18),
+          label: Text(tr('login_to_comment'),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.primary,
+            side: BorderSide(color: AppColors.primary.withValues(alpha: 0.35)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCommentComposer(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -4),
           ),
         ],
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_replyingToUsername != null) ...[
+              Row(
+                children: [
+                  Text(
+                    '${tr('replying_to')} $_replyingToUsername',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: _cancelReply,
+                    child: const Icon(Icons.close,
+                        size: 16, color: AppColors.textMuted),
+                  )
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                  backgroundImage:
+                      (AppState.instance.profileImagePath != null &&
+                              AppState.instance.profileImagePath!
+                                  .startsWith('http'))
+                          ? NetworkImage(AppState.instance.profileImagePath!)
+                          : null,
+                  child: (AppState.instance.profileImagePath != null &&
+                          AppState.instance.profileImagePath!
+                              .startsWith('http'))
+                      ? null
+                      : const Icon(Icons.person_rounded,
+                          size: 18, color: AppColors.primary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _commentController,
+                    focusNode: _focusNode,
+                    enabled: !_isPosting,
+                    decoration: InputDecoration(
+                      hintText: tr('add_comment_hint'),
+                      hintStyle: const TextStyle(
+                          fontSize: 14, color: AppColors.textMuted),
+                      filled: true,
+                      fillColor: AppColors.chipBg,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onSubmitted: (_) => _postComment(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _isPosting
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.send, color: AppColors.primary),
+                        onPressed: _postComment,
+                      ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -65,7 +65,7 @@ class _AboutScreenState extends State<AboutScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text(_dynamicTitle ?? 'About Vaaradhi', style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(_dynamicTitle ?? 'వారధి గురించి', style: const TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         foregroundColor: textColor,
         elevation: 0,
@@ -100,7 +100,7 @@ class _AboutScreenState extends State<AboutScreen> {
               ),
               const SizedBox(height: 20),
               Text(
-                'Vaaradhi',
+                'వారధి',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -109,7 +109,7 @@ class _AboutScreenState extends State<AboutScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Your Local News Bridge',
+                'మీ స్థానిక వార్తా వారధి',
                 style: TextStyle(
                   fontSize: 16,
                   color: isDark ? Colors.white54 : Colors.black54,
@@ -125,22 +125,22 @@ class _AboutScreenState extends State<AboutScreen> {
               else if (_dynamicContent != null && _dynamicContent!.isNotEmpty)
                 _buildInfoCard(
                   context,
-                  _dynamicTitle ?? 'About Us',
+                  _dynamicTitle ?? 'వారధి గురించి',
                   _dynamicContent!,
                   isDark,
                 )
               else ...[
                 _buildInfoCard(
                   context, 
-                  'Our Story', 
-                  'Vaaradhi started with a simple idea: local news matters. We wanted to build a platform that bridges the gap between communities and the information that affects their daily lives, directly from the ground up.',
+                  'మా కథ', 
+                  'స్థానిక వార్తలకు అత్యంత ప్రాధాన్యత ఉందనే ఆలోచనతో వారధి ప్రారంభమైంది. ప్రజల దైనందిన జీవితాలను ప్రభావితం చేసే స్థానిక సమాచారాన్ని ప్రజల వద్దకు నేరుగా చేర్చే వారధిగా నిలవడమే మా లక్ష్యం.',
                   isDark,
                 ),
                 const SizedBox(height: 20),
                 _buildInfoCard(
                   context, 
-                  'Our Goal', 
-                  'To empower citizen journalists and provide a transparent, hyper-local news ecosystem where everyone has a voice. Through the Reporter Program, we reward users who actively contribute authentic, verified news to their district.',
+                  'మా లక్ష్యం', 
+                  'పౌర జర్నలిస్టులను ప్రోత్సహించడం మరియు పారదర్శకమైన, విశ్వసనీయమైన స్థానిక వార్తా వేదికను అందించడం. సిటిజెన్ రిపోర్టర్ ప్రోగ్రామ్ ద్వారా తమ జిల్లా వార్తలను అందించే ప్రతి ఒక్కరికీ తగిన ప్రోత్సాహకాలు అందించబడతాయి.',
                   isDark,
                 ),
               ],
@@ -154,7 +154,7 @@ class _AboutScreenState extends State<AboutScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                '© 2026 Vaaradhi Media. All rights reserved.',
+                '© 2026 వారధి మీడియా. సర్వ హక్కులు ప్రత్యేకించబడ్డాయి.',
                 style: TextStyle(
                   fontSize: 12,
                   color: isDark ? Colors.white38 : Colors.black38,

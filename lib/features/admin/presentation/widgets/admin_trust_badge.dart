@@ -28,8 +28,8 @@ class AdminTrustBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Text(
-        level.label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+        level.teluguLabel,
+        style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w700),
       ),
     );
   }

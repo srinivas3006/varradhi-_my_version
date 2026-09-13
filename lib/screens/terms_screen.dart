@@ -73,7 +73,7 @@ class _TermsScreenState extends State<TermsScreen> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(
-          _dynamicTitle ?? 'Terms of Service',
+          _dynamicTitle ?? 'నిబంధనలు మరియు షరతులు',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
@@ -93,11 +93,11 @@ class _TermsScreenState extends State<TermsScreen> {
                 child: Center(child: CircularProgressIndicator()),
               )
             else if (_dynamicContent != null && _dynamicContent!.isNotEmpty) ...[
-              _buildSectionHeader(_dynamicTitle ?? 'Terms & Conditions', isDark),
+              _buildSectionHeader(_dynamicTitle ?? 'నిబంధనలు మరియు షరతులు', isDark),
               if (_updatedAt != null) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Last updated: ${_updatedAt!.day}/${_updatedAt!.month}/${_updatedAt!.year}',
+                  'చివరిగా అప్‌డేట్ చేసిన తేదీ: ${_updatedAt!.day}/${_updatedAt!.month}/${_updatedAt!.year}',
                   style: TextStyle(
                     fontSize: 12,
                     color: isDark ? Colors.white38 : Colors.black38,
@@ -114,37 +114,37 @@ class _TermsScreenState extends State<TermsScreen> {
                 ),
               ),
             ] else ...[
-              _buildSectionHeader('Terms of Service', isDark),
+              _buildSectionHeader('నిబంధనలు మరియు షరతులు', isDark),
               const SizedBox(height: 12),
               _buildParagraph(
-                'Welcome to Vaaradhi. By accessing or using our mobile application and services, you agree to be bound by these Terms of Service.',
+                'వారధికి స్వాగతం. మా మొబైల్ అప్లికేషన్ మరియు సేవలను ఉపయోగించడం ద్వారా, మీరు ఈ సేవా నిబంధనలకు కట్టుబడి ఉండటానికి అంగీకరిస్తున్నారు.',
                 isDark,
               ),
               _buildParagraph(
-                '1. User Eligibility: You must be at least 13 years old to use the platform. As a registered user, you are responsible for maintaining the confidentiality of your account credentials.',
+                '1. వినియోగదారు అర్హత: ప్లాట్‌ఫారమ్‌ను ఉపయోగించడానికి కనీసం 13 సంవత్సరాల వయస్సు ఉండాలి. మీ ఖాతా వివరాల గోప్యతను కాపాడటం మీ బాధ్యత.',
                 isDark,
               ),
               _buildParagraph(
-                '2. User-Generated Content: When submitting articles, comments, or multimedia content, you grant Vaaradhi a worldwide, royalty-free license to distribute and display your content.',
+                '2. యూజర్ కంటెంట్: కథనాలు, వ్యాఖ్యలు లేదా మీడియాను సమర్పించేటప్పుడు, ఆ సమాచారాన్ని ప్రచురించే మరియు పంపిణీ చేసే హక్కును మీరు వారధికి అందిస్తున్నారు.',
                 isDark,
               ),
               _buildParagraph(
-                '3. Reporter Responsibilities: Citizen reporters must provide truthful, authentic information. Submitting false, defamatory, or copyright-infringing content will result in termination of reporter status.',
+                '3. రిపోర్టర్ బాధ్యతలు: సిటిజెన్ రిపోర్టర్లు ఖచ్చితమైన, వాస్తవ సమాచారాన్ని మాత్రమే అందించాలి. అసత్యమైన, ఇతరులను కించపరిచే లేదా కాపీరైట్ ఉల్లంఘించే కంటెంట్‌ను పోస్ట్ చేస్తే రిపోర్టర్ హోదా రద్దు చేయబడుతుంది.',
                 isDark,
               ),
               _buildParagraph(
-                '4. Rewards & Redemptions: Reward tokens accrued through approved articles are redeemable according to our payout schedule and minimum balance thresholds.',
+                '4. రివార్డులు మరియు చెల్లింపులు: ఆమోదించబడిన కథనాల ద్వారా వచ్చే రివార్డ్ టోకెన్‌లను నిర్దేశిత నిబంధనలు మరియు కనీస బ్యాలెన్స్ పరిమితికి లోబడి విత్‌డ్రా చేసుకోవచ్చు.',
                 isDark,
               ),
               _buildParagraph(
-                '5. Limitation of Liability: Vaaradhi does not guarantee continuous, uninterrupted access to our services and disclaims liability for inaccuracies in citizen-reported news.',
+                '5. బాధ్యత పరిమితి: పౌరులు అందించే నివేదికలలోని సమాచార లోపాలకు వారధి బాధ్యత వహించదు.',
                 isDark,
               ),
             ],
             const SizedBox(height: 40),
             Center(
               child: Text(
-                '© 2026 Vaaradhi Media. All rights reserved.',
+                '© 2026 వారధి మీడియా. సర్వ హక్కులు ప్రత్యేకించబడ్డాయి.',
                 style: TextStyle(
                   fontSize: 12,
                   color: isDark ? Colors.white38 : Colors.black38,

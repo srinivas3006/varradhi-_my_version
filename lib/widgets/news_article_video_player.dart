@@ -10,6 +10,8 @@ import '../models/news_article.dart';
 import '../screens/video_player_screen.dart';
 import '../theme/app_theme.dart';
 
+import '../spotlight/spotlight_media_coordinator.dart';
+
 /// Interactive video player widget for news articles.
 /// Displays an authentic YouTube-style play button over the thumbnail.
 /// When the user taps the video button, it smoothly loads and plays
@@ -45,6 +47,14 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   void initState() {
     super.initState();
     _resolveMediaSource();
+    SpotlightMediaCoordinator.instance.addListener(_onMediaCoordinatorChanged);
+  }
+
+  void _onMediaCoordinatorChanged() {
+    if (_isPlaying &&
+        SpotlightMediaCoordinator.instance.activeVideoArticleId != widget.article.id) {
+      _stopPlayback();
+    }
   }
 
   void _resolveMediaSource() {
@@ -64,6 +74,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   void _startPlayback() async {
     HapticFeedback.mediumImpact();
     if (_mediaSource == null || !_mediaSource!.isPlayable) return;
+
+    SpotlightMediaCoordinator.instance.notifyVideoStarted(widget.article.id);
 
     setState(() {
       _isPlaying = true;
@@ -85,6 +97,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   }
 
   void _stopPlayback() {
+    SpotlightMediaCoordinator.instance.notifyVideoStopped(widget.article.id);
     setState(() {
       _isPlaying = false;
     });
@@ -97,9 +110,9 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   void didUpdateWidget(covariant NewsArticleVideoPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Auto-pause if the card is swiped away in Spotlight
+    // Auto-stop and release hardware texture if the card is swiped away in Spotlight
     if (oldWidget.isCurrent && !widget.isCurrent && _isPlaying) {
-      _playbackController?.pause();
+      _stopPlayback();
     }
 
     if (oldWidget.article.videoUrl != widget.article.videoUrl) {
@@ -110,6 +123,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
 
   @override
   void dispose() {
+    SpotlightMediaCoordinator.instance.removeListener(_onMediaCoordinatorChanged);
+    SpotlightMediaCoordinator.instance.notifyVideoStopped(widget.article.id);
     _playbackController?.dispose();
     super.dispose();
   }

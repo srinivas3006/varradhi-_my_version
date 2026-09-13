@@ -68,7 +68,7 @@ A complete grep search across all Dart and configuration files yielded:
 
 ## 3. Production API Configuration
 
-- **Base URL**: `https://incite-backend.onrender.com` (Strict HTTPS)
+- **Base URL**: `https://incite-backend.onrender.com` for client review/demo builds (Strict HTTPS). Switch `useRenderTestBackend` off in `AppConfig` before AWS production release.
 - **Timeouts**:
   - `connectTimeout`: 35 seconds
   - `sendTimeout`: 35 seconds
@@ -83,7 +83,7 @@ A complete grep search across all Dart and configuration files yielded:
 
 - **Hardcoded API Keys**: None in Dart source code.
 - **Firebase Private Keys**: None committed. Only standard public client identifiers in `google-services.json`.
-- **Signing Credentials**: No `key.properties`, `.jks`, or `.keystore` files committed to repository.
+- **Signing Credentials**: Production signing is configured locally through ignored `android/key.properties` and the owner-managed keystore. Signing secrets remain excluded from version control by `.gitignore`.
 - **Tokens**: `authToken`, `refreshToken`, and `installationSecret` are dynamically acquired from the backend and stored in hardware-backed `FlutterSecureStorage`.
 - **Sensitive Key Redaction**: `NetworkLoggerInterceptor` explicitly redacts keys matching `password`, `token`, `access`, `refresh`, `otp`, `secret`, `installation_secret`, and `authorization`.
 
@@ -145,5 +145,5 @@ Declared Permissions in `android/app/src/main/AndroidManifest.xml`:
 
 ## 10. Signing & Play Store Readiness
 
-- **Production Signing**: `PRODUCTION SIGNING: NOT CONFIGURED`. Release builds currently sign with debug keys as a fallback for local evaluation. Production deployment requires a client-managed Keystore file and `key.properties`.
+- **Production Signing**: Configured locally via `android/key.properties`; the successful review APK build used `android/upload-keystore.jks`. The root `varadhi-key (1).keystore` is present, but its password/alias do not match the current `key.properties` values yet. Keep all keystores and passwords owner-managed and excluded from version control.
 - **Play Store Requirements**: Requires privacy policy URL, store screenshots, and Data Safety form completion by the app owner.

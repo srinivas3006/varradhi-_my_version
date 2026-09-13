@@ -1,7 +1,17 @@
 import 'news_article.dart';
 import 'poll.dart';
 
-enum FeedItemType { article, ad, poll, trendingRail, preferencesPrompt, poster, infoCard }
+enum FeedType { article, video, ad, jyothisham, poll }
+
+enum FeedItemType {
+  article,
+  ad,
+  poll,
+  trendingRail,
+  preferencesPrompt,
+  poster,
+  infoCard
+}
 
 /// Wraps a heterogeneous feed entry (article, ad slot, or poll) so a single
 /// PageView/ListView can render a mixed vertical feed, matching Way2News's

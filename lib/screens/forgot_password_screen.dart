@@ -19,7 +19,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _submit() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Please enter your registered email address.');
+      setState(() => _error = 'దయచేసి మీ నమోదిత ఇమెయిల్ చిరునామా నమోదు చేయండి.');
       return;
     }
 
@@ -39,7 +39,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'Failed to request password reset. Please try again.';
+        String errorMsg = 'పాస్‌వర్డ్ రీసెట్ అభ్యర్థన విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException && e.response?.data is Map) {
           final resp = e.response!.data as Map;
           if (resp['errors'] is Map && resp['errors']['message'] != null) {
@@ -58,7 +58,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('Forgot Password')),
+      appBar: AppBar(title: const Text('పాస్‌వర్డ్ మర్చిపోయారా')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
@@ -76,7 +76,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'Reset Password',
+                'పాస్‌వర్డ్ రీసెట్ చేయండి',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -85,7 +85,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'Enter your email address and we will send you a verification code to reset your password.',
+                'మీ ఇమెయిల్ చిరునామా నమోదు చేయండి, పాస్‌వర్డ్ రీసెట్ చేయడానికి మేము మీకు ధృవీకరణ కోడ్‌ను పంపుతాము.',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
@@ -94,7 +94,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 keyboardType: TextInputType.emailAddress,
                 autofillHints: const [AutofillHints.email],
                 decoration: InputDecoration(
-                  labelText: 'Email Address',
+                  labelText: 'ఇమెయిల్ చిరునామా',
                   filled: true,
                   fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
                   border: OutlineInputBorder(
@@ -130,7 +130,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : const Text('Send Reset Code',
+                      : const Text('రీసెట్ కోడ్ పంపండి',
                           style: TextStyle(
                               fontSize: 15, fontWeight: FontWeight.w700)),
                 ),

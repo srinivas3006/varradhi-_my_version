@@ -97,9 +97,39 @@ void main() {
       expect(MediaResolver.extractYoutubeVideoId('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
       expect(MediaResolver.extractYoutubeVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
       expect(MediaResolver.extractYoutubeVideoId('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+      expect(
+        MediaResolver.extractYoutubeVideoId(
+          'https://m.youtube.com/watch?v=dQw4w9WgXcQ&pp=ygU=',
+        ),
+        'dQw4w9WgXcQ',
+      );
+      expect(
+        MediaResolver.extractYoutubeVideoId(
+          'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0',
+        ),
+        'dQw4w9WgXcQ',
+      );
+      expect(
+        MediaResolver.extractYoutubeVideoId(
+          'https://www.youtube.com/live/dQw4w9WgXcQ?si=abc',
+        ),
+        'dQw4w9WgXcQ',
+      );
       expect(MediaResolver.extractYoutubeVideoId('dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
       expect(MediaResolver.extractYoutubeVideoId('https://example.com/not-youtube'), null);
       expect(MediaResolver.extractYoutubeVideoId(null), null);
+    });
+
+    test('VideoItem sanitizes a full URL stored in youtube_video_id', () {
+      final item = VideoItem.fromJson({
+        'id': 'v-url-id',
+        'title': 'CMS stored URL as ID',
+        'youtube_video_id':
+            'https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=youtu.be',
+      });
+
+      expect(item.youtubeVideoId, 'dQw4w9WgXcQ');
+      expect(item.toMediaSource().type, MediaSourceType.youtube);
     });
 
     test('VideoItem.toMediaSource() properly translates to MediaSource', () {

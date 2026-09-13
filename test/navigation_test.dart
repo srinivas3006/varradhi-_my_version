@@ -10,6 +10,7 @@ import 'package:way2news_clone/core/network/dio_client.dart';
 import 'package:way2news_clone/screens/create_post_screen.dart';
 import 'package:way2news_clone/screens/home_screen.dart';
 import 'package:way2news_clone/screens/spotlight_screen.dart';
+import 'package:way2news_clone/state/app_state.dart';
 
 class NavTestMockAdapter implements HttpClientAdapter {
   @override
@@ -64,6 +65,8 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    AppState.instance.isLoggedIn = false;
+    AppState.instance.authToken = null;
     ApiClient.instance.dio.httpClientAdapter = NavTestMockAdapter();
     AppNavigator.resetDebounce();
     AppNavigatorObserver.instance.reset();
@@ -84,7 +87,8 @@ void main() {
                       context,
                       MaterialPageRoute(
                         settings: const RouteSettings(name: '/target'),
-                        builder: (_) => const Scaffold(body: Text('Target Page')),
+                        builder: (_) =>
+                            const Scaffold(body: Text('Target Page')),
                       ),
                     );
                   },
@@ -118,7 +122,8 @@ void main() {
   });
 
   group('HomeScreen Root PopScope & Back Navigation Policy', () {
-    testWidgets('Back from secondary tab switches back to primary tab (NewsFeedTab)',
+    testWidgets(
+        'Back from secondary tab switches back to primary tab (NewsFeedTab)',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;
@@ -145,9 +150,11 @@ void main() {
       // Re-query state to confirm it did not crash and handled back
       expect(find.byType(HomeScreen), findsOneWidget);
       await tester.pump(const Duration(seconds: 4));
+      await tester.pump();
     });
 
-    testWidgets('First back on root tab shows "Press back again to exit" SnackBar',
+    testWidgets(
+        'First back on root tab shows "Press back again to exit" SnackBar',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;
@@ -172,7 +179,8 @@ void main() {
       await tester.pump(const Duration(seconds: 4));
     });
 
-    testWidgets('Second back within 2 seconds at root calls SystemNavigator.pop',
+    testWidgets(
+        'Second back within 2 seconds at root calls SystemNavigator.pop',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;
@@ -271,8 +279,10 @@ void main() {
                             AppNavigator.pushSafe(
                               childContext,
                               MaterialPageRoute(
-                                settings: const RouteSettings(name: '/comments'),
-                                builder: (_) => const Scaffold(body: Text('Comments Screen')),
+                                settings:
+                                    const RouteSettings(name: '/comments'),
+                                builder: (_) => const Scaffold(
+                                    body: Text('Comments Screen')),
                               ),
                             );
                           },
@@ -375,6 +385,8 @@ void main() {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
+      AppState.instance.isLoggedIn = true;
+      AppState.instance.authToken = 'test-token';
 
       await tester.pumpWidget(
         MaterialApp(

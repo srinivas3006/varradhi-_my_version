@@ -12,7 +12,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Code** | Flutter Analyze | 0 errors, 0 warnings, 0 lints | Validated via `flutter analyze` | **PASS** |
 | **Code** | Automated Test Suite | All tests passing across all suites | Validated via `flutter test` (169/169 tests) | **PASS** |
-| **API** | Production Base URL | Strict HTTPS (`https://incite-backend.onrender.com`) | Verified in `AppConfig` and `NetworkConfig` | **PASS** |
+| **API** | Client Review Base URL | Strict HTTPS (`https://incite-backend.onrender.com`) | Active via `AppConfig.useRenderTestBackend`; switch off before AWS production release | **PASS FOR REVIEW** |
 | **API** | Localhost / Test URLs | Zero localhost, 127.0.0.1, or 10.0.2.2 in runtime | Verified via full codebase grep | **PASS** |
 | **Firebase** | Production Project | `vaaradhi-8e964` matching package `com.vaaradhi.vaaradhi` | Verified in `google-services.json` | **PASS** |
 | **Firebase** | FCM Configuration | Background and foreground messaging handlers configured | Verified in `NotificationService` | **PASS** |
@@ -38,7 +38,7 @@
 | **Build** | Debug APK Build | `flutter build apk --debug` builds cleanly | Verified (Build succeeded) | **PASS** |
 | **Build** | Release APK Build | `flutter build apk --release` builds cleanly | Verified (70.2MB Release APK generated) | **PASS** |
 | **Build** | Release App Bundle (AAB) | `flutter build appbundle --release` builds cleanly | Verified (66.3MB Release AAB generated) | **PASS** |
-| **Signing** | Production Release Keystore | Hardware signing key configured for Google Play Console | `PRODUCTION SIGNING: NOT CONFIGURED` (Debug key fallback) | **BLOCKED (OWNER INPUT)** |
+| **Signing** | Production Release Keystore | Upload keystore configured for Google Play Console | Review APK signed with `android/upload-keystore.jks`; root `varadhi-key (1).keystore` still needs matching password/alias in `key.properties` | **PASS FOR REVIEW** |
 | **Store** | Privacy Policy URL | Publicly accessible privacy policy hosted online | Required for Google Play Console submission | **NEEDS OWNER INPUT** |
 | **Store** | Store Listing Assets | Feature graphic (1024x500), screenshots, icon | Required for Google Play Console submission | **NEEDS OWNER INPUT** |
 | **Store** | Data Safety Declaration | App permissions and data collection declarations | Ready to map from audited permissions | **NEEDS OWNER INPUT** |

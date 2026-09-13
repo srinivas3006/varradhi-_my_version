@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../../models/app_notification.dart';
 import '../../models/notification_target.dart';
@@ -108,14 +109,35 @@ class NotificationDeepLinkResolver {
   }
 
   /// Resolves an FCM push notification payload map.
-  static NotificationTarget resolveFromPayload(Map<String, dynamic> data) {
-    if (data.isEmpty) {
-      return NotificationTarget.unknown(originalPayload: data);
+  static NotificationTarget resolveFromPayload(Map<String, dynamic> rawData) {
+    if (rawData.isEmpty) {
+      return NotificationTarget.unknown(originalPayload: rawData);
+    }
+
+    // Unwrap nested JSON payload if present (e.g. backend sends serialized json string under 'payload' or 'data')
+    Map<String, dynamic> data = Map<String, dynamic>.from(rawData);
+    if (data.containsKey('data') && data['data'] is String) {
+      try {
+        final decoded = Uri.decodeComponent(data['data'] as String);
+        if (decoded.trim().startsWith('{')) {
+          // Attempt JSON parse if valid string
+          data.addAll(Map<String, dynamic>.from(
+            // ignore: unnecessary_cast
+            (jsonDecode(decoded) as Map),
+          ));
+        }
+      } catch (_) {}
+    } else if (data.containsKey('data') && data['data'] is Map) {
+      data.addAll(Map<String, dynamic>.from(data['data'] as Map));
+    }
+
+    if (data.containsKey('payload') && data['payload'] is Map) {
+      data.addAll(Map<String, dynamic>.from(data['payload'] as Map));
     }
 
     final notificationId =
         data['notification_id']?.toString() ?? data['id']?.toString();
-    final deepLink = data['deep_link']?.toString();
+    final deepLink = data['deep_link']?.toString() ?? data['click_action']?.toString();
 
     // 1. If explicit deep_link is present, prioritize it
     if (deepLink != null && deepLink.trim().isNotEmpty) {
@@ -131,13 +153,13 @@ class NotificationDeepLinkResolver {
 
     // 2. Fall back to structured backend payload fields
     final contentType = data['content_type']?.toString().toLowerCase();
-    final contentSlug = data['content_slug']?.toString();
-    final contentId = data['content_id']?.toString();
-    final categorySlug = data['category_slug']?.toString();
+    final contentSlug = data['content_slug']?.toString() ?? data['slug']?.toString();
+    final contentId = data['content_id']?.toString() ?? data['article_id']?.toString() ?? data['id']?.toString();
+    final categorySlug = data['category_slug']?.toString() ?? data['category']?.toString();
 
     // Category target
     if (contentType == 'category' ||
-        (categorySlug != null && categorySlug.isNotEmpty)) {
+        (categorySlug != null && categorySlug.isNotEmpty && contentType != 'article')) {
       final cat = (categorySlug != null && categorySlug.isNotEmpty)
           ? categorySlug
           : contentSlug;
@@ -152,8 +174,10 @@ class NotificationDeepLinkResolver {
 
     // Article target
     if (contentType == 'article' ||
+        contentType == 'news' ||
         contentType == 'quote' ||
-        contentType == 'breaking') {
+        contentType == 'breaking' ||
+        (contentSlug != null && contentSlug.isNotEmpty && contentType == null)) {
       final slug = (contentSlug != null && contentSlug.isNotEmpty)
           ? contentSlug
           : contentId;

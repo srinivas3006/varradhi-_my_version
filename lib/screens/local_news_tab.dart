@@ -1,6 +1,7 @@
 import 'dart:ui' as dart_ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
 import '../core/network/api_response.dart';
 import '../models/ad_banner.dart';
@@ -327,8 +328,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   // --- Per-Section Pagination ---
 
   Future<void> _loadMoreVillage() async {
-    if (_isLoadingMoreVillage || !_villageHasMore || _villageCursor == null)
+    if (_isLoadingMoreVillage || !_villageHasMore || _villageCursor == null) {
       return;
+    }
     final locationKey = _currentLocationKey;
     setState(() => _isLoadingMoreVillage = true);
 
@@ -371,8 +373,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   }
 
   Future<void> _loadMoreMandal() async {
-    if (_isLoadingMoreMandal || !_mandalHasMore || _mandalCursor == null)
+    if (_isLoadingMoreMandal || !_mandalHasMore || _mandalCursor == null) {
       return;
+    }
     final locationKey = _currentLocationKey;
     setState(() => _isLoadingMoreMandal = true);
 
@@ -415,8 +418,11 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   }
 
   Future<void> _loadMoreDistrict() async {
-    if (_isLoadingMoreDistrict || !_districtHasMore || _districtCursor == null)
+    if (_isLoadingMoreDistrict ||
+        !_districtHasMore ||
+        _districtCursor == null) {
       return;
+    }
     final locationKey = _currentLocationKey;
     setState(() => _isLoadingMoreDistrict = true);
 
@@ -631,12 +637,14 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       final deviceLocation = await LocationService.detectLocation();
       final match =
           await ApiService.instance.resolveCanonicalLocation(deviceLocation);
+      if (!mounted) return;
       final confirmed = await LocationService.showCanonicalConfirmation(
         context,
         match,
       );
-      if (!confirmed || !mounted) {
-        if (mounted) await _changeLocation();
+      if (!mounted) return;
+      if (!confirmed) {
+        await _changeLocation();
         return;
       }
       await ApiService.instance.applyCanonicalLocation(match);
@@ -655,7 +663,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error getting location: $e')));
+            SnackBar(content: Text('లొకేషన్ పొందడంలో సమస్య ఏర్పడింది: $e')));
       }
     } finally {
       if (mounted) {
@@ -796,7 +804,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                       Icon(Icons.record_voice_over_rounded,
                           color: Colors.amber, size: 14),
                       SizedBox(width: 4),
-                      Text('Citizen',
+                      Text('సిటిజెన్',
                           style: TextStyle(
                               color: Colors.amber,
                               fontSize: 11,
@@ -1006,8 +1014,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     }
     if (_hasText(article.village)) return article.village!.trim();
     if (_hasText(article.subdistrict)) return article.subdistrict!.trim();
-    if (_hasText(article.district))
+    if (_hasText(article.district)) {
       return '${article.district!.trim()} District';
+    }
     return 'Local';
   }
 
@@ -1216,7 +1225,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('మళ్ళీ ప్రయత్నించండి (Retry)'),
+                  child: const Text('మళ్లీ ప్రయత్నించండి'),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton(
@@ -1290,7 +1299,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     _buildSectionHeader(
                                       teluguTitle: 'గ్రామ వార్తలు',
                                       englishTitle:
-                                          'Village Headlines & Reports',
+                                          'గ్రామ ముఖ్యాంశాలు & నివేదికలు',
                                       locationTag: selectedVillage,
                                       icon: Icons.holiday_village_rounded,
                                       accentColor: AppColors.primary,
@@ -1309,12 +1318,17 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                       _buildSectionEmptyCard(
                                         message:
                                             '$selectedVillage గ్రామంలో ప్రస్తుతానికి వార్తలు లేవు. మీరే వార్తను పోస్ట్ చేయండి!',
-                                        ctaText: 'Citizen Report రాయండి',
-                                        onCta: () => Navigator.push(
+                                        ctaText: 'సిటిజెన్ రిపోర్ట్ రాయండి',
+                                        onCta: () => requireAuth(
+                                          context,
+                                          () => Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                                builder: (_) =>
-                                                    const CreatePostScreen())),
+                                              builder: (_) =>
+                                                  const CreatePostScreen(),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ],
                                     if (_localAds.isNotEmpty) ...[
@@ -1330,7 +1344,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                   if (selectedSubdistrict.isNotEmpty) ...[
                                     _buildSectionHeader(
                                       teluguTitle: 'మండల వార్తలు',
-                                      englishTitle: 'Mandal Coverage & Updates',
+                                      englishTitle: 'మండల సమగ్ర సమాచారం',
                                       locationTag: selectedSubdistrict,
                                       icon: Icons.location_city_rounded,
                                       accentColor: Colors.teal,
@@ -1350,11 +1364,16 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                         message:
                                             '$selectedSubdistrict మండలంలో ప్రస్తుతానికి కొత్త వార్తలు లేవు.',
                                         ctaText: 'వార్తను రిపోర్ట్ చేయండి',
-                                        onCta: () => Navigator.push(
+                                        onCta: () => requireAuth(
+                                          context,
+                                          () => Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                                builder: (_) =>
-                                                    const CreatePostScreen())),
+                                              builder: (_) =>
+                                                  const CreatePostScreen(),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ],
                                     if (_localAds.length > 1) ...[
@@ -1370,7 +1389,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                   if (selectedDistrict.isNotEmpty) ...[
                                     _buildSectionHeader(
                                       teluguTitle: 'జిల్లా వార్తలు',
-                                      englishTitle: 'District Highlights',
+                                      englishTitle: 'జిల్లా ముఖ్యాంశాలు',
                                       locationTag: selectedDistrict,
                                       icon: Icons.domain_rounded,
                                       accentColor: Colors.indigo,
@@ -1381,7 +1400,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                               a, cardColor, borderColor)),
                                       if (_districtHasMore)
                                         _buildLoadMoreButton(
-                                          title: '$selectedDistrict District',
+                                          title: '$selectedDistrict జిల్లా',
                                           isLoading: _isLoadingMoreDistrict,
                                           onLoadMore: _loadMoreDistrict,
                                         ),
@@ -1399,7 +1418,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                   if (_stateArticles.isNotEmpty) ...[
                                     _buildSectionHeader(
                                       teluguTitle: 'రాష్ట్ర ముఖ్యాంశాలు',
-                                      englishTitle: 'State Headlines',
+                                      englishTitle: 'రాష్ట్ర వార్తా సమాచారం',
                                       locationTag: selectedState,
                                       icon: Icons.map_rounded,
                                       accentColor: Colors.deepOrange,
@@ -1413,8 +1432,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                   if (_globalArticles.isNotEmpty) ...[
                                     _buildSectionHeader(
                                       teluguTitle: 'జాతీయ వార్తలు',
-                                      englishTitle: 'India / Global News',
-                                      locationTag: 'India / Global',
+                                      englishTitle:
+                                          'దేశీయ & అంతర్జాతీయ వార్తలు',
+                                      locationTag: 'జాతీయం / అంతర్జాతీయం',
                                       icon: Icons.public_rounded,
                                       accentColor: Colors.blueGrey,
                                     ),
@@ -1423,7 +1443,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                             a, cardColor, borderColor)),
                                     if (_stateHasMore)
                                       _buildLoadMoreButton(
-                                        title: 'More Headlines',
+                                        title: 'మరిన్ని ముఖ్యాంశాలు',
                                         isLoading: _isLoadingMoreState,
                                         onLoadMore: _loadMoreState,
                                       ),

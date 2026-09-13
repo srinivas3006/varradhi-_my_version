@@ -51,7 +51,7 @@ DioClient (lib/services/dio_client.dart)
   ↓
 Dio Interceptors (Bearer token, X-Device-ID, 401 refresh interceptor)
   ↓
-Remote Backend (https://incite-backend.onrender.com)
+Remote Backend (https://api.vaaradhinews.com)
   ↓
 Raw Response (JSON Map)
   ↓

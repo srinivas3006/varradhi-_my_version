@@ -118,13 +118,15 @@ void main() {
   });
 
   group('Spotlight Controller & FeedRepository Integration', () {
-    test('SpotlightController loads articles from FeedRepository into feed', () async {
+    test('SpotlightController loads articles from FeedRepository into feed',
+        () async {
       final sampleArticles = [
         {
           'id': 'art-1',
           'title': 'Hyderabad Tech Innovation Center Opens',
           'summary': 'Summary of article',
-          'body': 'A state-of-the-art tech innovation center was inaugurated today.',
+          'body':
+              'A state-of-the-art tech innovation center was inaugurated today.',
           'image_url': 'https://example.com/art1.jpg',
           'source': 'Varadhi',
           'category': 'Tech',
@@ -153,7 +155,8 @@ void main() {
       controller.dispose();
     });
 
-    test('Category switching triggers clean state reset and re-query', () async {
+    test('Category switching triggers clean state reset and re-query',
+        () async {
       final articlesPol = [
         {
           'id': 'pol-1',
@@ -184,7 +187,8 @@ void main() {
       controller.dispose();
     });
 
-    test('Location update updates state location and triggers refresh', () async {
+    test('Location update updates state location and triggers refresh',
+        () async {
       final controller = SpotlightController();
       await controller.loadFeed(refresh: true);
 
@@ -198,12 +202,16 @@ void main() {
   });
 
   group('Spotlight News Card Rendering', () {
-    testWidgets('Renders story title, content, location badge, and reporter attribution', (tester) async {
+    testWidgets(
+        'Renders story title, content, location badge, and reporter attribution',
+        (tester) async {
       final article = _createTestArticle(
         id: 'spotlight-card-1',
         title: 'Bumper Harvest in Guntur District',
-        summary: 'Farmers celebrate high chilli yields this season across several mandals.',
-        body: 'Farmers celebrate high chilli yields this season across several mandals.',
+        summary:
+            'Farmers celebrate high chilli yields this season across several mandals.',
+        body:
+            'Farmers celebrate high chilli yields this season across several mandals.',
         category: 'Agriculture',
         district: 'Guntur',
         state: 'Andhra Pradesh',
@@ -229,14 +237,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Bumper Harvest in Guntur District'), findsOneWidget);
-      expect(find.textContaining('Farmers celebrate high chilli yields'), findsOneWidget);
+      expect(find.textContaining('Farmers celebrate high chilli yields'),
+          findsOneWidget);
       expect(find.text('Guntur'), findsOneWidget);
       expect(find.text('Ravi Kumar (Citizen Reporter)'), findsOneWidget);
     });
   });
 
   group('Spotlight Startup Navigation & Notification Priority', () {
-    testWidgets('HomeScreen with openSpotlightOnStart pushes SpotlightScreen', (tester) async {
+    testWidgets('HomeScreen with openSpotlightOnStart pushes SpotlightScreen',
+        (tester) async {
       ApiClient.instance.dio.httpClientAdapter =
           SpotlightMockAdapter(articles: []);
 
@@ -251,9 +261,12 @@ void main() {
 
       expect(find.byType(SpotlightScreen), findsOneWidget);
       expect(find.byType(SpotlightScreenView), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 100));
     });
 
-    testWidgets('HomeScreen suppresses openSpotlightOnStart if pending notification target exists', (tester) async {
+    testWidgets(
+        'HomeScreen suppresses openSpotlightOnStart if pending notification target exists',
+        (tester) async {
       ApiClient.instance.dio.httpClientAdapter =
           SpotlightMockAdapter(articles: []);
 
@@ -277,7 +290,8 @@ void main() {
       expect(find.byType(SpotlightScreen), findsNothing);
     });
 
-    testWidgets('SpotlightScreen top home button exits to HomeScreen cleanly', (tester) async {
+    testWidgets('SpotlightScreen top home button exits to HomeScreen cleanly',
+        (tester) async {
       ApiClient.instance.dio.httpClientAdapter =
           SpotlightMockAdapter(articles: []);
 

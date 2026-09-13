@@ -18,6 +18,10 @@ class NewsArticleRepository {
   /// Fetches article detail by slug, returning cached version if available.
   Future<NewsArticle> getDetail(String slug, {bool forceRefresh = false}) async {
     if (!forceRefresh && _cache.containsKey(slug)) {
+      // Return instantly (<10ms) and revalidate in background
+      ApiService.instance.getArticleDetail(slug).then((fresh) {
+        _cache[slug] = fresh;
+      }).catchError((_) {});
       return _cache[slug]!;
     }
 

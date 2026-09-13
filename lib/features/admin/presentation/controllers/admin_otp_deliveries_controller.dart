@@ -4,6 +4,7 @@ import '../../data/repositories/admin_ugc_repository.dart';
 import 'admin_load_status.dart';
 
 class AdminOtpDeliveriesController extends ChangeNotifier {
+  static const _requestTimeout = Duration(seconds: 8);
   final AdminUgcRepository _repository = AdminUgcRepository();
 
   final List<AdminOtpDeliveryModel> _items = [];
@@ -42,7 +43,7 @@ class AdminOtpDeliveriesController extends ChangeNotifier {
       final response = await _repository.getOtpDeliveries(
         status: statusFilter == 'ALL' ? null : statusFilter,
         mobile: mobileQuery.isEmpty ? null : mobileQuery,
-      );
+      ).timeout(_requestTimeout);
       _items
         ..clear()
         ..addAll(response.items);
@@ -50,7 +51,7 @@ class AdminOtpDeliveriesController extends ChangeNotifier {
       _hasMore = response.hasMore;
       _status = _items.isEmpty ? AdminLoadStatus.empty : AdminLoadStatus.loaded;
     } catch (e) {
-      _errorMessage = e.toString();
+      _errorMessage = 'OTP లాగ్‌లు లోడ్ కాలేదు. కనెక్షన్ చూసి మళ్లీ ప్రయత్నించండి.';
       _status = AdminLoadStatus.error;
     } finally {
       _isFetching = false;
@@ -69,7 +70,7 @@ class AdminOtpDeliveriesController extends ChangeNotifier {
         cursor: _nextCursor,
         status: statusFilter == 'ALL' ? null : statusFilter,
         mobile: mobileQuery.isEmpty ? null : mobileQuery,
-      );
+      ).timeout(_requestTimeout);
       _items.addAll(response.items);
       _nextCursor = response.next;
       _hasMore = response.hasMore;

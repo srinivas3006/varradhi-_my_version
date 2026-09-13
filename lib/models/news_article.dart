@@ -1,4 +1,5 @@
 import '../core/utils/date_parser.dart';
+import '../core/media/media_resolver.dart';
 import '../core/utils/url_normalizer.dart';
 
 int _toInt(dynamic val, [int fallback = 0]) {
@@ -102,16 +103,18 @@ class NewsArticle {
     String extractString(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
-        if (value != null && value.toString().trim().isNotEmpty)
+        if (value != null && value.toString().trim().isNotEmpty) {
           return value.toString();
+        }
       }
 
       final nested = json['article'];
       if (nested is Map<String, dynamic>) {
         for (final key in keys) {
           final value = nested[key];
-          if (value != null && value.toString().trim().isNotEmpty)
+          if (value != null && value.toString().trim().isNotEmpty) {
             return value.toString();
+          }
         }
       }
 
@@ -122,10 +125,12 @@ class NewsArticle {
         (json['thumbnail_url'] ?? json['image_url'] ?? json['imageUrl'])
                 ?.toString() ??
             '';
-    final rawVid = (json['video_url'] ?? json['youtube_url'])?.toString() ?? '';
+    final rawVid =
+        extractString(['video_url', 'youtube_url', 'youtube_video_id']);
 
     if (rawImgUrl.isEmpty && rawVid.isNotEmpty) {
-      final ytThumb = UrlNormalizer.extractYoutubeThumbnail(rawVid);
+      final ytThumb = UrlNormalizer.extractYoutubeThumbnail(rawVid) ??
+          _youtubeThumbnailFromId(rawVid);
       if (ytThumb != null) {
         rawImgUrl = ytThumb;
       }
@@ -133,27 +138,7 @@ class NewsArticle {
 
     final normalizedImgUrl = UrlNormalizer.normalize(rawImgUrl);
 
-    // Resolve video url
-    String resolvedVideoUrl = '';
-    if (json['video_url']?.toString().trim().isNotEmpty == true) {
-      resolvedVideoUrl = json['video_url'].toString().trim();
-    } else if (json['youtube_url']?.toString().trim().isNotEmpty == true) {
-      resolvedVideoUrl = json['youtube_url'].toString().trim();
-    } else if (json['youtube_video_id']?.toString().trim().isNotEmpty == true) {
-      resolvedVideoUrl =
-          'https://www.youtube.com/watch?v=${json['youtube_video_id']}';
-    } else if (json['article'] is Map) {
-      final art = json['article'] as Map;
-      if (art['video_url']?.toString().trim().isNotEmpty == true) {
-        resolvedVideoUrl = art['video_url'].toString().trim();
-      } else if (art['youtube_url']?.toString().trim().isNotEmpty == true) {
-        resolvedVideoUrl = art['youtube_url'].toString().trim();
-      } else if (art['youtube_video_id']?.toString().trim().isNotEmpty ==
-          true) {
-        resolvedVideoUrl =
-            'https://www.youtube.com/watch?v=${art['youtube_video_id']}';
-      }
-    }
+    final resolvedVideoUrl = _resolveVideoUrl(json);
 
     // Media type resolution
     final rawMediaType =
@@ -306,6 +291,40 @@ class NewsArticle {
   }
 }
 
+String _resolveVideoUrl(Map<dynamic, dynamic> json) {
+  String fromMap(Map<dynamic, dynamic> source) {
+    final directVideoUrl = source['video_url']?.toString().trim() ?? '';
+    if (directVideoUrl.isNotEmpty) return directVideoUrl;
+
+    final youtubeUrl = source['youtube_url']?.toString().trim() ?? '';
+    if (youtubeUrl.isNotEmpty) return youtubeUrl;
+
+    final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
+        source['youtube_video_id']?.toString());
+    if (youtubeVideoId != null) {
+      return 'https://www.youtube.com/watch?v=$youtubeVideoId';
+    }
+
+    return '';
+  }
+
+  final topLevel = fromMap(json);
+  if (topLevel.isNotEmpty) return topLevel;
+
+  final nested = json['article'];
+  if (nested is Map) {
+    return fromMap(nested);
+  }
+
+  return '';
+}
+
+String? _youtubeThumbnailFromId(String rawValue) {
+  final youtubeVideoId = MediaResolver.extractYoutubeVideoId(rawValue);
+  if (youtubeVideoId == null) return null;
+  return 'https://i.ytimg.com/vi/$youtubeVideoId/hqdefault.jpg';
+}
+
 class Comment {
   final String id;
   final String? articleId;
@@ -363,7 +382,7 @@ class Comment {
       username: authorName.toString(),
       avatarUrl: UrlNormalizer.normalize(
         (json['avatar_url'] ?? json['avatarUrl'])?.toString(),
-        fallback: 'https://i.pravatar.cc/150?u=${authorName.hashCode}',
+        fallback: '',
       ),
       text: json['content']?.toString() ?? json['text']?.toString() ?? '',
       postedAt: createdAt,
@@ -403,9 +422,23 @@ class MediaItem {
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
     final mType = json['media_type']?.toString().toLowerCase() ?? 'image';
-    final urlStr = UrlNormalizer.normalize(json['url']?.toString());
-    final thumbStr = UrlNormalizer.normalize(json['thumbnail_url']?.toString(),
-        fallback: urlStr);
+    final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
+      json['youtube_video_id']?.toString() ?? json['youtube_url']?.toString(),
+    );
+    final youtubeUrl = youtubeVideoId == null
+        ? ''
+        : 'https://www.youtube.com/watch?v=$youtubeVideoId';
+    final rawUrl = json['url']?.toString();
+    final urlStr = rawUrl == null || rawUrl.trim().isEmpty
+        ? youtubeUrl
+        : UrlNormalizer.normalize(rawUrl);
+    final youtubeThumb = youtubeVideoId == null
+        ? ''
+        : 'https://i.ytimg.com/vi/$youtubeVideoId/hqdefault.jpg';
+    final thumbStr = UrlNormalizer.normalize(
+      json['thumbnail_url']?.toString(),
+      fallback: youtubeThumb.isNotEmpty ? youtubeThumb : urlStr,
+    );
     final order = _toInt(json['sort_order'], 0);
     return MediaItem(
       mediaType: mType,

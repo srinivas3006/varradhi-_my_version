@@ -26,6 +26,7 @@ class AdBanner {
   final String? area;
   final String? areaId;
   final int displayFrequency;
+  final int durationSeconds;
   final int dailyMaxImpressionsPerUser;
   final double ctr;
 
@@ -41,6 +42,7 @@ class AdBanner {
     this.area,
     this.areaId,
     required this.displayFrequency,
+    this.durationSeconds = 4,
     this.dailyMaxImpressionsPerUser = 0,
     required this.ctr,
   });
@@ -50,7 +52,8 @@ class AdBanner {
 
   bool get isBanner => adType.toLowerCase() == 'banner';
   bool get isBox => adType.toLowerCase() == 'box';
-  bool get isThreeD => adType.toLowerCase() == 'three_d' || adType.toLowerCase() == '3d';
+  bool get isThreeD =>
+      adType.toLowerCase() == 'three_d' || adType.toLowerCase() == '3d';
   bool get isInterstitial => adType.toLowerCase() == 'interstitial';
   bool get isNative => adType.toLowerCase() == 'native';
   bool get isPoster => adType.toLowerCase() == 'poster';
@@ -61,13 +64,19 @@ class AdBanner {
   bool get isBottomSticky => adType.toLowerCase() == 'bottom_sticky';
 
   factory AdBanner.fromJson(Map<String, dynamic> json) {
-    final rawImg = (json['image_url'] ?? json['thumbnail_url'] ?? json['banner_url'])?.toString();
+    final rawImg =
+        (json['image_url'] ?? json['thumbnail_url'] ?? json['banner_url'])
+            ?.toString();
     final rawVideo = (json['video_url'] ?? json['video'])?.toString();
-    final rawDest = (json['destination_url'] ?? json['target_url'] ?? json['click_url'])?.toString();
+    final rawDest =
+        (json['destination_url'] ?? json['target_url'] ?? json['click_url'])
+            ?.toString();
 
     return AdBanner(
       id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? json['headline']?.toString() ?? 'Sponsored Promotion',
+      title: json['title']?.toString() ??
+          json['headline']?.toString() ??
+          'Sponsored Promotion',
       imageUrl: UrlNormalizer.normalize(rawImg),
       videoUrl: UrlNormalizer.normalize(rawVideo),
       destinationUrl: rawDest?.trim() ?? '',
@@ -77,7 +86,12 @@ class AdBanner {
       area: json['area']?.toString(),
       areaId: json['area_id']?.toString(),
       displayFrequency: _toInt(json['display_frequency'], 5),
-      dailyMaxImpressionsPerUser: _toInt(json['daily_max_impressions_per_user'], 0),
+      durationSeconds: _toInt(
+        json['duration_seconds'] ?? json['display_seconds'] ?? json['duration'],
+        4,
+      ).clamp(2, 30),
+      dailyMaxImpressionsPerUser:
+          _toInt(json['daily_max_impressions_per_user'], 0),
       ctr: _toDouble(json['ctr'], 0.0),
     );
   }
@@ -95,6 +109,7 @@ class AdBanner {
       if (area != null) 'area': area,
       if (areaId != null) 'area_id': areaId,
       'display_frequency': displayFrequency,
+      'duration_seconds': durationSeconds,
       'daily_max_impressions_per_user': dailyMaxImpressionsPerUser,
       'ctr': ctr,
     };
@@ -112,6 +127,7 @@ class AdBanner {
     String? area,
     String? areaId,
     int? displayFrequency,
+    int? durationSeconds,
     int? dailyMaxImpressionsPerUser,
     double? ctr,
   }) {
@@ -127,7 +143,9 @@ class AdBanner {
       area: area ?? this.area,
       areaId: areaId ?? this.areaId,
       displayFrequency: displayFrequency ?? this.displayFrequency,
-      dailyMaxImpressionsPerUser: dailyMaxImpressionsPerUser ?? this.dailyMaxImpressionsPerUser,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      dailyMaxImpressionsPerUser:
+          dailyMaxImpressionsPerUser ?? this.dailyMaxImpressionsPerUser,
       ctr: ctr ?? this.ctr,
     );
   }

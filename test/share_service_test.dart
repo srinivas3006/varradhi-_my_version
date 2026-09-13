@@ -42,4 +42,13 @@ void main() {
       'varadhi://ugc/ugc%20123',
     );
   });
+
+  test('buildShareText includes title, playstore app link, and web article link', () {
+    final article = _article(id: 'news-1', slug: 'telangana-news');
+    final text = ShareService.buildShareText(article);
+
+    expect(text, contains('News'));
+    expect(text, contains(ShareService.appDownloadUrl));
+    expect(text, contains('https://vaaradhinews.com/article/telangana-news'));
+  });
 }

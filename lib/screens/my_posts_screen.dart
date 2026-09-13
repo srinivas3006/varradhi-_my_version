@@ -62,38 +62,38 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   String _statusLabel(PostStatus status) {
     switch (status) {
       case PostStatus.approved:
-        return 'Approved · +1 token';
+        return 'ఆమోదించబడింది · +1 టోకెన్';
       case PostStatus.published:
-        return 'Published';
+        return 'ప్రచురించబడింది';
       case PostStatus.rejected:
-        return 'Rejected';
+        return 'తిరస్కరించబడింది';
       case PostStatus.pending:
-        return 'Pending review';
+        return 'సమీక్షలో ఉంది';
     }
   }
 
   String _emptyMessage(String filter) {
     switch (filter) {
       case 'pending':
-        return 'No submissions currently pending review.';
+        return 'ప్రస్తుతం సమీక్షలో ఎలాంటి వార్తలు లేవు.';
       case 'approved':
-        return 'No approved submissions awaiting publication.';
+        return 'ప్రచురణ కోసం ఎదురుచూస్తున్న ఆమోదిత వార్తలు లేవు.';
       case 'published':
-        return 'No published submissions yet.';
+        return 'ఇంకా ప్రచురించబడిన వార్తలు లేవు.';
       case 'rejected':
-        return 'No rejected submissions.';
+        return 'తిరస్కరించబడిన వార్తలు ఏవీ లేవు.';
       default:
-        return 'You haven\'t posted anything yet.';
+        return 'మీరు ఇంకా ఎలాంటి వార్తలను పోస్ట్ చేయలేదు.';
     }
   }
 
   Widget _buildFilterBar(bool isDark, int Function(String) countFor) {
     final filters = [
-      {'key': 'all', 'label': 'All', 'color': AppColors.primary},
-      {'key': 'pending', 'label': 'Pending', 'color': const Color(0xFFE8A312)},
-      {'key': 'approved', 'label': 'Approved', 'color': const Color(0xFF10B981)},
-      {'key': 'published', 'label': 'Published', 'color': const Color(0xFF3B82F6)},
-      {'key': 'rejected', 'label': 'Rejected', 'color': const Color(0xFFE8412B)},
+      {'key': 'all', 'label': 'అన్నీ', 'color': AppColors.primary},
+      {'key': 'pending', 'label': 'పెండింగ్', 'color': const Color(0xFFE8A312)},
+      {'key': 'approved', 'label': 'ఆమోదించబడినవి', 'color': const Color(0xFF10B981)},
+      {'key': 'published', 'label': 'ప్రచురించబడినవి', 'color': const Color(0xFF3B82F6)},
+      {'key': 'rejected', 'label': 'తిరస్కరించబడినవి', 'color': const Color(0xFFE8412B)},
     ];
 
     return Container(
@@ -193,7 +193,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
         return Scaffold(
           backgroundColor: isDark ? const Color(0xFF121212) : AppColors.background,
           appBar: AppBar(
-            title: const Text('My Posts'),
+            title: const Text('నా వార్తలు'),
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
@@ -337,7 +337,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                                               const SizedBox(width: 6),
                                               Expanded(
                                                 child: Text(
-                                                  'Reason: ${post.rejectionReason}',
+                                                  'కారణం: ${post.rejectionReason}',
                                                   style: const TextStyle(
                                                     fontSize: 11,
                                                     fontWeight: FontWeight.w600,
@@ -368,8 +368,8 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
 
   String _timeAgo(DateTime time) {
     final diff = DateTime.now().difference(time);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} నిమిషాల కిందట';
+    if (diff.inHours < 24) return '${diff.inHours} గంటల కిందట';
+    return '${diff.inDays} రోజుల కిందట';
   }
 }

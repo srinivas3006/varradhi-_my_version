@@ -56,7 +56,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       if (prefs != null && mounted) {
         setState(() {
           _enabled = prefs['enabled'] ?? true;
-          _contentLanguage = prefs['content_language']?.toString() ?? (AppState.instance.language == 'English' ? 'en' : 'te');
+          _contentLanguage = prefs['content_language']?.toString() ?? 'te';
           _articles = prefs['articles'] ?? true;
           _posters = prefs['posters'] ?? true;
           _quotes = prefs['quotes'] ?? true;
@@ -114,7 +114,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Notification settings updated' : 'Settings saved locally'),
+          content: Text(success ? 'నోటిఫికేషన్ సెట్టింగ్‌లు నవీకరించబడ్డాయి' : 'సెట్టింగ్‌లు సేవ్ అయ్యాయి'),
           backgroundColor: success ? Colors.green.shade700 : AppColors.primary,
           behavior: SnackBarBehavior.floating,
         ),
@@ -138,7 +138,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Notification Settings',
+          'నోటిఫికేషన్ సెట్టింగ్‌లు',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
@@ -161,7 +161,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
               Icon(Icons.lock_outline_rounded, size: 64, color: isDark ? Colors.white24 : Colors.black26),
               const SizedBox(height: 16),
               Text(
-                'Login Required',
+                'లాగిన్ అవసరం',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -170,7 +170,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'Please sign in to customize your push notification preferences and alerts.',
+                'మీ పుష్ నోటిఫికేషన్ ప్రాధాన్యతలను మార్చుకోవడానికి దయచేసి సైన్ ఇన్ చేయండి.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -192,7 +192,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('సైన్ ఇన్', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -215,7 +215,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
             child: SwitchListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               title: Text(
-                'Enable All Notifications',
+                'అన్ని నోటిఫికేషన్‌లను ప్రారంభించండి',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -223,7 +223,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                 ),
               ),
               subtitle: Text(
-                'Master switch for breaking news, stories, and alerts',
+                'బ్రేకింగ్ న్యూస్, కథనాలు మరియు హెచ్చరికల ప్రధాన స్విచ్',
                 style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
               ),
               value: _enabled,
@@ -237,14 +237,14 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           const SizedBox(height: 20),
 
           // Alerts & Updates
-          _buildSectionHeader('ALERTS & BROADCASTS', isDark),
+          _buildSectionHeader('హెచ్చరికలు & ప్రసారాలు', isDark),
           _buildCard(
             isDark,
             child: Column(
               children: [
                 _buildSwitchTile(
-                  'Breaking News',
-                  'High priority emergency and headline notifications',
+                  'బ్రేకింగ్ న్యూస్',
+                  'ముఖ్యమైన అత్యవసర మరియు ప్రధాన వార్తల నోటిఫికేషన్‌లు',
                   _breakingNews,
                   _enabled,
                   (val) {
@@ -255,8 +255,8 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                 ),
                 const Divider(height: 1),
                 _buildSwitchTile(
-                  'Live News Streams',
-                  'Alerts when major live coverage or events begin',
+                  'లైవ్ న్యూస్ ప్రసారాలు',
+                  'ప్రత్యక్ష కవరేజ్ లేదా ముఖ్య సంఘటనలు ప్రారంభమైనప్పుడు హెచ్చరికలు',
                   _liveNews,
                   _enabled,
                   (val) {
@@ -267,8 +267,8 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                 ),
                 const Divider(height: 1),
                 _buildSwitchTile(
-                  'Local News & Area Alerts',
-                  'Stories from your district, mandal, and village',
+                  'స్థానిక వార్తలు & ప్రాంతీయ హెచ్చరికలు',
+                  'మీ జిల్లా, మండలం మరియు గ్రామం నుంచి తాజా వార్తలు',
                   _localNews,
                   _enabled,
                   (val) {
@@ -283,27 +283,27 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           const SizedBox(height: 20),
 
           // Category Channels
-          _buildSectionHeader('CATEGORY PREFERENCES', isDark),
+          _buildSectionHeader('విభాగాల ప్రాధాన్యతలు', isDark),
           _buildCard(
             isDark,
             child: Column(
               children: [
-                _buildSwitchTile('Politics', 'Political updates, government policies, and elections', _politics, _enabled, (val) {
+                _buildSwitchTile('రాజకీయాలు', 'రాజకీయ వార్తలు, ప్రభుత్వ విధానాలు మరియు ఎన్నికల సమాచారం', _politics, _enabled, (val) {
                   setState(() => _politics = val);
                   _savePreferences();
                 }, isDark),
                 const Divider(height: 1),
-                _buildSwitchTile('Sports', 'Cricket matches, scores, and tournament updates', _sports, _enabled, (val) {
+                _buildSwitchTile('క్రీడలు', 'క్రికెట్ మ్యాచ్‌లు, స్కోర్లు మరియు టోర్నమెంట్ వార్తలు', _sports, _enabled, (val) {
                   setState(() => _sports = val);
                   _savePreferences();
                 }, isDark),
                 const Divider(height: 1),
-                _buildSwitchTile('Entertainment', 'Cinema news, movie reviews, and celebrity trends', _entertainment, _enabled, (val) {
+                _buildSwitchTile('వినోదం', 'సినిమా వార్తలు, రివ్యూలు మరియు సెలబ్రిటీ అప్‌డేట్స్', _entertainment, _enabled, (val) {
                   setState(() => _entertainment = val);
                   _savePreferences();
                 }, isDark),
                 const Divider(height: 1),
-                _buildSwitchTile('Business & Finance', 'Stock market, economy, and financial highlights', _business, _enabled, (val) {
+                _buildSwitchTile('వ్యాపారం & ఫైనాన్స్', 'స్టాక్ మార్కెట్, ఆర్థిక వ్యవస్థ మరియు వ్యాపార వార్తలు', _business, _enabled, (val) {
                   setState(() => _business = val);
                   _savePreferences();
                 }, isDark),
@@ -313,7 +313,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           const SizedBox(height: 20),
 
           // Quiet Hours and Frequency
-          _buildSectionHeader('DELIVERY & QUIET HOURS', isDark),
+          _buildSectionHeader('సమయాలు & పరిమితులు', isDark),
           _buildCard(
             isDark,
             child: Column(
@@ -322,11 +322,11 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: const Icon(Icons.bedtime_outlined, color: AppColors.primary),
                   title: Text(
-                    'Quiet Hours',
+                    'సైలెంట్ గంటలు',
                     style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
                   ),
                   subtitle: Text(
-                    'Mute non-critical notifications between $_quietHoursStart and $_quietHoursEnd',
+                    '$_quietHoursStart నుండి $_quietHoursEnd మధ్య అత్యవసరం కాని నోటిఫికేషన్‌లను నిలిపివేయండి',
                     style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
                   ),
                 ),
@@ -335,11 +335,11 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   leading: const Icon(Icons.speed_rounded, color: AppColors.primary),
                   title: Text(
-                    'Notification Limits',
+                    'నోటిఫికేషన్ పరిమితులు',
                     style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
                   ),
                   subtitle: Text(
-                    'Up to $_maxPerHour per hour (max $_maxPerDay per day)',
+                    'గంటకు గరిష్టంగా $_maxPerHour (రోజుకు గరిష్టంగా $_maxPerDay)',
                     style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
                   ),
                 ),

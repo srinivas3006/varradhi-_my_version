@@ -51,13 +51,13 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Local Jobs & Services'),
+        title: const Text('స్థానిక ఉద్యోగాలు & సేవలు'),
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppColors.primary,
           unselectedLabelColor: AppColors.textMuted,
           indicatorColor: AppColors.primary,
-          tabs: const [Tab(text: 'Jobs'), Tab(text: 'Services')],
+          tabs: const [Tab(text: 'ఉద్యోగాలు'), Tab(text: 'సేవలు')],
         ),
       ),
       body: Column(
@@ -88,12 +88,12 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
               Icon(Icons.work_outline_rounded, size: 48, color: AppColors.textMuted),
               SizedBox(height: 12),
               Text(
-                'No job listings currently available',
+                'ప్రస్తుతానికి ఉద్యోగ ప్రకటనలు లేవు',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 6),
               Text(
-                'Check back soon for new local opportunities in your district.',
+                'మీ జిల్లాలోని తాజా స్థానిక అవకాశాల కోసం కాసేపటి తర్వాత మళ్లీ చూడండి.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
               ),
@@ -144,7 +144,7 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
                   ),
                   const Spacer(),
                   Text(
-                    'Vacancies: ${job.vacancies}',
+                    'ఖాళీలు: ${job.vacancies}',
                     style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
                   ),
                 ],
@@ -161,7 +161,7 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
                   Text(job.location, style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
                   const Spacer(),
                   Text(
-                    'Last date: ${job.lastDate}',
+                    'చివరి తేదీ: ${job.lastDate}',
                     style: const TextStyle(fontSize: 11.5, color: Color(0xFFE8412B), fontWeight: FontWeight.w600),
                   ),
                 ],
@@ -184,12 +184,12 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
               Icon(Icons.handyman_outlined, size: 48, color: AppColors.textMuted),
               SizedBox(height: 12),
               Text(
-                'No local services listed',
+                'ప్రస్తుతానికి సేవల జాబితా అందుబాటులో లేదు',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               SizedBox(height: 6),
               Text(
-                'Local service provider directory will update automatically.',
+                'స్థానిక సేవా ప్రదాతల వివరాలు త్వరలోనే నవీకరించబడతాయి.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
               ),

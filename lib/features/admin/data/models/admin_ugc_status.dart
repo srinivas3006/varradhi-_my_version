@@ -50,6 +50,21 @@ extension AdminUgcStatusX on AdminUgcStatus {
     }
   }
 
+  String get teluguLabel {
+    switch (this) {
+      case AdminUgcStatus.pending:
+        return 'పెండింగ్';
+      case AdminUgcStatus.review:
+        return 'సమీక్షలో ఉంది';
+      case AdminUgcStatus.flagged:
+        return 'ఫ్లాగ్డ్';
+      case AdminUgcStatus.approved:
+        return 'ఆమోదించబడింది';
+      case AdminUgcStatus.rejected:
+        return 'తిరస్కరించబడింది';
+    }
+  }
+
   /// True for statuses whose quick-action row is "flag + Reject + Approve".
   bool get isPendingLike => this == AdminUgcStatus.pending || this == AdminUgcStatus.review;
 
@@ -101,6 +116,17 @@ extension AdminTrustLevelX on AdminTrustLevel {
         return 'Trusted Reporter';
       case AdminTrustLevel.adminReporter:
         return 'Admin Reporter';
+    }
+  }
+
+  String get teluguLabel {
+    switch (this) {
+      case AdminTrustLevel.newUser:
+        return 'కొత్త యూజర్';
+      case AdminTrustLevel.trustedReporter:
+        return 'విశ్వసనీయ రిపోర్టర్';
+      case AdminTrustLevel.adminReporter:
+        return 'అడ్మిన్ రిపోర్టర్';
     }
   }
 }

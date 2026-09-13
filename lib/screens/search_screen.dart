@@ -18,14 +18,14 @@ class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   List<NewsArticle> _results = [];
-  final List<String> _recent = ['ISRO satellite', 'Sensex', 'Metro phase 2'];
+  final List<String> _recent = ['ఇస్రో ఉపగ్రహం', 'సెన్సెక్స్', 'మెట్రో ఫేజ్ 2'];
 
   List<String> _trending = [
-    'Cricket series',
-    'AI chipset',
-    'Box office',
-    'Monsoon alert',
-    'Sensex record',
+    'క్రికెట్ సిరీస్',
+    'ఏఐ చిప్‌సెట్',
+    'బాక్సాఫీస్',
+    'వర్షపాతం హెచ్చరిక',
+    'సెన్సెక్స్ రికార్డ్',
   ];
 
   @override

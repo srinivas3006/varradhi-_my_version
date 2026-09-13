@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
@@ -10,6 +11,9 @@ import '../utils/share_service.dart';
 import '../services/api_service.dart';
 import '../services/tts_service.dart';
 import '../repositories/news_article_repository.dart';
+import '../services/ad_manager.dart';
+import '../widgets/ads/banner_ad_slot.dart';
+import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/news_article_video_player.dart';
 import 'comments_screen.dart';
 
@@ -91,62 +95,52 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   bool _isTogglingLike = false;
 
   Future<void> _toggleLike() async {
-    if (_isUgc || _isTogglingLike) return;
+    if (_isTogglingLike) return;
     _isTogglingLike = true;
-    HapticFeedback.lightImpact();
+    HapticFeedback.selectionClick();
 
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
     if (targetId.isEmpty) {
       _isTogglingLike = false;
       return;
     }
-    final wasLiked = AppState.instance.isLiked(targetId);
-    AppState.instance.toggleLike(targetId);
 
+    final isCurrentlyLiked = AppState.instance.isLiked(targetId) || article.isLiked;
+    AppState.instance.toggleLike(targetId);
     final isNowLiked = AppState.instance.isLiked(targetId);
     final prevLikes = article.likes;
 
     setState(() {
       article.isLiked = isNowLiked;
-      article.likes =
-          isNowLiked ? prevLikes + 1 : (prevLikes > 0 ? prevLikes - 1 : 0);
+      article.likes = isNowLiked
+          ? (isCurrentlyLiked ? prevLikes : prevLikes + 1)
+          : (prevLikes > 0 ? prevLikes - 1 : 0);
     });
 
     try {
-      final res = await ApiService.instance.postArticleReaction(
-        targetId,
-        isNowLiked ? 'like' : 'none',
-      );
-      if (mounted && res.containsKey('like_count')) {
-        setState(() {
-          article.likes = (res['like_count'] as num?)?.toInt() ?? article.likes;
-        });
+      if (AppState.instance.isLoggedIn) {
+        final res = await ApiService.instance.postArticleReaction(
+          targetId,
+          isNowLiked ? 'like' : 'none',
+        );
+        if (mounted && res.containsKey('like_count')) {
+          setState(() {
+            article.likes = (res['like_count'] as num?)?.toInt() ?? article.likes;
+          });
+        }
       }
     } catch (e) {
-      debugPrint('Error syncing article reaction: $e');
-      if (AppState.instance.isLiked(targetId) != wasLiked) {
-        AppState.instance.toggleLike(targetId);
-      }
-      if (mounted) {
-        setState(() {
-          article.isLiked = wasLiked;
-          article.likes = prevLikes;
-        });
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text(tr('reaction_update_failed')),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-      }
+      debugPrint('[NewsDetailScreen] Could not sync reaction to backend: $e');
     } finally {
       _isTogglingLike = false;
     }
   }
 
   Future<void> _toggleBookmark() async {
+    if (!AppState.instance.isLoggedIn) {
+      requireAuth(context, () => _toggleBookmark());
+      return;
+    }
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
     if (targetId.isEmpty) return;
 
@@ -165,7 +159,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
           ..showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(tr('bookmark_update_failed')),
               behavior: SnackBarBehavior.floating,
             ),
@@ -211,7 +205,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             children: [
               Text(
                 tr('report_citizen_news'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               ...reasons.map(
@@ -239,9 +234,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            reported
-                ? tr('report_submitted')
-                : tr('report_submit_failed'),
+            reported ? tr('report_submitted') : tr('report_submit_failed'),
           ),
           behavior: SnackBarBehavior.floating,
         ),
@@ -250,7 +243,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       debugPrint('Error reporting UGC submission: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(tr('report_submit_failed')),
             behavior: SnackBarBehavior.floating,
           ),
@@ -259,14 +252,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-  void _share() async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-    await ShareService.shareArticle(article);
-    if (mounted) Navigator.pop(context); // dismiss loading
+  void _share() {
+    ShareService.shareArticle(article);
   }
 
   @override
@@ -423,26 +410,53 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Media Carousel Counter (If multiple media items)
-                if (article.mediaItems.length > 1 ||
-                    (article.imageUrls != null &&
-                        article.imageUrls!.length > 1))
+                // Photographer/Desk Credit Pill (Way2News style - article text.jpeg)
+                Positioned(
+                  bottom: 44,
+                  left: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.65),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 14),
+                        const SizedBox(width: 5),
+                        Text(
+                          article.authorName.isNotEmpty
+                              ? article.authorName
+                              : (article.source.isNotEmpty ? article.source : 'VARADHI Desk'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Multi-Image Index Indicator Pill
+                if (article.imageUrls != null && article.imageUrls!.length > 1)
                   Positioned(
                     bottom: 44,
-                    left: 16,
+                    right: 16,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
+                        color: Colors.black.withValues(alpha: 0.65),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${_currentImageIndex + 1} / ${article.mediaItems.isNotEmpty ? article.mediaItems.length : article.imageUrls!.length}',
+                        '${_currentImageIndex + 1}/${article.imageUrls!.length}',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -451,25 +465,29 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             ),
           ),
 
-          // 2. Frosted Header Action Bar (Top Floating Controls)
+          // 2. Frosted Header Action Bar (Top Floating Controls with Way2News Category & Desk)
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
-            left: 16,
-            right: 16,
+            left: 14,
+            right: 14,
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Back Button (Frosted Circle)
+                // Back Button with Interstitial eligibility check
                 GestureDetector(
                   onTap: () {
                     HapticFeedback.lightImpact();
                     Navigator.pop(context);
+                    if (AdManager.instance.canShowInterstitial()) {
+                      Future.delayed(const Duration(milliseconds: 300), () {
+                        if (context.mounted) showInterstitialAd(context);
+                      });
+                    }
                   },
                   child: Container(
-                    width: 42,
-                    height: 42,
+                    width: 40,
+                    height: 40,
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.4),
+                      color: Colors.black.withValues(alpha: 0.45),
                       shape: BoxShape.circle,
                       border: Border.all(
                           color: Colors.white.withValues(alpha: 0.2), width: 1),
@@ -478,30 +496,43 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         color: Colors.white, size: 18),
                   ),
                 ),
+                const SizedBox(width: 10),
 
-                // Center Page Context Tag
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15), width: 1),
-                  ),
-                  child: Text(
-                    article.category.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0,
-                    ),
+                // Category & Desk Title (Way2News style)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        article.category.isNotEmpty ? article.category : 'General',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Text(
+                        article.authorName.isNotEmpty
+                            ? article.authorName
+                            : (article.source.isNotEmpty ? article.source : 'VARADHI Desk'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
-                // Actions (Bookmark & Options)
+                // Actions (Bookmark & Share)
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     if (!_isUgc)
                       AnimatedBuilder(
@@ -514,12 +545,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           return GestureDetector(
                             onTap: _toggleBookmark,
                             child: Container(
-                              width: 48,
-                              height: 48,
+                              width: 40,
+                              height: 40,
+                              margin: const EdgeInsets.only(right: 8),
                               decoration: BoxDecoration(
                                 color: isBookmarked
                                     ? AppColors.primary
-                                    : Colors.black.withValues(alpha: 0.4),
+                                    : Colors.black.withValues(alpha: 0.45),
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                     color: Colors.white.withValues(alpha: 0.2),
@@ -530,12 +562,30 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                     ? Icons.bookmark_rounded
                                     : Icons.bookmark_border_rounded,
                                 color: Colors.white,
-                                size: 20,
+                                size: 19,
                               ),
                             ),
                           );
                         },
                       ),
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        _share();
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.2), width: 1),
+                        ),
+                        child: const Icon(Icons.share_rounded,
+                            color: Colors.white, size: 18),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -784,14 +834,14 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                   : Colors.black.withValues(alpha: 0.05)),
                         ),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: _isUgc
                               ? [
-                                  const Row(
+                                  Row(
                                     children: [
-                                      Icon(Icons.campaign_outlined,
+                                      const Icon(Icons.campaign_outlined,
                                           color: AppColors.primary, size: 20),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       Text(
                                         tr('citizen_report'),
                                         style: const TextStyle(
@@ -819,42 +869,48 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                           AppState.instance.isLiked(targetId) ||
                                               article.isLiked;
 
-                                      return GestureDetector(
+                                      return InkWell(
                                         onTap: _toggleLike,
-                                        child: Row(
-                                          children: [
-                                            AnimatedSwitcher(
-                                              duration: const Duration(
-                                                  milliseconds: 250),
-                                              transitionBuilder:
-                                                  (child, anim) =>
-                                                      ScaleTransition(
-                                                          scale: anim,
-                                                          child: child),
-                                              child: Icon(
-                                                isLiked
-                                                    ? Icons.favorite_rounded
-                                                    : Icons
-                                                        .favorite_outline_rounded,
-                                                key: ValueKey(isLiked),
-                                                color: isLiked
-                                                    ? AppColors.primary
-                                                    : mutedTextColor,
-                                                size: 18,
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 20, vertical: 8),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              AnimatedSwitcher(
+                                                duration: const Duration(
+                                                    milliseconds: 250),
+                                                transitionBuilder:
+                                                    (child, anim) =>
+                                                        ScaleTransition(
+                                                            scale: anim,
+                                                            child: child),
+                                                child: Icon(
+                                                  isLiked
+                                                      ? Icons.favorite_rounded
+                                                      : Icons
+                                                          .favorite_outline_rounded,
+                                                  key: ValueKey(isLiked),
+                                                  color: isLiked
+                                                      ? AppColors.primary
+                                                      : mutedTextColor,
+                                                  size: 20,
+                                                ),
                                               ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '${article.likes}',
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.bold,
-                                                color: isLiked
-                                                    ? AppColors.primary
-                                                    : textColor,
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '${article.likes}',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isLiked
+                                                      ? AppColors.primary
+                                                      : textColor,
+                                                ),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
                                       );
                                     },
@@ -862,7 +918,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                                   Container(
                                       width: 1,
-                                      height: 16,
+                                      height: 20,
                                       color: isDark
                                           ? Colors.white12
                                           : Colors.black12),
@@ -874,59 +930,45 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                       final count = AppState.instance
                                           .getDisplayCommentCount(
                                               article.id, article.comments);
-                                      return GestureDetector(
-                                        onTap: () async {
+                                      return InkWell(
+                                        onTap: () {
                                           HapticFeedback.lightImpact();
-                                          await Navigator.push(
+                                          Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                                builder: (_) => CommentsScreen(
-                                                    article: article)),
-                                          );
-                                          if (mounted) setState(() {});
-                                        },
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                                Icons
-                                                    .chat_bubble_outline_rounded,
-                                                color: mutedTextColor,
-                                                size: 18),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '$count',
-                                              style: TextStyle(
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: textColor),
+                                              builder: (_) =>
+                                                  CommentsScreen(
+                                                      article: article),
                                             ),
-                                          ],
+                                          ).then((_) {
+                                            if (mounted) setState(() {});
+                                          });
+                                        },
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 20, vertical: 8),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                  Icons
+                                                      .chat_bubble_outline_rounded,
+                                                  color: mutedTextColor,
+                                                  size: 20),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '$count',
+                                                style: TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: textColor),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       );
                                     },
-                                  ),
-
-                                  Container(
-                                      width: 1,
-                                      height: 16,
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12),
-
-                                  // Views Metric Pill
-                                  Row(
-                                    children: [
-                                      Icon(Icons.remove_red_eye_outlined,
-                                          color: mutedTextColor, size: 18),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '${article.viewCount}',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: textColor),
-                                      ),
-                                    ],
                                   ),
                                 ],
                         ),
@@ -974,18 +1016,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           ),
                         )
                       else
-                        Text(
+                        _buildWay2NewsBodyText(
                           article.body.isNotEmpty
                               ? article.body
-                              : (article.summary.isNotEmpty
-                                  ? article.summary
-                                  : tr('no_content')),
-                          style: TextStyle(
-                            fontSize: 16,
-                            height: 1.75,
-                            letterSpacing: 0,
-                            color: textColor.withValues(alpha: 0.9),
-                          ),
+                              : (article.summary.isNotEmpty ? article.summary : ''),
+                          textColor,
                         ),
 
                       const SizedBox(height: 40),
@@ -997,6 +1032,142 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildWay2NewsBodyText(String text, Color textColor) {
+    if (text.isEmpty) {
+      return Text(
+        tr('no_content'),
+        style: TextStyle(fontSize: 16, color: textColor.withValues(alpha: 0.7)),
+      );
+    }
+
+    final rawParagraphs = text.split('\n');
+    final paragraphs = <String>[];
+    final buffer = StringBuffer();
+    for (final line in rawParagraphs) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        if (buffer.isNotEmpty) {
+          paragraphs.add(buffer.toString());
+          buffer.clear();
+        }
+      } else {
+        if (buffer.isNotEmpty) buffer.write(' ');
+        buffer.write(trimmed);
+      }
+    }
+    if (buffer.isNotEmpty) {
+      paragraphs.add(buffer.toString());
+    }
+
+    if (paragraphs.isEmpty) {
+      paragraphs.add(text.trim());
+    }
+
+    // Extract first grapheme cluster for the red circular drop-cap (Way2News style - article text.jpeg)
+    final firstP = paragraphs.first;
+    String firstLetter = '';
+    String restOfFirstP = firstP;
+    if (firstP.isNotEmpty) {
+      final chars = firstP.characters;
+      firstLetter = chars.first;
+      final remaining = chars.skip(1).string;
+
+      // Check if removing candidate breaks a Telugu conjunct/matra (e.g. starts with virama ్ or matra)
+      final startsWithCombiningMark = remaining.isNotEmpty &&
+          (remaining.startsWith('్') ||
+              remaining.startsWith('ం') ||
+              remaining.startsWith('ః') ||
+              RegExp(r'^[\u0C3E-\u0C4D]').hasMatch(remaining));
+
+      if (startsWithCombiningMark) {
+        // Don't break the word into an orphan syllable!
+        // Keep the full text in restOfFirstP, badge displays initial letter
+        restOfFirstP = firstP;
+      } else {
+        restOfFirstP = remaining;
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (int i = 0; i < paragraphs.length; i++) ...[
+          if (i == 0 && firstLetter.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18.0),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        margin: const EdgeInsets.only(right: 8, bottom: 3),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFC80022),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text(
+                            firstLetter,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    TextSpan(
+                      text: restOfFirstP,
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.75,
+                        color: textColor.withValues(alpha: 0.92),
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.1,
+                      ),
+                    ),
+                  ],
+                ),
+                textAlign: TextAlign.justify,
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 18.0),
+              child: Text(
+                paragraphs[i],
+                textAlign: TextAlign.justify,
+                style: TextStyle(
+                  fontSize: 17,
+                  height: 1.75,
+                  color: textColor.withValues(alpha: 0.92),
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 0.1,
+                ),
+              ),
+            ),
+          // Mid-article banner ad injection after 2nd paragraph
+          if (i == 1 && paragraphs.length > 2) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14.0),
+              child: BannerAdSlot(placementZone: 'article_detail', maxHeight: 80),
+            ),
+          ],
+        ],
+        // Bottom article banner ad
+        const Padding(
+          padding: EdgeInsets.only(top: 8.0, bottom: 20.0),
+          child: BannerAdSlot(placementZone: 'article_bottom', maxHeight: 80),
+        ),
+      ],
     );
   }
 }

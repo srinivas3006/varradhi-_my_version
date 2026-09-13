@@ -23,6 +23,7 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
   final _reportsController = AdminReportsController();
   final _logsController = AdminLogsController();
   final _otpController = AdminOtpDeliveriesController();
+  final Set<int> _activatedTabs = {0};
 
   bool _searchVisible = false;
   bool _bulkSubmitting = false;
@@ -31,19 +32,26 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _tabController.addListener(() {
-      setState(() {});
-    });
+    _tabController.addListener(_handleTabChange);
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     _queueController.dispose();
     _reportsController.dispose();
     _logsController.dispose();
     _otpController.dispose();
     super.dispose();
+  }
+
+  void _handleTabChange() {
+    final index = _tabController.index;
+    _activatedTabs.add(index);
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _refreshActiveTab() {
@@ -69,7 +77,7 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
       await _queueController.applyBulkAction(action);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bulk action failed. Please try again.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('బల్క్ చర్య విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.')));
       }
     } finally {
       if (mounted) setState(() => _bulkSubmitting = false);
@@ -92,9 +100,9 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
           builder: (context, _) => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('UGC Admin Moderation', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              const Text('యూజీసీ అడ్మిన్ పర్యవేక్షణ', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
               Text(
-                '${_queueController.totalCount} items in queue',
+                'క్యూలో ${_queueController.totalCount} అంశాలు ఉన్నాయి',
                 style: TextStyle(fontSize: 11.5, color: AdminColors.textSecondaryColor(isDark), fontWeight: FontWeight.w500),
               ),
             ],
@@ -106,7 +114,7 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
               animation: _queueController,
               builder: (context, _) => IconButton(
                 icon: Icon(_queueController.isMultiSelectMode ? Icons.checklist_rtl : Icons.checklist_outlined),
-                tooltip: 'Multi-select',
+                tooltip: 'ఎంపిక చేసుకోండి',
                 onPressed: _queueController.toggleMultiSelect,
               ),
             ),
@@ -123,10 +131,10 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
           unselectedLabelColor: AdminColors.textSecondaryColor(isDark),
           indicatorColor: AdminColors.primary,
           tabs: const [
-            Tab(text: 'Queue'),
-            Tab(text: 'Reports'),
-            Tab(text: 'Logs'),
-            Tab(text: 'OTP Logs'),
+            Tab(text: 'క్యూ'),
+            Tab(text: 'ఫిర్యాదులు'),
+            Tab(text: 'లాగ్‌లు'),
+            Tab(text: 'ఓటీపీ లాగ్‌లు'),
           ],
         ),
       ),
@@ -134,9 +142,9 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
         controller: _tabController,
         children: [
           AdminQueueTab(controller: _queueController, showSearch: _searchVisible),
-          AdminReportsTab(controller: _reportsController),
-          AdminLogsTab(controller: _logsController, showSearch: _searchVisible),
-          AdminOtpDeliveriesTab(controller: _otpController, showSearch: _searchVisible),
+          _lazyTab(1, AdminReportsTab(controller: _reportsController)),
+          _lazyTab(2, AdminLogsTab(controller: _logsController, showSearch: _searchVisible)),
+          _lazyTab(3, AdminOtpDeliveriesTab(controller: _otpController, showSearch: _searchVisible)),
         ],
       ),
       bottomNavigationBar: isQueueTab
@@ -156,5 +164,10 @@ class _AdminUgcScreenState extends State<AdminUgcScreen> with SingleTickerProvid
             )
           : null,
     );
+  }
+
+  Widget _lazyTab(int index, Widget child) {
+    if (_activatedTabs.contains(index)) return child;
+    return const SizedBox.shrink();
   }
 }

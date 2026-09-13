@@ -34,10 +34,10 @@ class NotificationsTab extends StatelessWidget {
 
   String _formatTime(DateTime time) {
     final diff = DateTime.now().difference(time);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+    if (diff.inMinutes < 1) return 'ఇప్పుడే';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} నిమిషాల కిందట';
+    if (diff.inHours < 24) return '${diff.inHours} గంటల కిందట';
+    return '${diff.inDays} రోజుల కిందట';
   }
 
   @override
@@ -58,12 +58,12 @@ class NotificationsTab extends StatelessWidget {
                     Icon(Icons.notifications_none_rounded, size: 48, color: AppColors.textMuted),
                     SizedBox(height: 12),
                     Text(
-                      'No notifications yet',
+                      'ఇంకా ఎలాంటి నోటిఫికేషన్లు లేవు',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     SizedBox(height: 6),
                     Text(
-                      'Updates and alerts will appear here.',
+                      'అప్‌డేట్‌లు మరియు అలర్ట్‌లు ఇక్కడ కనిపిస్తాయి.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                     ),
@@ -79,7 +79,7 @@ class NotificationsTab extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: Text(
-                  'Notifications',
+                  'నోటిఫికేషన్లు',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,

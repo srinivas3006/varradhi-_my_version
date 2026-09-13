@@ -1,21 +1,35 @@
 enum Environment { dev, staging, prod }
 
 class AppConfig {
-  static Environment environment = Environment.prod;
+  /// =========================================================================
+  /// BACKEND ENVIRONMENT TOGGLE:
+  /// Set [useRenderTestBackend] to `true` for testing with Render backend.
+  /// Set [useRenderTestBackend] to `false` to switch back to AWS production backend.
+  /// =========================================================================
+  static const bool useRenderTestBackend = true;
+
+  /// Render Testing Backend (available for test builds)
+  static const String renderTestingUrl = 'https://incite-backend.onrender.com';
+
+  /// Original Production Backend (AWS)
+  static const String awsProductionUrl = 'https://api.vaaradhinews.com';
+
+  static Environment environment = Environment.dev;
 
   static String get baseUrl {
+    if (useRenderTestBackend) {
+      return renderTestingUrl;
+    }
     switch (environment) {
       case Environment.dev:
-        return 'https://api.vaaradhinews.com';
       case Environment.staging:
-        return 'https://api.vaaradhinews.com';
       case Environment.prod:
-        return 'https://api.vaaradhinews.com';
+        return awsProductionUrl;
     }
   }
 
-  static const Duration connectTimeout = Duration(seconds: 35);
-  static const Duration sendTimeout = Duration(seconds: 35);
-  static const Duration receiveTimeout = Duration(seconds: 35);
-  static const int maxRetries = 3;
+  static const Duration connectTimeout = Duration(seconds: 10);
+  static const Duration sendTimeout = Duration(seconds: 10);
+  static const Duration receiveTimeout = Duration(seconds: 10);
+  static const int maxRetries = 2;
 }

@@ -179,7 +179,7 @@ class LocationService {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text('రద్దు (Cancel)'),
+                      child: const Text('రద్దు చేయండి'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -193,7 +193,7 @@ class LocationService {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text('అనుమతించు (Continue)'),
+                      child: const Text('అనుమతించండి'),
                     ),
                   ),
                 ],
@@ -216,14 +216,14 @@ class LocationService {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Location not matched'),
+          title: const Text('ప్రాంతం సరిపోలలేదు'),
           content: const Text(
-            'We found your GPS position, but could not verify its names in the location database. Please select your area manually.',
+            'మీ GPS స్థానం గుర్తించబడింది, కానీ మా డేటాబేస్‌లో సరిపోల్చలేకపోయాము. దయచేసి మీ ప్రాంతాన్ని మీరే ఎంచుకోండి.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Select manually'),
+              child: const Text('స్వయంగా ఎంచుకోండి'),
             ),
           ],
         ),
@@ -259,7 +259,7 @@ class LocationService {
                     const SizedBox(width: 12),
                     const Expanded(
                       child: Text(
-                        'Confirm your news location',
+                        'వార్తల ప్రాంతాన్ని నిర్ధారించండి',
                         style: TextStyle(
                             fontSize: 19, fontWeight: FontWeight.w800),
                       ),
@@ -274,7 +274,7 @@ class LocationService {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Verified against Vaaradhi location records. News sections will use these exact names.',
+                  'వారధి లొకేషన్ రికార్డులతో ధృవీకరించబడింది. వార్తా విభాగాలు ఈ పేర్లతోనే ప్రదర్శించబడతాయి.',
                   style: TextStyle(
                     fontSize: 14,
                     height: 1.4,
@@ -290,7 +290,7 @@ class LocationService {
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
                         ),
-                        child: const Text('Correct'),
+                        child: const Text('సవరించండి'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -301,7 +301,7 @@ class LocationService {
                           minimumSize: const Size.fromHeight(48),
                         ),
                         icon: const Icon(Icons.check_rounded),
-                        label: const Text('Use location'),
+                        label: const Text('ఈ ప్రాంతాన్ని ఎంచుకోండి'),
                       ),
                     ),
                   ],
@@ -316,20 +316,20 @@ class LocationService {
   static Future<DeviceLocation> detectLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw LocationException(
-          'Location services are disabled. Please enable GPS.');
+          'లొకేషన్ సేవలు నిలిపివేయబడ్డాయి. దయచేసి GPS ఆన్ చేయండి.');
     }
 
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        throw LocationException('Location permissions are denied.');
+        throw LocationException('లొకేషన్ అనుమతులు నిరాకరించబడ్డాయి.');
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
       throw LocationException(
-          'Permissions are permanently denied. Please enable them from settings.');
+          'అనుమతులు శాశ్వతంగా నిరాకరించబడ్డాయి. దయచేసి సెట్టింగ్స్‌లో అనుమతించండి.');
     }
 
     Position position =
@@ -405,7 +405,7 @@ class LocationService {
       );
     } on TimeoutException {
       throw LocationException(
-          'Location request timed out. Please try again from an open sky view.');
+          'లొకేషన్ అభ్యర్థన సమయం ముగిసింది. దయచేసి మళ్లీ ప్రయత్నించండి.');
     } catch (error) {
       rethrow;
     }

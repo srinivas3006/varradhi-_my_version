@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../../../data/models/admin_ugc_options.dart';
 import '../../controllers/admin_load_status.dart';
 import '../../controllers/admin_reports_controller.dart';
-import '../../theme/admin_colors.dart';
 import '../../widgets/admin_filter_chip_row.dart';
 import '../../widgets/admin_report_card.dart';
+import '../../widgets/admin_status_state.dart';
 
 class AdminReportsTab extends StatefulWidget {
   final AdminReportsController controller;
@@ -32,6 +33,7 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
   }
 
   void _onScroll() {
+    if (!_scrollController.hasClients) return;
     if (_scrollController.position.maxScrollExtent - _scrollController.position.pixels < 250) {
       widget.controller.loadMore();
     }
@@ -39,7 +41,6 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnimatedBuilder(
       animation: widget.controller,
       builder: (context, _) {
@@ -48,34 +49,42 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
           children: [
             const SizedBox(height: 8),
             AdminFilterChipRow<String>(
-              options: AdminUgcOptions.reportStatuses.map((s) => AdminFilterChipOption(s, s)).toList(),
+              options: AdminUgcOptions.reportStatuses.map((s) => AdminFilterChipOption(s, _reportStatusLabel(s))).toList(),
               selected: c.statusFilter,
               onSelect: c.setStatusFilter,
             ),
             const SizedBox(height: 8),
-            Expanded(child: _buildList(c, isDark)),
+            Expanded(child: _buildList(c)),
           ],
         );
       },
     );
   }
 
-  Widget _buildList(AdminReportsController c, bool isDark) {
-    if (c.status == AdminLoadStatus.loading) return const Center(child: CircularProgressIndicator());
+  Widget _buildList(AdminReportsController c) {
+    if (c.status == AdminLoadStatus.loading) {
+      return const AdminStatusState(
+        icon: Icons.report_gmailerrorred_rounded,
+        title: 'నివేదికలు లోడ్ అవుతున్నాయి',
+        message: 'రిపోర్ట్ చేసిన యూజీసీ వివరాలు తెస్తున్నాం.',
+        isLoading: true,
+      );
+    }
     if (c.status == AdminLoadStatus.error) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(c.errorMessage ?? 'Failed to load reports', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))),
-            const SizedBox(height: 12),
-            ElevatedButton(onPressed: c.refresh, child: const Text('Retry')),
-          ],
-        ),
+      return AdminStatusState(
+        icon: Icons.wifi_off_rounded,
+        title: 'నివేదికలు రాలేదు',
+        message: c.errorMessage ?? 'కనెక్షన్ చూసి మళ్లీ ప్రయత్నించండి.',
+        actionLabel: 'మళ్లీ ప్రయత్నించండి',
+        onAction: c.refresh,
       );
     }
     if (c.items.isEmpty) {
-      return Center(child: Text('No reports.', style: TextStyle(color: AdminColors.textSecondaryColor(isDark))));
+      return const AdminStatusState(
+        icon: Icons.verified_user_outlined,
+        title: 'నివేదికలు లేవు',
+        message: 'ఈ ఫిల్టర్‌కు సరిపోయే రిపోర్టులు లేవు.',
+      );
     }
     return RefreshIndicator(
       onRefresh: c.refresh,
@@ -85,7 +94,10 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
         itemCount: c.items.length + (c.hasMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index >= c.items.length) {
-            return const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: CircularProgressIndicator()));
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator()),
+            );
           }
           final report = c.items[index];
           return AdminReportCard(
@@ -96,5 +108,20 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
         },
       ),
     );
+  }
+
+  String _reportStatusLabel(String status) {
+    switch (status) {
+      case 'ALL':
+        return 'అన్నీ';
+      case 'PENDING':
+        return 'పెండింగ్';
+      case 'REVIEWED':
+        return 'సమీక్షించాయి';
+      case 'DISMISSED':
+        return 'తొలగించాయి';
+      default:
+        return status;
+    }
   }
 }

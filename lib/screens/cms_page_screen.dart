@@ -84,7 +84,7 @@ class _CMSPageScreenState extends State<CMSPageScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to load document.';
+          _error = 'సమాచారాన్ని లోడ్ చేయడం విఫలమైంది.';
           _isLoading = false;
         });
       }
@@ -94,17 +94,17 @@ class _CMSPageScreenState extends State<CMSPageScreen> {
   String _getDefaultContent(String slug) {
     switch (slug.toLowerCase()) {
       case 'about':
-        return 'Varadhi is your trusted regional digital news and hyper-local media platform, delivering verified, realtime news, community updates, and multimedia coverage across Andhra Pradesh and Telangana.\n\nOur mission is to empower citizens with objective information and foster community voice through citizen journalism.';
+        return 'వారధి ఆంధ్రప్రదేశ్ మరియు తెలంగాణ అంతటా విశ్వసనీయమైన, నిజ-సమయ స్థానిక వార్తలు మరియు సమాచారాన్ని అందించే ప్రముఖ వేదిక.\n\nపారదర్శకమైన సమాచారంతో పౌరులకు అండగా నిలవడం, సిటిజెన్ జర్నలిజం ద్వారా స్థానిక గళాన్ని వినిపించడం మా లక్ష్యం.';
       case 'contact':
-        return 'Have questions, feedback, or advertising inquiries?\n\nEmail: contact@vaaradhinews.com\nPhone: +91 98765 43210\nAddress: Vaaradhi Media Network, Hyderabad, Telangana, India.';
+        return 'మీకు ఏవైనా ప్రశ్నలు, అభిప్రాయాలు లేదా ప్రకటనల విచారణలు ఉన్నాయా?\n\nఇమెయిల్: contact@vaaradhinews.com\nఫోన్: +91 98765 43210\nచిరునామా: వారధి మీడియా నెట్‌వర్క్, హైదరాబాద్, తెలంగాణ, భారతదేశం.';
       case 'privacy':
       case 'privacy-policy':
-        return 'We value your privacy. Your personal information, location coordinates, and bookmarks are encrypted and handled strictly in accordance with our data protection guidelines. We do not sell your personal data to third parties.';
+        return 'మీ గోప్యత మాకు చాలా ముఖ్యం. మీ వ్యక్తిగత సమాచారం మరియు ప్రాధాన్యతలు సురక్షితంగా రక్షించబడతాయి. మేము మీ వ్యక్తిగత వివరాలను ఎవరికీ విక్రయించము.';
       case 'terms':
       case 'terms-and-conditions':
-        return 'By using Vaaradhi, you agree to access content for personal, non-commercial use. Users posting content via Citizen Journalism are responsible for the authenticity and legality of their submissions.';
+        return 'వారధిని ఉపయోగించడం ద్వారా, మీరు మా సేవా నిబంధనలకు కట్టుబడి ఉంటారు. పౌర జర్నలిజం ద్వారా వార్తలను పోస్ట్ చేసే వినియోగదారులు ఆ సమాచార వాస్తవికతకు బాధ్యత వహించాలి.';
       default:
-        return 'Information will be available soon.';
+        return 'సమాచారం త్వరలో అందుబాటులోకి వస్తుంది.';
     }
   }
 
@@ -124,7 +124,7 @@ class _CMSPageScreenState extends State<CMSPageScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          _title ?? 'Information',
+          _title ?? 'సమాచారం',
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
@@ -156,7 +156,7 @@ class _CMSPageScreenState extends State<CMSPageScreen> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Retry'),
+              child: const Text('మళ్లీ ప్రయత్నించండి'),
             ),
           ],
         ),

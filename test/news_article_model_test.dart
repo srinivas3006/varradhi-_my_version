@@ -80,5 +80,47 @@ void main() {
 
       expect(article.isUgc, isFalse);
     });
+
+    test('sanitizes full YouTube URL stored in youtube_video_id', () {
+      final article = NewsArticle.fromJson({
+        'id': 'youtube-article',
+        'title': 'YouTube article',
+        'youtube_video_id':
+            'https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=shared',
+        'published_at': '2026-01-01T00:00:00Z',
+      });
+
+      expect(
+        article.videoUrl,
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      );
+      expect(
+          article.imageUrl, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
+      expect(article.isVideo, isTrue);
+    });
+
+    test('builds playable media item from YouTube video id', () {
+      final article = NewsArticle.fromJson({
+        'id': 'media-youtube-article',
+        'title': 'Media YouTube article',
+        'media_items': [
+          {
+            'media_type': 'video',
+            'youtube_video_id':
+                'https://www.youtube.com/live/dQw4w9WgXcQ?si=abc',
+            'is_primary': true,
+          },
+        ],
+        'published_at': '2026-01-01T00:00:00Z',
+      });
+
+      expect(article.mediaItems.single.url,
+          'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      expect(
+        article.mediaItems.single.thumbnailUrl,
+        'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+      );
+      expect(article.mediaItems.single.isVideo, isTrue);
+    });
   });
 }

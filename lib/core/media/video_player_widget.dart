@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'network_video_playback_controller.dart';
@@ -10,7 +11,7 @@ import 'youtube_playback_controller.dart';
 /// - Thumbnail-first rendering (never shows a blank black rectangle)
 /// - Unified rendering of YouTube and native video
 /// - Graceful loading, buffering, and single-item retry on failure
-/// - Seamless gesture pass-through
+/// - Seamless gesture pass-through and fallback to external YouTube app
 class VideoPlayerWidget extends StatelessWidget {
   final VideoPlaybackController controller;
   final BoxFit fit;
@@ -24,6 +25,24 @@ class VideoPlayerWidget extends StatelessWidget {
     this.showControls = false,
     this.onRetry,
   });
+
+  Future<void> _openYouTubeExternal(VideoPlaybackController controller) async {
+    final videoId = controller.source.youtubeVideoId;
+    final rawUrl = controller.source.url;
+    final targetUrl = (rawUrl != null && rawUrl.isNotEmpty)
+        ? rawUrl
+        : (videoId != null ? 'https://www.youtube.com/watch?v=$videoId' : null);
+
+    if (targetUrl == null) return;
+    final uri = Uri.tryParse(targetUrl);
+    if (uri != null) {
+      try {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        debugPrint('[VideoPlayerWidget] Could not launch external YouTube URL: $e');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,36 +101,56 @@ class VideoPlayerWidget extends StatelessWidget {
                 ),
               ),
 
-            // 5. Error State Overlay with Single-Item Retry
+            // 5. Error State Overlay with Single-Item Retry & "Watch on YouTube"
             if (state.isError)
               Container(
-                color: Colors.black.withValues(alpha: 0.75),
-                padding: const EdgeInsets.all(24),
+                color: Colors.black.withValues(alpha: 0.85),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: Colors.white70, size: 48),
-                      const SizedBox(height: 12),
+                      const Icon(Icons.error_outline_rounded, color: Colors.white70, size: 44),
+                      const SizedBox(height: 10),
                       Text(
                         state.errorMessage ?? 'వీడియో అందుబాటులో లేదు',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 14,
+                          fontSize: 13.5,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: onRetry ?? () => controller.initialize(),
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('మళ్ళీ ప్రయత్నించండి'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF2300),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: onRetry ?? () => controller.initialize(),
+                            icon: const Icon(Icons.refresh_rounded, size: 16),
+                            label: const Text('మళ్ళీ ప్రయత్నించండి'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white24,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            ),
+                          ),
+                          if (controller.source.isYouTube)
+                            ElevatedButton.icon(
+                              onPressed: () => _openYouTubeExternal(controller),
+                              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                              label: const Text('యూట్యూబ్‌లో చూడండి'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFFF0000),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -127,17 +166,12 @@ class VideoPlayerWidget extends StatelessWidget {
     if (controller is YouTubePlaybackController) {
       final ytCtrl = (controller as YouTubePlaybackController).rawController;
       if (ytCtrl != null) {
-        return FittedBox(
-          fit: fit,
-          child: SizedBox(
-            width: MediaQuery.of(context).size.width,
-            height: MediaQuery.of(context).size.width * (16 / 9),
-            child: IgnorePointer(
-              ignoring: !showControls,
-              child: YoutubePlayer(
-                controller: ytCtrl,
-                aspectRatio: controller.source.isShort ? 9 / 16 : 16 / 9,
-              ),
+        return Center(
+          child: AspectRatio(
+            aspectRatio: controller.source.isShort ? 9 / 16 : 16 / 9,
+            child: YoutubePlayer(
+              controller: ytCtrl,
+              aspectRatio: controller.source.isShort ? 9 / 16 : 16 / 9,
             ),
           ),
         );

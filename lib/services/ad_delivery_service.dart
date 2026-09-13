@@ -42,12 +42,18 @@ class AdDeliveryService extends ChangeNotifier {
   bool get isRapidSwiping => _isRapidSwiping;
 
   // --- Configuration Constants ---
-  static const int minArticlesBeforeFirstAd = 2; // Do NOT show ad in first 2 articles
-  static const int minCooldownArticles = 3;      // Skip next 3-4 articles before next ad
-  static const int spotlightSwipesThreshold = 5; // Show ad after 5 meaningful swipes
-  static const int feedArticlesInterval = 4;     // Show 1 ad after every 4-6 articles
-  static const Duration meaningfulDwellThreshold = Duration(milliseconds: 2000); // >= 2s
-  static const Duration rapidSwipeThreshold = Duration(milliseconds: 1400);      // < 1.4s
+  static const int minArticlesBeforeFirstAd =
+      5; // Show first ad after 5 content items
+  static const int minCooldownArticles =
+      3; // Skip next 3-4 articles before next ad
+  static const int spotlightSwipesThreshold =
+      5; // Show ad after 5 meaningful swipes
+  static const int feedArticlesInterval =
+      5; // Show 1 ad after every 5 content items
+  static const Duration meaningfulDwellThreshold =
+      Duration(milliseconds: 2000); // >= 2s
+  static const Duration rapidSwipeThreshold =
+      Duration(milliseconds: 1400); // < 1.4s
 
   /// Called when a user settles on an article page/card (e.g. In Spotlight or Full Card).
   void onPageSelected(int index) {
@@ -78,7 +84,8 @@ class AdDeliveryService extends ChangeNotifier {
       _isRapidSwiping = true;
       // Rapid swiping decreases engagement score slightly and delays ad delivery
       _userEngagementScore = max(0.5, _userEngagementScore - 0.05);
-      debugPrint('[AdDelivery] Fast swipe detected on item $articleIndex (${dwellDuration.inMilliseconds}ms). Ad delayed. Fast streak: $_consecutiveFastSwipes');
+      debugPrint(
+          '[AdDelivery] Fast swipe detected on item $articleIndex (${dwellDuration.inMilliseconds}ms). Ad delayed. Fast streak: $_consecutiveFastSwipes');
     } else if (dwellDuration >= meaningfulDwellThreshold || userScrolled) {
       // Meaningful read!
       _consecutiveFastSwipes = 0;
@@ -90,7 +97,8 @@ class AdDeliveryService extends ChangeNotifier {
       final bonus = min(1.0, dwellDuration.inMilliseconds / 5000.0) * 0.15;
       _userEngagementScore = min(3.0, _userEngagementScore + bonus);
 
-      debugPrint('[AdDelivery] Meaningful read on item $articleIndex (${dwellDuration.inMilliseconds}ms). Read count: $_articlesReadCount, Meaningful swipes: $_meaningfulSpotlightSwipes, Score: ${_userEngagementScore.toStringAsFixed(2)}');
+      debugPrint(
+          '[AdDelivery] Meaningful read on item $articleIndex (${dwellDuration.inMilliseconds}ms). Read count: $_articlesReadCount, Meaningful swipes: $_meaningfulSpotlightSwipes, Score: ${_userEngagementScore.toStringAsFixed(2)}');
       notifyListeners();
     }
   }
@@ -114,7 +122,8 @@ class AdDeliveryService extends ChangeNotifier {
   /// - Spotlight Rule: >= 5 meaningful swipes completed
   /// - Rapid Swiping: Must NOT be rapidly swiping
   /// - No Repeat: Position must not have been shown already
-  bool canShowSpotlightAd({required int targetIndex, required bool isSwipingBack}) {
+  bool canShowSpotlightAd(
+      {required int targetIndex, required bool isSwipingBack}) {
     // Hard Rule 1: Never show in first 2 articles
     if (targetIndex < minArticlesBeforeFirstAd) {
       return false;
@@ -132,17 +141,20 @@ class AdDeliveryService extends ChangeNotifier {
 
     // If user is rapidly swiping, delay ad until user settles
     if (_isRapidSwiping || _consecutiveFastSwipes >= 2) {
-      debugPrint('[AdDelivery] Spotlight ad blocked: Rapid swiping in progress');
+      debugPrint(
+          '[AdDelivery] Spotlight ad blocked: Rapid swiping in progress');
       return false;
     }
 
     // Cool-down check: skip next 3-4 articles before next ad
-    if (_lastAdShownIndex >= 0 && (targetIndex - _lastAdShownIndex).abs() <= minCooldownArticles) {
+    if (_lastAdShownIndex >= 0 &&
+        (targetIndex - _lastAdShownIndex).abs() <= minCooldownArticles) {
       return false;
     }
 
     // Cool-down in terms of articles consumed
-    if (_lastAdShownArticleCount >= 0 && (_articlesReadCount - _lastAdShownArticleCount) < minCooldownArticles) {
+    if (_lastAdShownArticleCount >= 0 &&
+        (_articlesReadCount - _lastAdShownArticleCount) < minCooldownArticles) {
       return false;
     }
 
@@ -167,12 +179,15 @@ class AdDeliveryService extends ChangeNotifier {
     }
 
     // Cooldown check: at least 3-4 articles between ads
-    if (_lastAdShownIndex >= 0 && (articleIndex - _lastAdShownIndex) < (minCooldownArticles + 1)) {
+    if (_lastAdShownIndex >= 0 &&
+        (articleIndex - _lastAdShownIndex) < (minCooldownArticles + 1)) {
       return false;
     }
 
-    // Behavioral check: user must have consumed at least 4 meaningful articles or scrolled steadily
-    if (_articlesReadCount >= feedArticlesInterval || (articleIndex >= 4 && (articleIndex % 5 == 0))) {
+    // Deterministic fallback: show one ad after every 5 content items.
+    if (_articlesReadCount >= feedArticlesInterval ||
+        (articleIndex >= minArticlesBeforeFirstAd &&
+            articleIndex % feedArticlesInterval == 0)) {
       return true;
     }
 
@@ -184,7 +199,8 @@ class AdDeliveryService extends ChangeNotifier {
     if (availableAds.isEmpty) return null;
 
     // Filter out ads already shown this session
-    final unshownAds = availableAds.where((ad) => !_shownAdIds.contains(ad.id)).toList();
+    final unshownAds =
+        availableAds.where((ad) => !_shownAdIds.contains(ad.id)).toList();
 
     if (unshownAds.isNotEmpty) {
       // Pick ad with highest display weight or first available
@@ -204,9 +220,11 @@ class AdDeliveryService extends ChangeNotifier {
     _shownAdPositions.add(position);
     _lastAdShownIndex = position;
     _lastAdShownArticleCount = _articlesReadCount;
-    _meaningfulSpotlightSwipes = 0; // Reset counter for next 5 meaningful swipes
+    _meaningfulSpotlightSwipes =
+        0; // Reset counter for next 5 meaningful swipes
 
-    debugPrint('[AdDelivery] Ad shown: ID=$adId at position=$position. Resetting meaningful swipes counter.');
+    debugPrint(
+        '[AdDelivery] Ad shown: ID=$adId at position=$position. Resetting meaningful swipes counter.');
     notifyListeners();
   }
 
