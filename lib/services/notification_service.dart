@@ -61,6 +61,17 @@ class NotificationService {
 
       final messaging = FirebaseMessaging.instance;
 
+      // Acquire early FCM token so guest registration and login can send it immediately
+      try {
+        final token = await messaging.getToken();
+        if (token != null && token.isNotEmpty) {
+          AppState.instance.fcmToken = token;
+          debugPrint('[NotificationService] Early FCM token acquired: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
+        }
+      } catch (e) {
+        debugPrint('[NotificationService] Early FCM token fetch deferred: $e');
+      }
+
       // 1. Listen to token refreshes
       messaging.onTokenRefresh.listen((newToken) {
         AppState.instance.fcmToken = newToken;

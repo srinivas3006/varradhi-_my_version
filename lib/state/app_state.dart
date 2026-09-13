@@ -34,6 +34,7 @@ class AppState extends ChangeNotifier {
   static const _refreshTokenKey = 'refreshToken';
   static const _installationSecretKey = 'installation_secret';
   static const _sessionIdKey = 'session_id';
+  static const _deviceIdKey = 'device_id';
 
   /// Scoped notifier for themeMode and language updates.
   final ThemeAndLocaleNotifier themeAndLocaleNotifier =
@@ -111,6 +112,30 @@ class AppState extends ChangeNotifier {
       debugPrint('[AppState] Failed to persist installation secret: $e');
     }
     notifyListeners();
+  }
+
+  Future<void> setDeviceId(String id) async {
+    deviceId = id;
+    try {
+      await _secureStorage.write(key: _deviceIdKey, value: id);
+    } catch (e) {
+      debugPrint('[AppState] Failed to persist device ID in secure storage: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('deviceId', id);
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  /// Regenerates a fresh device ID and clears old installation secret.
+  /// Used to recover cleanly when the backend rejects mismatched credentials.
+  Future<String> regenerateDeviceId() async {
+    final newId =
+        'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
+    await setDeviceId(newId);
+    await setInstallationSecret(null);
+    return newId;
   }
 
   Future<void> setSessionId(String? id) async {
@@ -202,11 +227,27 @@ class AppState extends ChangeNotifier {
     uploadVerified = prefs.getBool('uploadVerified') ?? false;
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
 
-    deviceId = prefs.getString('deviceId') ?? '';
+    // Read deviceId from secure storage first, fallback to shared_preferences
+    try {
+      deviceId = (await _secureStorage.read(key: _deviceIdKey)) ?? '';
+    } catch (_) {
+      deviceId = '';
+    }
+    if (deviceId.isEmpty) {
+      deviceId = prefs.getString('deviceId') ?? '';
+    }
     if (deviceId.isEmpty) {
       deviceId =
           'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
       await prefs.setString('deviceId', deviceId);
+      try {
+        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+      } catch (_) {}
+    } else {
+      await prefs.setString('deviceId', deviceId);
+      try {
+        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+      } catch (_) {}
     }
 
     // Auth tokens come from secure storage, not shared_preferences.

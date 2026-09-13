@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
@@ -42,13 +43,39 @@ class ApiService {
   // --- Auth ---
   Future<Map<String, dynamic>> login(String email, String password,
       {String? fcmToken}) async {
+    var token = fcmToken ?? AppState.instance.fcmToken;
+
+    // 1. Resolve FCM token if not yet cached in AppState
+    if (token == null || token.isEmpty) {
+      if (!kIsWeb) {
+        try {
+          token = await FirebaseMessaging.instance.getToken();
+          if (token != null && token.isNotEmpty) {
+            AppState.instance.fcmToken = token;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. Recommended backend flow: If installation_secret is missing,
+    // ensure guest registration is performed first so backend generates and returns installation_secret.
+    if (AppState.instance.installationSecret == null ||
+        AppState.instance.installationSecret!.isEmpty) {
+      try {
+        await registerGuestDevice(fcmToken: token);
+      } catch (e) {
+        debugPrint('[ApiService] Pre-login guest registration attempt failed: $e');
+      }
+    }
+
     Map<String, dynamic> buildPayload() => {
       'email': email,
       'password': password,
       'device_id': AppState.instance.deviceId,
       'device_name': 'Mobile Device',
       'device_type': 'android',
-      if (fcmToken != null && fcmToken.isNotEmpty) 'fcm_token': fcmToken,
+      'app_version': '1.0.0',
+      if (token != null && token.isNotEmpty) 'fcm_token': token,
       if (AppState.instance.installationSecret != null &&
           AppState.instance.installationSecret!.isNotEmpty)
         'installation_secret': AppState.instance.installationSecret,
@@ -63,9 +90,19 @@ class ApiService {
       }
       return data;
     } on DioException catch (dioErr) {
-      if (dioErr.response?.statusCode == 403 ||
-          dioErr.response?.data.toString().contains('Installation') == true) {
-        await registerGuestDevice(fcmToken: fcmToken);
+      final respStr = dioErr.response?.data?.toString() ?? '';
+      final isInstallationError = dioErr.response?.statusCode == 403 ||
+          respStr.toLowerCase().contains('installation');
+
+      if (isInstallationError) {
+        debugPrint(
+            '[ApiService] 403 Installation credential required/mismatched. Regenerating device ID and re-registering guest device...');
+        // The backend expects the installation_secret matching this device_id,
+        // but this client lost or does not have that secret.
+        // As per backend contract: Generate fresh device_id, register guest-device to obtain a new installation_secret, and retry login.
+        await AppState.instance.regenerateDeviceId();
+        await registerGuestDevice(fcmToken: token);
+
         final retryResponse =
             await _dio.post('/api/v1/auth/login/', data: buildPayload());
         final data = retryResponse.data['data'] as Map<String, dynamic>;
@@ -86,10 +123,23 @@ class ApiService {
     String? installationSecret,
   }) async {
     final devId = deviceId ?? AppState.instance.deviceId;
-    final token = fcmToken ?? AppState.instance.fcmToken;
+    var token = fcmToken ?? AppState.instance.fcmToken;
     final secret = installationSecret ?? AppState.instance.installationSecret;
 
+    if (token == null || token.isEmpty) {
+      if (!kIsWeb) {
+        try {
+          token = await FirebaseMessaging.instance.getToken();
+          if (token != null && token.isNotEmpty) {
+            AppState.instance.fcmToken = token;
+          }
+        } catch (_) {}
+      }
+    }
+
     if (token == null || token.isEmpty) return null;
+
+    final lang = AppState.instance.language == 'English' ? 'en' : 'te';
 
     try {
       final response =
@@ -107,7 +157,7 @@ class ApiService {
         'country': AppState.instance.country,
         'preferences': {
           'enabled': true,
-          'content_language': 'te',
+          'content_language': lang,
           'articles': true,
           'posters': true,
           'quotes': true,
@@ -129,9 +179,10 @@ class ApiService {
       }
       return data;
     } on DioException catch (dioErr) {
+      final respStr = dioErr.response?.data?.toString() ?? '';
       if (dioErr.response?.statusCode == 403 ||
-          dioErr.response?.data.toString().contains('Installation') == true ||
-          dioErr.response?.data.toString().contains('upgrade') == true) {
+          respStr.toLowerCase().contains('installation') ||
+          respStr.toLowerCase().contains('upgrade')) {
         await AppState.instance.setInstallationSecret(null);
         try {
           final retryResp =
@@ -148,7 +199,7 @@ class ApiService {
             'country': AppState.instance.country,
             'preferences': {
               'enabled': true,
-              'content_language': 'te',
+              'content_language': lang,
               'articles': true,
               'posters': true,
               'quotes': true,

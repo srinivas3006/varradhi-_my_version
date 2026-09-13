@@ -119,6 +119,98 @@ void main() {
         equals('en'),
       );
     });
+
+    test('login automatically registers guest device and sends installation_secret',
+        () async {
+      final state = AppState.instance;
+      state.deviceId = 'device-guest-1';
+      state.fcmToken = 'fcm-token-guest-1';
+      state.installationSecret = null;
+
+      final loginPayloads = <Map<String, dynamic>>[];
+
+      ApiClient.instance.dio.httpClientAdapter =
+          ReleaseMockAdapter((options) async {
+        if (options.path == '/api/v1/notifications/guest-device/') {
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {'installation_secret': 'sec-guest-1'}
+          }, 200);
+        }
+        if (options.path == '/api/v1/auth/login/') {
+          loginPayloads.add(Map<String, dynamic>.from(options.data as Map));
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {
+              'access': 'access-token',
+              'refresh': 'refresh-token',
+              'installation_secret': 'sec-guest-1',
+              'user': {'full_name': 'Admin User', 'email': 'admin@example.com'}
+            }
+          }, 200);
+        }
+        return ReleaseMockAdapter.jsonResponse({'data': {}}, 200);
+      });
+
+      final result = await ApiService.instance.login('admin@example.com', 'pass123');
+
+      expect(result['access'], equals('access-token'));
+      expect(loginPayloads.length, equals(1));
+      expect(loginPayloads.first['device_id'], equals('device-guest-1'));
+      expect(loginPayloads.first['fcm_token'], equals('fcm-token-guest-1'));
+      expect(loginPayloads.first['installation_secret'], equals('sec-guest-1'));
+    });
+
+    test('login self-heals on 403 Installation credential required error',
+        () async {
+      final state = AppState.instance;
+      state.deviceId = 'device-stale-1';
+      state.fcmToken = 'fcm-token-1';
+      state.installationSecret = 'old-bad-secret';
+
+      int loginAttempts = 0;
+      final requestedDeviceIds = <String>[];
+
+      ApiClient.instance.dio.httpClientAdapter =
+          ReleaseMockAdapter((options) async {
+        if (options.path == '/api/v1/notifications/guest-device/') {
+          final body = options.data as Map;
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {'installation_secret': 'new-valid-secret-${body['device_id']}'}
+          }, 200);
+        }
+        if (options.path == '/api/v1/auth/login/') {
+          loginAttempts++;
+          final body = options.data as Map;
+          requestedDeviceIds.add(body['device_id'] as String);
+          if (loginAttempts == 1) {
+            // First attempt with stale credentials returns 403 installation error
+            return ReleaseMockAdapter.jsonResponse({
+              'errors': {
+                'code': 403,
+                'message': 'Installation credential required.'
+              }
+            }, 403);
+          }
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {
+              'access': 'new-access-token',
+              'refresh': 'new-refresh-token',
+              'installation_secret': 'new-valid-secret',
+              'user': {'full_name': 'Admin User'}
+            }
+          }, 200);
+        }
+        return ReleaseMockAdapter.jsonResponse({'data': {}}, 200);
+      });
+
+      final result = await ApiService.instance.login('admin@example.com', 'pass123');
+
+      expect(result['access'], equals('new-access-token'));
+      expect(loginAttempts, equals(2));
+      // Second attempt regenerated a fresh device ID
+      expect(requestedDeviceIds[0], equals('device-stale-1'));
+      expect(requestedDeviceIds[1], isNot(equals('device-stale-1')));
+      expect(requestedDeviceIds[1], startsWith('dev_'));
+    });
   });
 
   group('Release Readiness: Account Deletion Contract', () {
