@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
+import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/share_service.dart';
@@ -28,12 +29,26 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   bool _isLoadingDetail = false;
   String? _detailError;
 
+  bool get _isUgc => article.isUgc;
+
   Future<void> _fetchFullArticleDetail() async {
+    if (_isUgc) {
+      if (mounted) {
+        setState(() {
+          _isLoadingDetail = false;
+          _detailError = null;
+        });
+      }
+      return;
+    }
+
     final slugToFetch = (widget.slug?.isNotEmpty ?? false)
         ? widget.slug!
         : (widget.article.slug.isNotEmpty
             ? widget.article.slug
-            : (widget.article.id.isNotEmpty ? widget.article.id : article.slug));
+            : (widget.article.id.isNotEmpty
+                ? widget.article.id
+                : article.slug));
     if (slugToFetch.isEmpty) {
       if (mounted) {
         setState(() {
@@ -51,8 +66,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     try {
       debugPrint('Fetching full detail for slug: $slugToFetch');
-      final fullArticle = await NewsArticleRepository.instance.getDetail(slugToFetch);
-      debugPrint('Detail API success for slug "$slugToFetch". Body length: ${fullArticle.body.length}');
+      final fullArticle =
+          await NewsArticleRepository.instance.getDetail(slugToFetch);
+      debugPrint(
+          'Detail API success for slug "$slugToFetch". Body length: ${fullArticle.body.length}');
 
       if (mounted) {
         setState(() {
@@ -74,11 +91,16 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   bool _isTogglingLike = false;
 
   Future<void> _toggleLike() async {
-    if (_isTogglingLike) return;
+    if (_isUgc || _isTogglingLike) return;
     _isTogglingLike = true;
     HapticFeedback.lightImpact();
 
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    if (targetId.isEmpty) {
+      _isTogglingLike = false;
+      return;
+    }
+    final wasLiked = AppState.instance.isLiked(targetId);
     AppState.instance.toggleLike(targetId);
 
     final isNowLiked = AppState.instance.isLiked(targetId);
@@ -86,13 +108,9 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     setState(() {
       article.isLiked = isNowLiked;
-      article.likes = isNowLiked ? prevLikes + 1 : (prevLikes > 0 ? prevLikes - 1 : 0);
+      article.likes =
+          isNowLiked ? prevLikes + 1 : (prevLikes > 0 ? prevLikes - 1 : 0);
     });
-
-    if (targetId.isEmpty) {
-      _isTogglingLike = false;
-      return;
-    }
 
     try {
       final res = await ApiService.instance.postArticleReaction(
@@ -106,8 +124,138 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       }
     } catch (e) {
       debugPrint('Error syncing article reaction: $e');
+      if (AppState.instance.isLiked(targetId) != wasLiked) {
+        AppState.instance.toggleLike(targetId);
+      }
+      if (mounted) {
+        setState(() {
+          article.isLiked = wasLiked;
+          article.likes = prevLikes;
+        });
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(tr('reaction_update_failed')),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+      }
     } finally {
       _isTogglingLike = false;
+    }
+  }
+
+  Future<void> _toggleBookmark() async {
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    if (targetId.isEmpty) return;
+
+    HapticFeedback.lightImpact();
+    final wasBookmarked = AppState.instance.isBookmarked(targetId);
+    AppState.instance.toggleBookmark(targetId);
+
+    try {
+      await ApiService.instance.toggleBookmark(targetId);
+    } catch (e) {
+      if (AppState.instance.isBookmarked(targetId) != wasBookmarked) {
+        AppState.instance.toggleBookmark(targetId);
+      }
+      debugPrint('Error syncing article bookmark: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(tr('bookmark_update_failed')),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+      }
+      return;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              AppState.instance.isBookmarked(targetId)
+                  ? tr('saved_to_bookmarks')
+                  : tr('removed_from_bookmarks'),
+            ),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  Future<void> _showUgcReportSheet() async {
+    final reasons = <(String, String)>[
+      ('spam', tr('reason_spam_short')),
+      ('misinformation', tr('reason_misinformation_short')),
+      ('inappropriate', tr('reason_inappropriate')),
+      ('other', tr('reason_other')),
+    ];
+
+    final selected = await showModalBottomSheet<(String, String)>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr('report_citizen_news'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              ...reasons.map(
+                (reason) => ListTile(
+                  minTileHeight: 48,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.flag_outlined),
+                  title: Text(reason.$2),
+                  onTap: () => Navigator.pop(sheetContext, reason),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+
+    try {
+      final reported = await ApiService.instance.reportUgcSubmission(
+        submissionId: article.id,
+        reason: selected.$1,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            reported
+                ? tr('report_submitted')
+                : tr('report_submit_failed'),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error reporting UGC submission: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(tr('report_submit_failed')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -126,7 +274,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     super.initState();
     article = widget.article;
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    if (AppState.instance.isLiked(targetId)) {
+    if (!article.isUgc && AppState.instance.isLiked(targetId)) {
       article.isLiked = true;
     }
     _fetchFullArticleDetail();
@@ -138,7 +286,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     final cardBgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDark ? Colors.white : AppColors.textDark;
     final mutedTextColor = isDark ? Colors.white60 : AppColors.textMuted;
-    
+
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF4F6F8),
       body: Stack(
@@ -170,13 +318,16 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         );
                       }
                       return CachedNetworkImage(
-                        imageUrl: item.url.isNotEmpty ? item.url : item.thumbnailUrl,
+                        imageUrl:
+                            item.url.isNotEmpty ? item.url : item.thumbnailUrl,
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: AppColors.chipBg),
+                        placeholder: (context, url) =>
+                            Container(color: AppColors.chipBg),
                         errorWidget: (context, url, error) => Container(
                           color: AppColors.chipBg,
                           child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted, size: 40),
+                            child: Icon(Icons.image_not_supported_outlined,
+                                color: AppColors.textMuted, size: 40),
                           ),
                         ),
                       );
@@ -187,7 +338,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     article: article,
                     height: 360,
                   )
-                else if (article.imageUrls != null && article.imageUrls!.length > 1)
+                else if (article.imageUrls != null &&
+                    article.imageUrls!.length > 1)
                   PageView.builder(
                     onPageChanged: (index) {
                       setState(() {
@@ -199,26 +351,40 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       return CachedNetworkImage(
                         imageUrl: article.imageUrls![index],
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(color: AppColors.chipBg),
+                        placeholder: (context, url) =>
+                            Container(color: AppColors.chipBg),
                         errorWidget: (context, url, error) => Container(
                           color: AppColors.chipBg,
                           child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted, size: 40),
+                            child: Icon(Icons.image_not_supported_outlined,
+                                color: AppColors.textMuted, size: 40),
                           ),
                         ),
                       );
                     },
                   )
-                else
+                else if (article.imageUrl.isNotEmpty)
                   CachedNetworkImage(
                     imageUrl: article.imageUrl,
                     fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(color: AppColors.chipBg),
+                    placeholder: (context, url) =>
+                        Container(color: AppColors.chipBg),
                     errorWidget: (context, url, error) => Container(
                       color: AppColors.chipBg,
                       child: const Center(
-                        child: Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted, size: 40),
+                        child: Icon(Icons.image_not_supported_outlined,
+                            color: AppColors.textMuted, size: 40),
                       ),
+                    ),
+                  )
+                else
+                  Container(
+                    color: isDark ? const Color(0xFF202124) : AppColors.chipBg,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      _isUgc ? Icons.campaign_outlined : Icons.article_outlined,
+                      color: AppColors.textMuted,
+                      size: 64,
                     ),
                   ),
 
@@ -258,12 +424,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 ),
 
                 // Media Carousel Counter (If multiple media items)
-                if (article.mediaItems.length > 1 || (article.imageUrls != null && article.imageUrls!.length > 1))
+                if (article.mediaItems.length > 1 ||
+                    (article.imageUrls != null &&
+                        article.imageUrls!.length > 1))
                   Positioned(
                     bottom: 44,
                     left: 16,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(12),
@@ -302,19 +471,23 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.4),
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.2), width: 1),
                     ),
-                    child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 18),
+                    child: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white, size: 18),
                   ),
                 ),
 
                 // Center Page Context Tag
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 1),
+                    border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15), width: 1),
                   ),
                   child: Text(
                     article.category.toUpperCase(),
@@ -322,7 +495,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      letterSpacing: 1.0,
+                      letterSpacing: 0,
                     ),
                   ),
                 ),
@@ -330,48 +503,39 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 // Actions (Bookmark & Options)
                 Row(
                   children: [
-                    AnimatedBuilder(
-                      animation: AppState.instance,
-                      builder: (context, _) {
-                        final targetId = article.id.isNotEmpty ? article.id : article.slug;
-                        final isBookmarked = AppState.instance.isBookmarked(targetId);
-                        return GestureDetector(
-                          onTap: () async {
-                            HapticFeedback.lightImpact();
-                            AppState.instance.toggleBookmark(targetId);
-                            await ApiService.instance.toggleBookmark(targetId);
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).clearSnackBars();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    AppState.instance.isBookmarked(targetId)
-                                        ? 'Saved to Bookmarks'
-                                        : 'Removed from Bookmarks',
-                                  ),
-                                  duration: const Duration(seconds: 2),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            }
-                          },
-                          child: Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: isBookmarked ? AppColors.primary : Colors.black.withValues(alpha: 0.4),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+                    if (!_isUgc)
+                      AnimatedBuilder(
+                        animation: AppState.instance,
+                        builder: (context, _) {
+                          final targetId =
+                              article.id.isNotEmpty ? article.id : article.slug;
+                          final isBookmarked =
+                              AppState.instance.isBookmarked(targetId);
+                          return GestureDetector(
+                            onTap: _toggleBookmark,
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: isBookmarked
+                                    ? AppColors.primary
+                                    : Colors.black.withValues(alpha: 0.4),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.2),
+                                    width: 1),
+                              ),
+                              child: Icon(
+                                isBookmarked
+                                    ? Icons.bookmark_rounded
+                                    : Icons.bookmark_border_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                             ),
-                            child: Icon(
-                              isBookmarked ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                          );
+                        },
+                      ),
                   ],
                 ),
               ],
@@ -384,7 +548,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             child: Container(
               decoration: BoxDecoration(
                 color: cardBgColor,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(32)),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.15),
@@ -394,7 +559,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 ],
               ),
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(32)),
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
                   child: Column(
@@ -420,9 +586,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           AnimatedBuilder(
                             animation: AppTtsService.instance,
                             builder: (context, _) {
-                              final targetId = article.id.isNotEmpty ? article.id : article.slug;
-                              final isPlaying = AppTtsService.instance.isArticlePlaying(targetId);
-                              final isLoading = AppTtsService.instance.isArticleLoading(targetId);
+                              final targetId = article.id.isNotEmpty
+                                  ? article.id
+                                  : article.slug;
+                              final isPlaying = AppTtsService.instance
+                                  .isArticlePlaying(targetId);
+                              final isLoading = AppTtsService.instance
+                                  .isArticleLoading(targetId);
 
                               return Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -430,16 +600,23 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                   GestureDetector(
                                     onTap: () {
                                       HapticFeedback.lightImpact();
-                                      AppTtsService.instance.toggleArticleTts(article);
+                                      AppTtsService.instance
+                                          .toggleArticleTts(article);
                                     },
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 250),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      duration:
+                                          const Duration(milliseconds: 250),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14, vertical: 8),
                                       decoration: BoxDecoration(
-                                        color: isPlaying ? AppColors.primary : AppColors.primary.withValues(alpha: 0.12),
+                                        color: isPlaying
+                                            ? AppColors.primary
+                                            : AppColors.primary
+                                                .withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(24),
                                         border: Border.all(
-                                          color: AppColors.primary.withValues(alpha: isPlaying ? 1.0 : 0.3),
+                                          color: AppColors.primary.withValues(
+                                              alpha: isPlaying ? 1.0 : 0.3),
                                           width: 1.5,
                                         ),
                                       ),
@@ -450,23 +627,33 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                             const SizedBox(
                                               width: 18,
                                               height: 18,
-                                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: AppColors.primary),
                                             )
                                           else
                                             Icon(
-                                              isPlaying ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                                              isPlaying
+                                                  ? Icons.stop_circle_rounded
+                                                  : Icons.volume_up_rounded,
                                               size: 20,
-                                              color: isPlaying ? Colors.white : AppColors.primary,
+                                              color: isPlaying
+                                                  ? Colors.white
+                                                  : AppColors.primary,
                                             ),
                                           const SizedBox(width: 8),
                                           Text(
                                             isLoading
-                                                ? 'Loading...'
-                                                : (isPlaying ? 'Stop Audio' : 'Listen Article'),
+                                                ? tr('loading')
+                                                : (isPlaying
+                                                    ? tr('stop_audio')
+                                                    : tr('listen_article')),
                                             style: TextStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.w700,
-                                              color: isPlaying ? Colors.white : AppColors.primary,
+                                              color: isPlaying
+                                                  ? Colors.white
+                                                  : AppColors.primary,
                                             ),
                                           ),
                                         ],
@@ -481,14 +668,20 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                         AppTtsService.instance.cycleSpeed();
                                       },
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 7),
                                         decoration: BoxDecoration(
-                                          color: AppColors.primary.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(18),
-                                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                                          color: AppColors.primary
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          border: Border.all(
+                                              color: AppColors.primary
+                                                  .withValues(alpha: 0.4)),
                                         ),
                                         child: Text(
-                                          AppTtsService.instance.playbackSpeedText,
+                                          AppTtsService
+                                              .instance.playbackSpeedText,
                                           style: const TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w800,
@@ -517,9 +710,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                               decoration: BoxDecoration(
                                 color: AppColors.primary.withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
-                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 1),
+                                border: Border.all(
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.3),
+                                    width: 1),
                               ),
-                              child: const Icon(Icons.share_rounded, color: AppColors.primary, size: 20),
+                              child: const Icon(Icons.share_rounded,
+                                  color: AppColors.primary, size: 20),
                             ),
                           ),
                         ],
@@ -535,7 +732,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           fontWeight: FontWeight.w800,
                           height: 1.3,
                           color: textColor,
-                          letterSpacing: -0.3,
+                          letterSpacing: 0,
                         ),
                       ),
 
@@ -544,117 +741,194 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       // Author & Timestamp Row
                       Row(
                         children: [
-                          Icon(Icons.access_time_rounded, size: 14, color: mutedTextColor),
+                          Icon(Icons.access_time_rounded,
+                              size: 14, color: mutedTextColor),
                           const SizedBox(width: 4),
                           Text(
                             article.timeAgo,
-                            style: TextStyle(fontSize: 13, color: mutedTextColor, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: mutedTextColor,
+                                fontWeight: FontWeight.w500),
                           ),
                           const SizedBox(width: 12),
                           Text('•', style: TextStyle(color: mutedTextColor)),
                           const SizedBox(width: 12),
-                          Icon(Icons.menu_book_rounded, size: 14, color: mutedTextColor),
+                          Icon(Icons.menu_book_rounded,
+                              size: 14, color: mutedTextColor),
                           const SizedBox(width: 4),
                           Text(
-                            '${article.readTimeMinutes} min read',
-                            style: TextStyle(fontSize: 13, color: mutedTextColor, fontWeight: FontWeight.w500),
+                            '${article.readTimeMinutes} నిమిషాల పఠనం',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: mutedTextColor,
+                                fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
 
                       const SizedBox(height: 16),
 
-                      // Metric Pill Bar (Likes, Comments, Views & Share Option)
+                      // Article engagement or UGC moderation actions.
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.03),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+                          border: Border.all(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.black.withValues(alpha: 0.05)),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            // Likes Metric Pill
-                            AnimatedBuilder(
-                              animation: AppState.instance,
-                              builder: (context, _) {
-                                final targetId = article.id.isNotEmpty ? article.id : article.slug;
-                                final isLiked = AppState.instance.isLiked(targetId) || article.isLiked;
-
-                                return GestureDetector(
-                                  onTap: _toggleLike,
-                                  child: Row(
+                          children: _isUgc
+                              ? [
+                                  const Row(
                                     children: [
-                                      AnimatedSwitcher(
-                                        duration: const Duration(milliseconds: 250),
-                                        transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
-                                        child: Icon(
-                                          isLiked ? Icons.favorite_rounded : Icons.favorite_outline_rounded,
-                                          key: ValueKey(isLiked),
-                                          color: isLiked ? AppColors.primary : mutedTextColor,
-                                          size: 18,
-                                        ),
+                                      Icon(Icons.campaign_outlined,
+                                          color: AppColors.primary, size: 20),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        tr('citizen_report'),
+                                        style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700),
                                       ),
+                                    ],
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: _showUgcReportSheet,
+                                    icon: const Icon(Icons.flag_outlined,
+                                        size: 18),
+                                    label: Text(tr('report')),
+                                  ),
+                                ]
+                              : [
+                                  // Likes Metric Pill
+                                  AnimatedBuilder(
+                                    animation: AppState.instance,
+                                    builder: (context, _) {
+                                      final targetId = article.id.isNotEmpty
+                                          ? article.id
+                                          : article.slug;
+                                      final isLiked =
+                                          AppState.instance.isLiked(targetId) ||
+                                              article.isLiked;
+
+                                      return GestureDetector(
+                                        onTap: _toggleLike,
+                                        child: Row(
+                                          children: [
+                                            AnimatedSwitcher(
+                                              duration: const Duration(
+                                                  milliseconds: 250),
+                                              transitionBuilder:
+                                                  (child, anim) =>
+                                                      ScaleTransition(
+                                                          scale: anim,
+                                                          child: child),
+                                              child: Icon(
+                                                isLiked
+                                                    ? Icons.favorite_rounded
+                                                    : Icons
+                                                        .favorite_outline_rounded,
+                                                key: ValueKey(isLiked),
+                                                color: isLiked
+                                                    ? AppColors.primary
+                                                    : mutedTextColor,
+                                                size: 18,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '${article.likes}',
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.bold,
+                                                color: isLiked
+                                                    ? AppColors.primary
+                                                    : textColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+
+                                  Container(
+                                      width: 1,
+                                      height: 16,
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12),
+
+                                  // Comments Metric Pill
+                                  AnimatedBuilder(
+                                    animation: AppState.instance,
+                                    builder: (context, _) {
+                                      final count = AppState.instance
+                                          .getDisplayCommentCount(
+                                              article.id, article.comments);
+                                      return GestureDetector(
+                                        onTap: () async {
+                                          HapticFeedback.lightImpact();
+                                          await Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                                builder: (_) => CommentsScreen(
+                                                    article: article)),
+                                          );
+                                          if (mounted) setState(() {});
+                                        },
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                                Icons
+                                                    .chat_bubble_outline_rounded,
+                                                color: mutedTextColor,
+                                                size: 18),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '$count',
+                                              style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: textColor),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+
+                                  Container(
+                                      width: 1,
+                                      height: 16,
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12),
+
+                                  // Views Metric Pill
+                                  Row(
+                                    children: [
+                                      Icon(Icons.remove_red_eye_outlined,
+                                          color: mutedTextColor, size: 18),
                                       const SizedBox(width: 6),
                                       Text(
-                                        '${article.likes}',
+                                        '${article.viewCount}',
                                         style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.bold,
-                                          color: isLiked ? AppColors.primary : textColor,
-                                        ),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: textColor),
                                       ),
                                     ],
                                   ),
-                                );
-                              },
-                            ),
-
-                            Container(width: 1, height: 16, color: isDark ? Colors.white12 : Colors.black12),
-
-                            // Comments Metric Pill
-                            AnimatedBuilder(
-                              animation: AppState.instance,
-                              builder: (context, _) {
-                                final count = AppState.instance.getDisplayCommentCount(article.id, article.comments);
-                                return GestureDetector(
-                                  onTap: () async {
-                                    HapticFeedback.lightImpact();
-                                    await Navigator.push(
-                                      context,
-                                      MaterialPageRoute(builder: (_) => CommentsScreen(article: article)),
-                                    );
-                                    if (mounted) setState(() {});
-                                  },
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.chat_bubble_outline_rounded, color: mutedTextColor, size: 18),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '$count',
-                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-
-                            Container(width: 1, height: 16, color: isDark ? Colors.white12 : Colors.black12),
-
-                            // Views Metric Pill
-                            Row(
-                              children: [
-                                Icon(Icons.remove_red_eye_outlined, color: mutedTextColor, size: 18),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${article.viewCount}',
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
-                                ),
-                              ],
-                            ),
-                          ],
+                                ],
                         ),
                       ),
 
@@ -674,15 +948,17 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Failed to load full article content.',
-                                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                              Text(
+                                tr('full_article_load_failed'),
+                                style: const TextStyle(
+                                    color: Colors.redAccent,
+                                    fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 8),
                               ElevatedButton.icon(
                                 onPressed: _fetchFullArticleDetail,
                                 icon: const Icon(Icons.refresh, size: 16),
-                                label: const Text('Retry'),
+                                label: Text(tr('retry')),
                               ),
                               const SizedBox(height: 12),
                               if (article.summary.isNotEmpty)
@@ -699,15 +975,19 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         )
                       else
                         Text(
-                          article.body.isNotEmpty ? article.body : (article.summary.isNotEmpty ? article.summary : 'No content available.'),
+                          article.body.isNotEmpty
+                              ? article.body
+                              : (article.summary.isNotEmpty
+                                  ? article.summary
+                                  : tr('no_content')),
                           style: TextStyle(
                             fontSize: 16,
                             height: 1.75,
-                            letterSpacing: 0.2,
+                            letterSpacing: 0,
                             color: textColor.withValues(alpha: 0.9),
                           ),
                         ),
-                        
+
                       const SizedBox(height: 40),
                     ],
                   ),

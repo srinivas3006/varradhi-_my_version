@@ -1,0 +1,9 @@
+# Production Android Release Signing Template
+# Copy this file to android/key.properties and replace values with your production keystore details:
+#
+# keyAlias=varadhi_release_key
+# keyPassword=your_key_password
+# storeFile=../varadhi_release.jks
+# storePassword=your_keystore_password
+#
+# NOTE: Do NOT commit your actual key.properties or .jks/.keystore files to version control.

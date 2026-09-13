@@ -6,26 +6,25 @@ import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
 import 'ad_viewability_detector.dart';
 
-/// Banner Ad Widget (Aspect ratio: 16:5, height ~90-120dp)
-/// Renders a banner ad in feed or banner sections with fixed aspect ratio,
-/// BoxFit.cover, Sponsored pill, and error fallback.
-class AdBannerWidget extends StatefulWidget {
+/// Square / Box ad widget (Aspect ratio: 1:1)
+/// Used between cards or in grid layouts with BoxFit.cover.
+class BoxAdWidget extends StatefulWidget {
   final AdBanner ad;
   final String placementZone;
   final String? exposureKey;
 
-  const AdBannerWidget({
+  const BoxAdWidget({
     super.key,
     required this.ad,
-    this.placementZone = 'banner',
+    this.placementZone = 'feed',
     this.exposureKey,
   });
 
   @override
-  State<AdBannerWidget> createState() => _AdBannerWidgetState();
+  State<BoxAdWidget> createState() => _BoxAdWidgetState();
 }
 
-class _AdBannerWidgetState extends State<AdBannerWidget> {
+class _BoxAdWidgetState extends State<BoxAdWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
@@ -49,25 +48,24 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
       placementZone: widget.placementZone,
       exposureKey: widget.exposureKey,
       child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         child: AspectRatio(
-          aspectRatio: 16 / 5, // Fixed 16:5 aspect ratio per spec (height ~90-120dp)
+          aspectRatio: 1.0, // Fixed 1:1 square ratio
           child: InkWell(
             onTap: _handleTap,
             child: Stack(
@@ -75,19 +73,18 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
               children: [
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
-                  fit: BoxFit.cover, // Keep image BoxFit.cover inside fixed aspect ratio
+                  fit: BoxFit.cover,
                   placeholder: (context, url) => Container(
                     color: isDark ? Colors.white10 : AppColors.chipBg,
                     child: const Center(
                       child: SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 24,
+                        height: 24,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                     ),
                   ),
                   errorWidget: (context, url, error) {
-                    // Hide that ad on error
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) setState(() => _hasError = true);
                     });
@@ -95,21 +92,21 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
                   },
                 ),
 
-                // Top-left Sponsored Pill
+                // Sponsored pill
                 Positioned(
-                  top: 6,
-                  left: 6,
+                  top: 10,
+                  left: 10,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.black.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Text(
                       'Sponsored',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 9,
+                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.3,
                       ),

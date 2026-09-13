@@ -48,6 +48,18 @@ class AdBanner {
   bool get isVideo =>
       adType.toLowerCase() == 'video' || videoUrl.trim().isNotEmpty;
 
+  bool get isBanner => adType.toLowerCase() == 'banner';
+  bool get isBox => adType.toLowerCase() == 'box';
+  bool get isThreeD => adType.toLowerCase() == 'three_d' || adType.toLowerCase() == '3d';
+  bool get isInterstitial => adType.toLowerCase() == 'interstitial';
+  bool get isNative => adType.toLowerCase() == 'native';
+  bool get isPoster => adType.toLowerCase() == 'poster';
+  bool get isSponsoredCard => adType.toLowerCase() == 'sponsored_card';
+  bool get isBreakingStrip => adType.toLowerCase() == 'breaking_strip';
+  bool get isLocalListing => adType.toLowerCase() == 'local_listing';
+  bool get isFullScreen => adType.toLowerCase() == 'full_screen';
+  bool get isBottomSticky => adType.toLowerCase() == 'bottom_sticky';
+
   factory AdBanner.fromJson(Map<String, dynamic> json) {
     final rawImg = (json['image_url'] ?? json['thumbnail_url'] ?? json['banner_url'])?.toString();
     final rawVideo = (json['video_url'] ?? json['video'])?.toString();

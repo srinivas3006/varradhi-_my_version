@@ -4,6 +4,7 @@ import 'package:way2news_clone/core/navigation/notification_deep_link_resolver.d
 import 'package:way2news_clone/core/navigation/notification_navigation_gate.dart';
 import 'package:way2news_clone/models/app_notification.dart';
 import 'package:way2news_clone/models/notification_target.dart';
+import 'package:way2news_clone/services/deep_link_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +21,9 @@ void main() {
       expect(target.notificationId, equals('notif-1'));
     });
 
-    test('varadhi://category/education?utm_source=fcm handles query params cleanly', () {
+    test(
+        'varadhi://category/education?utm_source=fcm handles query params cleanly',
+        () {
       final target = NotificationDeepLinkResolver.resolveFromUri(
         'varadhi://category/education?utm_source=fcm&campaign=breaking',
       );
@@ -65,7 +68,9 @@ void main() {
       expect(target.identifier, equals('poster-888'));
     });
 
-    test('varadhi://ugc/reporter/dashboard resolves to UGC dashboard target with auth', () {
+    test(
+        'varadhi://ugc/reporter/dashboard resolves to UGC dashboard target with auth',
+        () {
       final target = NotificationDeepLinkResolver.resolveFromUri(
         'varadhi://ugc/reporter/dashboard',
       );
@@ -83,6 +88,16 @@ void main() {
       expect(target.type, equals(NotificationTargetType.ugc));
       expect(target.screenName, equals('submit'));
       expect(target.requiresAuth, isTrue);
+    });
+
+    test('public UGC report link does not require reporter login', () {
+      final target = NotificationDeepLinkResolver.resolveFromUri(
+        'varadhi://ugc/report-123',
+      );
+
+      expect(target.type, equals(NotificationTargetType.ugc));
+      expect(target.identifier, equals('report-123'));
+      expect(target.requiresAuth, isFalse);
     });
 
     test('screen://bookmarks resolves to screen target and requires auth', () {
@@ -123,7 +138,8 @@ void main() {
         equals(NotificationTargetType.unknown),
       );
       expect(
-        NotificationDeepLinkResolver.resolveFromUri('random_scheme://test').type,
+        NotificationDeepLinkResolver.resolveFromUri('random_scheme://test')
+            .type,
         equals(NotificationTargetType.unknown),
       );
     });
@@ -143,7 +159,8 @@ void main() {
       expect(target.notificationId, equals('uuid-123'));
     });
 
-    test('FCM payload without deep_link resolves via content_type and slug', () {
+    test('FCM payload without deep_link resolves via content_type and slug',
+        () {
       final payload = {
         'notification_id': 'uuid-456',
         'content_type': 'article',
@@ -169,6 +186,18 @@ void main() {
       expect(target.notificationId, equals('notif-99'));
     });
 
+    test('FCM payload for a public UGC report does not require auth', () {
+      final target = NotificationDeepLinkResolver.resolveFromPayload({
+        'content_type': 'ugc',
+        'content_id': 'ugc-55',
+        'title': 'Citizen report',
+      });
+
+      expect(target.type, equals(NotificationTargetType.ugc));
+      expect(target.identifier, equals('ugc-55'));
+      expect(target.requiresAuth, isFalse);
+    });
+
     test('AppNotification domain model resolves correctly', () {
       final notif = AppNotification(
         id: 'inbox-1',
@@ -181,7 +210,8 @@ void main() {
         deepLink: 'varadhi://poster/poster-55',
       );
 
-      final target = NotificationDeepLinkResolver.resolveFromAppNotification(notif);
+      final target =
+          NotificationDeepLinkResolver.resolveFromAppNotification(notif);
       expect(target.type, equals(NotificationTargetType.poster));
       expect(target.identifier, equals('poster-55'));
     });
@@ -207,7 +237,18 @@ void main() {
       expect(gate.hasPendingTarget, isFalse);
     });
 
-    testWidgets('onNavigationReady dispatches pending target on next frame', (tester) async {
+    test('cold-start Android URI is queued until Home is ready', () async {
+      await DeepLinkService.instance.handleUri(
+        'varadhi://article/telangana-budget-2026',
+      );
+
+      final target = NotificationNavigationGate.instance.pendingTarget;
+      expect(target?.type, NotificationTargetType.article);
+      expect(target?.identifier, 'telangana-budget-2026');
+    });
+
+    testWidgets('onNavigationReady dispatches pending target on next frame',
+        (tester) async {
       final gate = NotificationNavigationGate.instance;
       final target = NotificationTarget.article(slugOrId: 'news-slug');
       gate.setPendingTarget(target);

@@ -36,7 +36,9 @@ void main() {
       expect(article.summary, 'Summary only');
     });
 
-    test('detects video articles when video_url exists even without explicit media_type', () {
+    test(
+        'detects video articles when video_url exists even without explicit media_type',
+        () {
       final article = NewsArticle.fromJson({
         'id': '3',
         'title': 'Video article',
@@ -53,6 +55,30 @@ void main() {
       expect(article.mediaType, 'video');
       expect(article.isVideo, isTrue);
       expect(article.formattedVideoDuration, '1:30');
+    });
+
+    test('preserves an explicit UGC content kind through JSON', () {
+      final article = NewsArticle.fromJson({
+        'id': 'ugc-1',
+        'title': 'Citizen report',
+        'type': 'ugc',
+        'summary': 'Local update',
+        'published_at': '2026-01-01T00:00:00Z',
+      });
+
+      expect(article.isUgc, isTrue);
+      expect(NewsArticle.fromJson(article.toJson()).isUgc, isTrue);
+    });
+
+    test('does not classify media content_type as UGC', () {
+      final article = NewsArticle.fromJson({
+        'id': 'article-1',
+        'title': 'Video news',
+        'content_type': 'VIDEO',
+        'published_at': '2026-01-01T00:00:00Z',
+      });
+
+      expect(article.isUgc, isFalse);
     });
   });
 }

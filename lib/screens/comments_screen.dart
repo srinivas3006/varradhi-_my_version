@@ -64,9 +64,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
     if (!AppState.instance.isLoggedIn) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Please log in to post a comment.'),
+          content: Text(tr('login_to_comment')),
           action: SnackBarAction(
-            label: 'Log In',
+            label: tr('login'),
             textColor: Colors.amber,
             onPressed: () {
               Navigator.push(
@@ -112,7 +112,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Comment posted successfully.'),
+            content: Text(tr('comment_posted')),
             backgroundColor: Color(0xFF10B981),
             behavior: SnackBarBehavior.floating,
           ),
@@ -121,7 +121,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isPosting = false);
-        String errorMsg = 'Failed to post comment. Please try again.';
+        String errorMsg = tr('comment_post_failed');
         if (e is DioException && e.response?.data is Map) {
           errorMsg = e.response?.data['errors']?['message'] ?? errorMsg;
         }
@@ -182,7 +182,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
               if (isOwnComment) ...[
                 ListTile(
                   leading: const Icon(Icons.edit_outlined, color: AppColors.primary),
-                  title: const Text('Edit Comment', style: TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(tr('edit_comment'), style: const TextStyle(fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     _showEditDialog(comment);
@@ -190,7 +190,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  title: const Text('Delete Comment', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                  title: Text(tr('delete_comment'), style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
                   onTap: () {
                     Navigator.pop(context);
                     _confirmDeleteComment(comment);
@@ -229,19 +229,19 @@ class _CommentsScreenState extends State<CommentsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Edit Comment'),
+        title: Text(tr('edit_comment')),
         content: TextField(
           controller: editController,
           maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Enter updated comment...',
+          decoration: InputDecoration(
+            hintText: tr('updated_comment_hint'),
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
@@ -254,16 +254,16 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 if (!mounted) return;
                 _fetchComments();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Comment updated successfully.')),
+                  SnackBar(content: Text(tr('comment_updated'))),
                 );
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Failed to update comment.')),
+                  SnackBar(content: Text(tr('comment_update_failed'))),
                 );
               }
             },
-            child: const Text('Save'),
+            child: Text(tr('save')),
           ),
         ],
       ),
@@ -274,12 +274,12 @@ class _CommentsScreenState extends State<CommentsScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Comment'),
-        content: const Text('Are you sure you want to delete this comment?'),
+        title: Text(tr('delete_comment')),
+        content: Text(tr('delete_comment_confirm')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
@@ -296,16 +296,16 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 });
                 AppState.instance.setComments(widget.article.id, _comments);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Comment deleted.')),
+                  SnackBar(content: Text(tr('comment_deleted'))),
                 );
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Failed to delete comment.')),
+                  SnackBar(content: Text(tr('comment_delete_failed'))),
                 );
               }
             },
-            child: const Text('Delete'),
+            child: Text(tr('delete_comment')),
           ),
         ],
       ),
@@ -313,14 +313,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
   }
 
   void _showReportReasonDialog(Comment comment) {
-    const reasons = [
-      ('spam', 'Spam or commercial promotion'),
-      ('abuse', 'Abusive content or harassment'),
-      ('hate', 'Hate speech or discrimination'),
-      ('misinformation', 'False or misleading information'),
-      ('violence', 'Violence or dangerous acts'),
-      ('sexual_content', 'Inappropriate sexual content'),
-      ('other', 'Other reason'),
+    final reasons = [
+      ('spam', tr('reason_spam')),
+      ('abuse', tr('reason_abuse')),
+      ('hate', tr('reason_hate')),
+      ('misinformation', tr('reason_misinformation')),
+      ('violence', tr('reason_violence')),
+      ('sexual_content', tr('reason_sexual')),
+      ('other', tr('reason_other')),
     ];
 
     showModalBottomSheet(
@@ -336,14 +336,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Report Comment',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              Text(
+                tr('report_comment'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Please select why you are reporting this comment:',
-                style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+              Text(
+                tr('report_reason_prompt'),
+                style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
               ),
               const SizedBox(height: 16),
               ...reasons.map((r) => ListTile(
@@ -362,7 +362,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                       } catch (e) {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Failed to report comment.')),
+                          SnackBar(content: Text(tr('comment_report_failed'))),
                         );
                       }
                     },
@@ -401,7 +401,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
           color: Theme.of(context).dividerColor.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: const Text('Comment deleted', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 13)),
+        child: Text(tr('comment_deleted'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 13)),
       );
     }
 
@@ -447,9 +447,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           color: Colors.amber.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
-                          'Pending review',
-                          style: TextStyle(fontSize: 10, color: Colors.amber, fontWeight: FontWeight.w600),
+                        child: Text(
+                          tr('pending_review'),
+                          style: const TextStyle(fontSize: 10, color: Colors.amber, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
@@ -555,12 +555,12 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ? const Center(child: CircularProgressIndicator())
                   : _comments.isEmpty
                       ? ListView(
-                          children: const [
-                            SizedBox(height: 120),
+                          children: [
+                            const SizedBox(height: 120),
                             Center(
                               child: Text(
-                                'No comments yet. Be the first to share your thoughts!',
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                                tr('no_comments'),
+                                style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
                               ),
                             ),
                           ],

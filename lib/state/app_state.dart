@@ -36,7 +36,8 @@ class AppState extends ChangeNotifier {
   static const _sessionIdKey = 'session_id';
 
   /// Scoped notifier for themeMode and language updates.
-  final ThemeAndLocaleNotifier themeAndLocaleNotifier = ThemeAndLocaleNotifier();
+  final ThemeAndLocaleNotifier themeAndLocaleNotifier =
+      ThemeAndLocaleNotifier();
 
   // Local persistence for likes/comments until backend supports it
   Set<String> likedItemIds = {};
@@ -47,7 +48,7 @@ class AppState extends ChangeNotifier {
   static final AppState instance = AppState._internal();
 
   String language = 'Telugu';
-  String get contentLanguage => language == 'English' ? 'en' : 'te';
+  String get contentLanguage => 'te';
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -91,6 +92,7 @@ class AppState extends ChangeNotifier {
     userName = name;
     notifyListeners();
   }
+
   String? fcmToken;
   String deviceId = '';
   String? installationSecret;
@@ -136,7 +138,7 @@ class AppState extends ChangeNotifier {
   /// True if the user has already been prompted for location permission
   /// in the feed. Ensures we only ask once.
   bool locationPrompted = false;
-  
+
   /// True if the user successfully granted location permissions and we fetched real GPS data
   bool hasValidLocation = false;
 
@@ -145,7 +147,8 @@ class AppState extends ChangeNotifier {
 
   // ---- Notifications state ----
   List<AppNotification> notifications = [];
-  int get unreadNotificationsCount => notifications.where((n) => !n.isRead).length;
+  int get unreadNotificationsCount =>
+      notifications.where((n) => !n.isRead).length;
 
   // ---- Comments state ----
   final Map<String, List<Comment>> articleComments = {};
@@ -201,7 +204,8 @@ class AppState extends ChangeNotifier {
 
     deviceId = prefs.getString('deviceId') ?? '';
     if (deviceId.isEmpty) {
-      deviceId = 'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
+      deviceId =
+          'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
       await prefs.setString('deviceId', deviceId);
     }
 
@@ -209,10 +213,12 @@ class AppState extends ChangeNotifier {
     try {
       authToken = await _secureStorage.read(key: _authTokenKey);
       refreshToken = await _secureStorage.read(key: _refreshTokenKey);
-      installationSecret = await _secureStorage.read(key: _installationSecretKey);
+      installationSecret =
+          await _secureStorage.read(key: _installationSecretKey);
       sessionId = await _secureStorage.read(key: _sessionIdKey);
     } catch (e) {
-      debugPrint('[AppState] Secure storage read failed (keystore reset or corrupted): $e');
+      debugPrint(
+          '[AppState] Secure storage read failed (keystore reset or corrupted): $e');
       try {
         await _secureStorage.deleteAll();
       } catch (_) {}
@@ -240,10 +246,12 @@ class AppState extends ChangeNotifier {
     hasPromptedPreferences = prefs.getBool('hasPromptedPreferences') ?? false;
     locationPrompted = prefs.getBool('locationPrompted') ?? false;
     hasValidLocation = prefs.getBool('hasValidLocation') ?? false;
-    pushNotificationsEnabled = prefs.getBool('pushNotificationsEnabled') ?? true;
+    pushNotificationsEnabled =
+        prefs.getBool('pushNotificationsEnabled') ?? true;
 
     likedItemIds = (prefs.getStringList('likedItemIds') ?? []).toSet();
-    bookmarkedItemIds = (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
+    bookmarkedItemIds =
+        (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
   }
 
   Future<void> _persist() async {
@@ -360,7 +368,8 @@ class AppState extends ChangeNotifier {
       isContributor = isAdmin || _hasContributorSignal(me);
       if (me['name'] != null && me['name'].toString().isNotEmpty) {
         userName = me['name'].toString();
-      } else if (me['username'] != null && me['username'].toString().isNotEmpty) {
+      } else if (me['username'] != null &&
+          me['username'].toString().isNotEmpty) {
         userName = me['username'].toString();
       } else if (me['email'] != null && me['email'].toString().isNotEmpty) {
         userName = me['email'].toString();
@@ -368,7 +377,9 @@ class AppState extends ChangeNotifier {
       if (me['phone'] != null) userPhone = me['phone'].toString();
       if (me['id'] != null) userId = me['id'].toString();
       if (me['is_reporter'] == true) isReporter = true;
-      if (me['tokens'] != null) reporterTokens = int.tryParse(me['tokens'].toString()) ?? reporterTokens;
+      if (me['tokens'] != null)
+        reporterTokens =
+            int.tryParse(me['tokens'].toString()) ?? reporterTokens;
       notifyListeners();
       await _persist();
     } catch (e) {
@@ -389,7 +400,9 @@ class AppState extends ChangeNotifier {
   }
 
   static bool _hasAdminSignal(Map<String, dynamic> me) {
-    if (me['is_admin'] == true || me['is_staff'] == true || me['is_superuser'] == true) return true;
+    if (me['is_admin'] == true ||
+        me['is_staff'] == true ||
+        me['is_superuser'] == true) return true;
     const keywords = ['admin', 'staff', 'superuser'];
     return _matchesKeyword(me['role'], keywords) ||
         _matchesKeyword(me['roles'], keywords) ||
@@ -409,12 +422,10 @@ class AppState extends ChangeNotifier {
   /// Marks onboarding (language + location) as done. Login stays optional/
   /// skippable on every future launch, matching Way2News's "no login
   /// required" behavior — only language+location gate the splash skip.
-  void completeOnboarding([String? defaultLang]) {
+  void completeOnboarding([String? _]) {
     hasOnboarded = true;
-    if (defaultLang != null) {
-      language = defaultLang;
-      themeAndLocaleNotifier.notify();
-    }
+    language = 'Telugu';
+    themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
   }
@@ -425,12 +436,12 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  void setLanguage(String lang) {
-    language = lang;
+  void setLanguage(String _) {
+    language = 'Telugu';
     themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
-    _syncProfileToBackend(preferredLanguage: _contentLanguageCode(lang));
+    _syncProfileToBackend(preferredLanguage: 'te');
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -441,31 +452,11 @@ class AppState extends ChangeNotifier {
     _syncProfileToBackend(theme: mode.name);
   }
 
-  /// Maps the UI's display language name to the backend's
-  /// `preferred_language` enum (en, hi, te, ta, ar, ur). Only English and
-  /// Telugu are currently selectable in the UI; anything else falls back
-  /// to English rather than sending a code the backend would reject.
-  static String _contentLanguageCode(String lang) {
-    switch (lang) {
-      case 'Telugu':
-        return 'te';
-      case 'Hindi':
-        return 'hi';
-      case 'Tamil':
-        return 'ta';
-      case 'Arabic':
-        return 'ar';
-      case 'Urdu':
-        return 'ur';
-      default:
-        return 'en';
-    }
-  }
-
   /// Best-effort sync of profile-level preferences to the backend. Never
   /// throws — a failed sync just leaves the change local-only until the
   /// next successful call, matching setPreferredCategories' pattern.
-  Future<void> _syncProfileToBackend({String? preferredLanguage, String? theme, String? fullName}) async {
+  Future<void> _syncProfileToBackend(
+      {String? preferredLanguage, String? theme, String? fullName}) async {
     if (!isLoggedIn) return;
     try {
       await ApiService.instance.updateProfile({
@@ -485,7 +476,13 @@ class AppState extends ChangeNotifier {
   }
 
   String get displayLocation {
-    if (subdistrict.isNotEmpty && district.isNotEmpty && subdistrict != district) {
+    if (village.isNotEmpty) {
+      return subdistrict.isNotEmpty
+          ? '$village, $subdistrict'
+          : '$village, $district';
+    } else if (subdistrict.isNotEmpty &&
+        district.isNotEmpty &&
+        subdistrict != district) {
       return '$subdistrict, $district';
     } else if (city.isNotEmpty && district.isNotEmpty && city != district) {
       return '$city, $district';
@@ -519,13 +516,14 @@ class AppState extends ChangeNotifier {
     this.country = country ?? 'India';
     this.latitude = latitude;
     this.longitude = longitude;
-    if (stateId != null) this.stateId = stateId;
-    if (districtId != null) this.districtId = districtId;
-    if (subdistrictId != null) this.subdistrictId = subdistrictId;
-    if (villageId != null) this.villageId = villageId;
+    this.stateId = stateId;
+    this.districtId = districtId;
+    this.subdistrictId = subdistrictId;
+    this.villageId = villageId;
     hasOnboarded = true;
     hasValidLocation = true;
     AdRepository.instance.clearCache();
+    ApiService.instance.clearFeedCache();
     notifyListeners();
     _persist();
   }
@@ -541,7 +539,7 @@ class AppState extends ChangeNotifier {
       loc.state,
       loc.district,
       city: loc.city,
-      subdistrict: loc.subdistrict ?? loc.district,
+      subdistrict: loc.subdistrict ?? '',
       village: loc.village ?? '',
       country: loc.country,
       latitude: loc.latitude,
@@ -586,7 +584,9 @@ class AppState extends ChangeNotifier {
   }
 
   static String _categoryToSlug(String cat) {
-    return cat.trim().toLowerCase()
+    return cat
+        .trim()
+        .toLowerCase()
         .replaceAll('&', 'and')
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_+|_+$'), '');
@@ -737,7 +737,6 @@ class AppState extends ChangeNotifier {
     unawaited(NotificationService.instance.registerAsGuest());
   }
 
-
   // ---- Comments Program methods ----
 
   final Map<String, int> userAddedComments = {};
@@ -758,16 +757,17 @@ class AppState extends ChangeNotifier {
     if (!articleComments.containsKey(articleId)) {
       articleComments[articleId] = [];
     }
-    
+
     final newComment = Comment(
       id: 'c_${DateTime.now().millisecondsSinceEpoch}',
       username: isLoggedIn ? userName : 'Guest User',
-      avatarUrl: 'https://i.pravatar.cc/150?u=${(isLoggedIn ? userName : 'Guest User').hashCode}',
+      avatarUrl:
+          'https://i.pravatar.cc/150?u=${(isLoggedIn ? userName : 'Guest User').hashCode}',
       text: text,
       postedAt: DateTime.now(),
       likes: 0,
     );
-    
+
     articleComments[articleId]!.insert(0, newComment);
     userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
     notifyListeners();
@@ -777,8 +777,6 @@ class AppState extends ChangeNotifier {
     articleComments[articleId] = comments;
     notifyListeners();
   }
-
-
 
   void addReply(String articleId, String parentCommentId, String text) {
     if (!articleComments.containsKey(articleId)) {

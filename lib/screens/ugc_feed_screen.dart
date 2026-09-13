@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
+import '../localization/app_translations.dart';
 import '../repositories/ugc_repository.dart';
 import '../theme/app_theme.dart';
 import 'news_detail_screen.dart';
@@ -53,7 +54,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
         setState(() {
           _isLoading = false;
           if (_reports.isEmpty) {
-            _errorMessage = 'రిపోర్ట్‌లను లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
+            _errorMessage = tr('citizen_reports_load_failed');
           }
         });
       }
@@ -80,7 +81,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Citizen Reports'),
+        title: Text(tr('citizen_reports')),
         backgroundColor: Colors.white,
         foregroundColor: AppColors.textDark,
         elevation: 0.5,
@@ -106,7 +107,9 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              _errorMessage != null ? 'కథనాలు లోడ్ చేయడం విఫలమైంది' : 'No citizen reports yet',
+                              _errorMessage != null
+                                  ? tr('citizen_reports_load_failed')
+                                  : tr('no_citizen_reports'),
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
@@ -115,7 +118,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              _errorMessage ?? 'Pull down to check for new updates.',
+                              _errorMessage ?? tr('pull_to_refresh'),
                               style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
                             ),
                             if (_errorMessage != null) ...[
@@ -127,7 +130,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                                   foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
-                                child: const Text('మళ్ళీ ప్రయత్నించండి'),
+                                child: Text(tr('retry')),
                               ),
                             ],
                           ],
@@ -206,7 +209,7 @@ class _UgcReportCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Local Reporter • ${report.timeAgo}',
+                        '${tr('local_reporter')} • ${report.timeAgo}',
                         style: TextStyle(
                           fontSize: 12,
                           color: mutedColor,

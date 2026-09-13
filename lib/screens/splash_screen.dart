@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
+import 'location_selection_screen.dart';
 import '../services/api_service.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -78,7 +79,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (!mounted) return;
 
-    const nextScreen = HomeScreen(openSpotlightOnStart: true);
+    final Widget nextScreen = state.hasOnboarded
+        ? const HomeScreen(openSpotlightOnStart: true)
+        : const LocationSelectionScreen();
 
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(

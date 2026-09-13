@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
+
 import 'app_config.dart';
 
 class NetworkConfig {
@@ -14,7 +16,7 @@ class NetworkConfig {
     Duration? sendTimeout,
     Duration? receiveTimeout,
     int? maxRetries,
-    this.enableLogging = true,
+    this.enableLogging = kDebugMode,
   })  : baseUrl = baseUrl ?? AppConfig.baseUrl,
         connectTimeout = connectTimeout ?? AppConfig.connectTimeout,
         sendTimeout = sendTimeout ?? AppConfig.sendTimeout,

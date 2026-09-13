@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../network/dio_client.dart';
+import '../../state/app_state.dart';
 
 /// Represents a trackable backend ad event.
 class AdEvent {
@@ -107,9 +109,16 @@ class AdEventQueue {
         final currentEvent = _queue.first;
 
         try {
+          final deviceId = AppState.instance.deviceId;
           await ApiClient.instance.dio.post(
             '/api/v1/ads/event/',
             data: currentEvent.toJson(),
+            options: Options(
+              headers: {
+                'Content-Type': 'application/json',
+                if (deviceId.isNotEmpty) 'X-Device-ID': deviceId,
+              },
+            ),
           );
 
           // Success - remove from queue

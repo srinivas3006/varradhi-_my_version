@@ -10,6 +10,14 @@ import '../../theme/app_theme.dart';
 import 'ad_viewability_detector.dart';
 import 'video_ad_card.dart';
 
+import 'box_ad_widget.dart';
+import 'three_d_ad_widget.dart';
+import 'poster_ad_widget.dart';
+import 'ad_banner_widget.dart';
+import 'breaking_strip_ad_widget.dart';
+import 'local_listing_ad_widget.dart';
+import 'bottom_sticky_ad_banner.dart';
+
 /// Backend-driven native in-feed ad card styled identically to regular news cards.
 /// Displays an ad with a "Sponsored" label, consistent typography, action buttons,
 /// and automatic dwell-based viewability and click tracking via [AdManager].
@@ -59,12 +67,60 @@ class _NativeAdCardState extends State<NativeAdCard> {
       return const SizedBox.shrink();
     }
 
-    // If ad is a video ad, delegate to VideoAdCard
+    // Delegate to specialized fixed aspect ratio widgets per ad_type
     if (ad.isVideo) {
       return VideoAdCard(
         ad: ad,
         placementZone: widget.placementZone,
         exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isBox) {
+      return BoxAdWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isThreeD) {
+      return ThreeDAdWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isPoster) {
+      return PosterAdWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isBanner) {
+      return AdBannerWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isBreakingStrip) {
+      return BreakingStripAdWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isLocalListing) {
+      return LocalListingAdWidget(
+        ad: ad,
+        placementZone: widget.placementZone,
+        exposureKey: widget.exposureKey,
+      );
+    }
+    if (ad.isBottomSticky) {
+      return BottomStickyAdBanner(
+        ad: ad,
+        placementZone: widget.placementZone,
       );
     }
 
@@ -95,9 +151,9 @@ class _NativeAdCardState extends State<NativeAdCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Media Header Frame
-              SizedBox(
-                height: 190,
+              // Media Header Frame: Fixed 16:9 Aspect Ratio matching article cards
+              AspectRatio(
+                aspectRatio: 16 / 9,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [

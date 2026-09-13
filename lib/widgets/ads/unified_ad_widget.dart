@@ -1,0 +1,124 @@
+import 'package:flutter/material.dart';
+import '../../core/ads/ad_type_resolver.dart';
+import '../../models/ad_banner.dart';
+import 'ad_banner_widget.dart';
+import 'box_ad_widget.dart';
+import 'three_d_ad_widget.dart';
+import 'poster_ad_widget.dart';
+import 'breaking_strip_ad_widget.dart';
+import 'local_listing_ad_widget.dart';
+import 'bottom_sticky_ad_banner.dart';
+import 'native_ad_card.dart';
+import 'video_ad_card.dart';
+
+/// Master frontend ad component that resolves any backend [ad.adType]
+/// into its required fixed aspect-ratio container and specialized UI layout.
+///
+/// Ensures compliance with:
+/// - Fixed UI aspect ratios per ad type (no stretching, BoxFit.cover)
+/// - Separation of image_url and video_url (no treating image_url as video)
+/// - Guaranteed 'Sponsored' / 'Ad' badges
+/// - Verified destination URL handling
+/// - Automatic impression & viewability tracking
+class UnifiedAdWidget extends StatelessWidget {
+  final AdBanner ad;
+  final String placementZone;
+  final String? exposureKey;
+
+  const UnifiedAdWidget({
+    super.key,
+    required this.ad,
+    this.placementZone = 'feed',
+    this.exposureKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 1. Video ad (16:9 video player with poster)
+    if (ad.isVideo) {
+      return VideoAdCard(
+        ad: ad,
+        placementZone: placementZone,
+        exposureKey: exposureKey,
+      );
+    }
+
+    final presentationType = AdTypeResolver.resolve(ad);
+
+    switch (presentationType) {
+      case AdPresentationType.banner:
+        return AdBannerWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.box:
+        return BoxAdWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.threeD:
+        return ThreeDAdWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.poster:
+        return PosterAdWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.breakingStrip:
+        return BreakingStripAdWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.localListing:
+        return LocalListingAdWidget(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.bottomSticky:
+        return BottomStickyAdBanner(
+          ad: ad,
+          placementZone: placementZone,
+        );
+
+      case AdPresentationType.nativeCard:
+      case AdPresentationType.sponsoredCard:
+        return NativeAdCard(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.videoCard:
+        return VideoAdCard(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+
+      case AdPresentationType.interstitial:
+      case AdPresentationType.fullScreen:
+      case AdPresentationType.unsupported:
+        // Interstitials/full-screen are screen-transition ads shown via showInterstitialAd
+        // For inline feed presentation, fallback gracefully to native card or banner
+        return NativeAdCard(
+          ad: ad,
+          placementZone: placementZone,
+          exposureKey: exposureKey,
+        );
+    }
+  }
+}

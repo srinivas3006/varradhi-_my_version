@@ -159,7 +159,11 @@ class AdManager extends ChangeNotifier {
   }
 
   /// Selects the best eligible ad from [pool] with anti-repetition rotation.
-  AdBanner? selectAd(List<AdBanner> pool, {String? preferType}) {
+  AdBanner? selectAd(
+    List<AdBanner> pool, {
+    String? preferType,
+    List<String>? excludeIds,
+  }) {
     if (pool.isEmpty) return null;
 
     // Filter to supported types
@@ -187,9 +191,11 @@ class AdManager extends ChangeNotifier {
 
     if (candidates.isEmpty) return null;
 
-    // 1. Pick an ad that has not been shown recently
+    final combinedRecent = <String>{..._recentAdIds, ...?excludeIds};
+
+    // 1. Pick an ad that has not been shown recently or assigned in this pass
     final unshown = candidates
-        .where((ad) => !_recentAdIds.contains(ad.id))
+        .where((ad) => !combinedRecent.contains(ad.id))
         .toList();
 
     if (unshown.isNotEmpty) {
@@ -198,12 +204,17 @@ class AdManager extends ChangeNotifier {
 
     // 2. If all candidates have been shown recently, pick the least recently shown
     // (i.e. Not the immediate last one)
-    if (candidates.length > 1 && _recentAdIds.isNotEmpty) {
-      final nonImmediate = candidates
-          .where((ad) => ad.id != _recentAdIds.last)
-          .toList();
-      if (nonImmediate.isNotEmpty) {
-        return nonImmediate.first;
+    if (candidates.length > 1 && combinedRecent.isNotEmpty) {
+      final lastId = (excludeIds != null && excludeIds.isNotEmpty)
+          ? excludeIds.last
+          : (_recentAdIds.isNotEmpty ? _recentAdIds.last : null);
+      if (lastId != null) {
+        final nonImmediate = candidates
+            .where((ad) => ad.id != lastId)
+            .toList();
+        if (nonImmediate.isNotEmpty) {
+          return nonImmediate.first;
+        }
       }
     }
 
@@ -255,6 +266,7 @@ class AdManager extends ChangeNotifier {
 
     int contentSinceLastAd = 0;
     int adSlotIndex = 0;
+    final inFeedAssignedAdIds = <String>[];
 
     for (int i = 0; i < contentItems.length; i++) {
       result.add(FeedPresentationItem<T>.content(
@@ -265,12 +277,13 @@ class AdManager extends ChangeNotifier {
 
       // Check if after minArticlesBeforeFirstAd and interval reached
       if (i >= (minArticlesBeforeFirstAd - 1) && contentSinceLastAd >= frequency) {
-        final ad = selectAd(adsPool);
+        final ad = selectAd(adsPool, excludeIds: inFeedAssignedAdIds);
         if (ad != null) {
           result.add(FeedPresentationItem<T>.ad(
             ad,
             stableKey: 'ad_${ad.id}_slot_$adSlotIndex',
           ));
+          inFeedAssignedAdIds.add(ad.id);
           adSlotIndex++;
           contentSinceLastAd = 0;
         }

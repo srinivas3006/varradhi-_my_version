@@ -2,17 +2,41 @@ import '../../models/ad_banner.dart';
 
 /// Presentation types supported by the Flutter client.
 enum AdPresentationType {
-  /// Native feed or list item card matching content card style
-  nativeCard,
-
-  /// Responsive banner strip (e.g. In articles or utility screens)
+  /// Responsive banner strip (16:5 or 16:4, 90-120dp)
   banner,
 
-  /// Video player card with poster, play-on-scroll, and audio controls
+  /// Square/box ad (1:1)
+  box,
+
+  /// Premium 3D interactive promotional ad (4:3 or 1:1, tilt/parallax)
+  threeD,
+
+  /// Full-screen transition ad (between pages)
+  interstitial,
+
+  /// Native card matching article card style (16:9 media)
+  nativeCard,
+
+  /// Video player card (16:9 video source with poster)
   videoCard,
 
-  /// Full-screen or modal interstitial overlay shown at natural breaks
-  interstitial,
+  /// Poster-style creative (4:5 or 9:16)
+  poster,
+
+  /// Sponsored card matching article card style
+  sponsoredCard,
+
+  /// Compact top ticker/strip (36-48dp)
+  breakingStrip,
+
+  /// Local business listing card (flexible layout for local sections)
+  localListing,
+
+  /// Full screen ad (similar to interstitial)
+  fullScreen,
+
+  /// Sticky bottom banner (56-80dp, fixed above bottom nav)
+  bottomSticky,
 
   /// Unsupported or unknown ad type to be skipped gracefully
   unsupported,
@@ -44,29 +68,87 @@ class AdTypeResolver {
   static AdPresentationType resolveType(String adType) {
     final normalized = adType.trim().toLowerCase();
     switch (normalized) {
+      case 'banner':
+        return AdPresentationType.banner;
+
+      case 'box':
+        return AdPresentationType.box;
+
+      case 'three_d':
+      case '3d':
+        return AdPresentationType.threeD;
+
+      case 'interstitial':
+        return AdPresentationType.interstitial;
+
+      case 'native':
+        return AdPresentationType.nativeCard;
+
       case 'video':
         return AdPresentationType.videoCard;
 
-      case 'native':
-      case 'sponsored_card':
       case 'poster':
-      case 'box':
-      case 'three_d':
-        return AdPresentationType.nativeCard;
+        return AdPresentationType.poster;
 
-      case 'banner':
-      case 'bottom_sticky':
+      case 'sponsored_card':
+        return AdPresentationType.sponsoredCard;
+
       case 'breaking_strip':
-      case 'local_listing':
-        return AdPresentationType.banner;
+        return AdPresentationType.breakingStrip;
 
-      case 'interstitial':
+      case 'local_listing':
+        return AdPresentationType.localListing;
+
       case 'full_screen':
-        return AdPresentationType.interstitial;
+        return AdPresentationType.fullScreen;
+
+      case 'bottom_sticky':
+        return AdPresentationType.bottomSticky;
 
       default:
-        // Graceful fallback for unexpected backend types
         return AdPresentationType.unsupported;
+    }
+  }
+
+  /// Recommended fixed aspect ratio for each ad type (width / height).
+  /// Null if sizing is defined by fixed height or full screen.
+  static double? getFixedAspectRatio(String adType) {
+    final presentation = resolveType(adType);
+    switch (presentation) {
+      case AdPresentationType.banner:
+        return 16 / 5; // 16:5 (or 16:4)
+      case AdPresentationType.box:
+        return 1.0; // 1:1
+      case AdPresentationType.threeD:
+        return 4 / 3; // 4:3 (or 1:1)
+      case AdPresentationType.nativeCard:
+      case AdPresentationType.sponsoredCard:
+        return 16 / 9; // Same as article card
+      case AdPresentationType.videoCard:
+        return 16 / 9; // 16:9
+      case AdPresentationType.poster:
+        return 4 / 5; // 4:5 (or 9:16)
+      case AdPresentationType.localListing:
+        return 16 / 7; // Flexible card layout
+      case AdPresentationType.interstitial:
+      case AdPresentationType.fullScreen:
+      case AdPresentationType.breakingStrip:
+      case AdPresentationType.bottomSticky:
+      case AdPresentationType.unsupported:
+        return null;
+    }
+  }
+
+  /// Recommended fixed height for strip and sticky banners in dp.
+  static double? getFixedHeight(String adType) {
+    final presentation = resolveType(adType);
+    switch (presentation) {
+      case AdPresentationType.breakingStrip:
+        return 42.0; // 36-48dp
+      case AdPresentationType.bottomSticky:
+        return 64.0; // 56-80dp
+      default:
+        return null;
     }
   }
 

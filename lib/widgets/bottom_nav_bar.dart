@@ -1,6 +1,8 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -26,13 +28,15 @@ class BottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark 
+    final bgColor = isDark
         ? AppColors.cardDarkSlate.withValues(alpha: 0.85)
         : Colors.white.withValues(alpha: 0.9);
 
     return AnimatedBuilder(
       animation: AppState.instance.themeAndLocaleNotifier,
       builder: (context, _) {
+        final postLabel = tr(_items[2].key);
+
         return Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.bottomCenter,
@@ -45,7 +49,9 @@ class BottomNavBar extends StatelessWidget {
                     color: bgColor,
                     border: Border(
                       top: BorderSide(
-                        color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black.withValues(alpha: 0.05),
                       ),
                     ),
                   ),
@@ -56,38 +62,45 @@ class BottomNavBar extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: List.generate(_items.length, (index) {
                           if (index == 2) {
-                            return const SizedBox(width: 70); // Space for FAB
+                            return const SizedBox(width: 70);
                           }
-                          
+
                           final item = _items[index];
                           final isActive = index == currentIndex;
-                          
+                          final itemLabel =
+                              (index == 1 && AppState.instance.displayLocation.isNotEmpty)
+                                  ? AppState.instance.displayLocation
+                                  : tr(item.key);
+
                           return Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                onTap(index);
-                              },
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  AnimatedScale(
-                                    scale: isActive ? 1.15 : 1.0,
-                                    duration: const Duration(milliseconds: 300),
-                                    curve: Curves.easeOutBack,
-                                    child: Icon(
-                                      item.icon,
-                                      size: 24,
-                                      color: isActive ? AppColors.primary : AppColors.textMuted,
-                                    ),
-                                  ),
-                                  Builder(
-                                    builder: (context) {
-                                      final itemLabel = (index == 1 && AppState.instance.displayLocation.isNotEmpty)
-                                          ? AppState.instance.displayLocation
-                                          : tr(item.key);
-                                      return Padding(
+                            child: Semantics(
+                              button: true,
+                              selected: isActive,
+                              label: itemLabel,
+                              child: Tooltip(
+                                message: itemLabel,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () {
+                                    HapticFeedback.selectionClick();
+                                    onTap(index);
+                                  },
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      AnimatedScale(
+                                        scale: isActive ? 1.15 : 1.0,
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOutBack,
+                                        child: Icon(
+                                          item.icon,
+                                          size: 24,
+                                          color: isActive
+                                              ? AppColors.primary
+                                              : AppColors.textMuted,
+                                        ),
+                                      ),
+                                      Padding(
                                         padding: const EdgeInsets.symmetric(horizontal: 2),
                                         child: Text(
                                           itemLabel,
@@ -96,15 +109,17 @@ class BottomNavBar extends StatelessWidget {
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
                                             fontSize: 10,
-                                            fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                                            color: isActive ? AppColors.primary : AppColors.textMuted,
+                                            fontWeight:
+                                                isActive ? FontWeight.w700 : FontWeight.w500,
+                                            color: isActive
+                                                ? AppColors.primary
+                                                : AppColors.textMuted,
                                           ),
                                         ),
-                                      );
-                                    },
+                                      ),
+                                    ],
                                   ),
-                                  // Removed bottom dot as requested for cleaner UI
-                                ],
+                                ),
                               ),
                             ),
                           );
@@ -115,41 +130,47 @@ class BottomNavBar extends StatelessWidget {
                 ),
               ),
             ),
-            
-            // Floating Center FAB
             Positioned(
               top: -20,
-              child: GestureDetector(
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  onTap(2);
-                },
-                child: Container(
-                  width: 54,
-                  height: 54,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      colors: [AppColors.primary, AppColors.primaryDark],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    border: Border.all(
-                      color: isDark ? AppColors.cardDarkSlate : Colors.white,
-                      width: 3,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.3),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+              child: Semantics(
+                button: true,
+                selected: currentIndex == 2,
+                label: postLabel,
+                child: Tooltip(
+                  message: postLabel,
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      onTap(2);
+                    },
+                    child: Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const LinearGradient(
+                          colors: [AppColors.primary, AppColors.primaryDark],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        border: Border.all(
+                          color: isDark ? AppColors.cardDarkSlate : Colors.white,
+                          width: 3,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.add_rounded,
-                    color: Colors.white,
-                    size: 28,
+                      child: const Icon(
+                        Icons.add_rounded,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
                   ),
                 ),
               ),

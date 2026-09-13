@@ -4,6 +4,13 @@
 
 $apkDir = "build\app\outputs\flutter-apk"
 $symbolsDir = "build\app\outputs\symbols"
+$keyProperties = "android\key.properties"
+
+if (!(Test-Path $keyProperties)) {
+    Write-Host "Missing Android release signing file: $keyProperties" -ForegroundColor Red
+    Write-Host "Create it with keyAlias, keyPassword, storeFile, and storePassword before building a Play Store release." -ForegroundColor Yellow
+    exit 1
+}
 
 if (Test-Path $apkDir) {
     Remove-Item "$apkDir\*.apk" -Force -ErrorAction SilentlyContinue

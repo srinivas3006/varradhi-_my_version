@@ -152,19 +152,35 @@ void main() {
   });
 
   group('AdTypeResolver Tests', () {
-    test('resolves native types to AdPresentationType.nativeCard', () {
+    test('resolves all 12 frontend ad types accurately', () {
+      expect(AdTypeResolver.resolveType('banner'), AdPresentationType.banner);
+      expect(AdTypeResolver.resolveType('box'), AdPresentationType.box);
+      expect(AdTypeResolver.resolveType('three_d'), AdPresentationType.threeD);
+      expect(AdTypeResolver.resolveType('interstitial'), AdPresentationType.interstitial);
       expect(AdTypeResolver.resolveType('native'), AdPresentationType.nativeCard);
-      expect(AdTypeResolver.resolveType('sponsored_card'), AdPresentationType.nativeCard);
-      expect(AdTypeResolver.resolveType('poster'), AdPresentationType.nativeCard);
-      expect(AdTypeResolver.resolveType('box'), AdPresentationType.nativeCard);
-      expect(AdTypeResolver.resolveType('three_d'), AdPresentationType.nativeCard);
+      expect(AdTypeResolver.resolveType('video'), AdPresentationType.videoCard);
+      expect(AdTypeResolver.resolveType('poster'), AdPresentationType.poster);
+      expect(AdTypeResolver.resolveType('sponsored_card'), AdPresentationType.sponsoredCard);
+      expect(AdTypeResolver.resolveType('breaking_strip'), AdPresentationType.breakingStrip);
+      expect(AdTypeResolver.resolveType('local_listing'), AdPresentationType.localListing);
+      expect(AdTypeResolver.resolveType('full_screen'), AdPresentationType.fullScreen);
+      expect(AdTypeResolver.resolveType('bottom_sticky'), AdPresentationType.bottomSticky);
     });
 
-    test('resolves banner types to AdPresentationType.banner', () {
-      expect(AdTypeResolver.resolveType('banner'), AdPresentationType.banner);
-      expect(AdTypeResolver.resolveType('bottom_sticky'), AdPresentationType.banner);
-      expect(AdTypeResolver.resolveType('breaking_strip'), AdPresentationType.banner);
-      expect(AdTypeResolver.resolveType('local_listing'), AdPresentationType.banner);
+    test('provides recommended fixed aspect ratios per ad type', () {
+      expect(AdTypeResolver.getFixedAspectRatio('banner'), 16 / 5);
+      expect(AdTypeResolver.getFixedAspectRatio('box'), 1.0);
+      expect(AdTypeResolver.getFixedAspectRatio('three_d'), 4 / 3);
+      expect(AdTypeResolver.getFixedAspectRatio('video'), 16 / 9);
+      expect(AdTypeResolver.getFixedAspectRatio('poster'), 4 / 5);
+      expect(AdTypeResolver.getFixedAspectRatio('native'), 16 / 9);
+      expect(AdTypeResolver.getFixedAspectRatio('sponsored_card'), 16 / 9);
+      expect(AdTypeResolver.getFixedAspectRatio('local_listing'), 16 / 7);
+    });
+
+    test('provides recommended fixed heights for strip and sticky banners', () {
+      expect(AdTypeResolver.getFixedHeight('breaking_strip'), 42.0);
+      expect(AdTypeResolver.getFixedHeight('bottom_sticky'), 64.0);
     });
 
     test('resolves video types to AdPresentationType.videoCard', () {
@@ -182,11 +198,6 @@ void main() {
         ctr: 0.0,
       );
       expect(AdTypeResolver.resolve(videoAd), AdPresentationType.videoCard);
-    });
-
-    test('resolves interstitial types to AdPresentationType.interstitial', () {
-      expect(AdTypeResolver.resolveType('interstitial'), AdPresentationType.interstitial);
-      expect(AdTypeResolver.resolveType('full_screen'), AdPresentationType.interstitial);
     });
 
     test('gracefully resolves unrecognized types to AdPresentationType.unsupported', () {

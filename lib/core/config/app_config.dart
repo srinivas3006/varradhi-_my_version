@@ -6,11 +6,11 @@ class AppConfig {
   static String get baseUrl {
     switch (environment) {
       case Environment.dev:
-        return 'https://incite-backend.onrender.com';
+        return 'https://api.vaaradhinews.com';
       case Environment.staging:
-        return 'https://incite-backend.onrender.com';
+        return 'https://api.vaaradhinews.com';
       case Environment.prod:
-        return 'https://incite-backend.onrender.com';
+        return 'https://api.vaaradhinews.com';
     }
   }
 

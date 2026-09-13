@@ -42,8 +42,12 @@ class NotificationDeepLinkResolver {
     if (scheme == 'varadhi') {
       // e.g. varadhi://category/education -> host = "category", pathSegments = ["education"]
       // e.g. varadhi:///category/education -> host = "", pathSegments = ["category", "education"]
-      final primaryType = host.isNotEmpty ? host : (segments.isNotEmpty ? segments[0].toLowerCase() : '');
-      final remainingSegments = host.isNotEmpty ? segments : (segments.length > 1 ? segments.sublist(1) : <String>[]);
+      final primaryType = host.isNotEmpty
+          ? host
+          : (segments.isNotEmpty ? segments[0].toLowerCase() : '');
+      final remainingSegments = host.isNotEmpty
+          ? segments
+          : (segments.length > 1 ? segments.sublist(1) : <String>[]);
 
       return _resolveSegments(
         type: primaryType,
@@ -56,7 +60,8 @@ class NotificationDeepLinkResolver {
 
     // 2. Handle scheme: "article://"
     if (scheme == 'article') {
-      final slug = host.isNotEmpty ? host : (segments.isNotEmpty ? segments[0] : null);
+      final slug =
+          host.isNotEmpty ? host : (segments.isNotEmpty ? segments[0] : null);
       if (slug != null && slug.isNotEmpty) {
         return NotificationTarget.article(
           slugOrId: slug,
@@ -68,7 +73,8 @@ class NotificationDeepLinkResolver {
 
     // 3. Handle scheme: "screen://"
     if (scheme == 'screen') {
-      final screen = host.isNotEmpty ? host : (segments.isNotEmpty ? segments[0] : null);
+      final screen =
+          host.isNotEmpty ? host : (segments.isNotEmpty ? segments[0] : null);
       if (screen != null && screen.isNotEmpty) {
         final requiresAuth = screen == 'profile' || screen == 'bookmarks';
         return NotificationTarget.screen(
@@ -107,7 +113,8 @@ class NotificationDeepLinkResolver {
       return NotificationTarget.unknown(originalPayload: data);
     }
 
-    final notificationId = data['notification_id']?.toString() ?? data['id']?.toString();
+    final notificationId =
+        data['notification_id']?.toString() ?? data['id']?.toString();
     final deepLink = data['deep_link']?.toString();
 
     // 1. If explicit deep_link is present, prioritize it
@@ -129,8 +136,11 @@ class NotificationDeepLinkResolver {
     final categorySlug = data['category_slug']?.toString();
 
     // Category target
-    if (contentType == 'category' || (categorySlug != null && categorySlug.isNotEmpty)) {
-      final cat = (categorySlug != null && categorySlug.isNotEmpty) ? categorySlug : contentSlug;
+    if (contentType == 'category' ||
+        (categorySlug != null && categorySlug.isNotEmpty)) {
+      final cat = (categorySlug != null && categorySlug.isNotEmpty)
+          ? categorySlug
+          : contentSlug;
       if (cat != null && cat.isNotEmpty) {
         return NotificationTarget.category(
           categorySlug: cat,
@@ -141,8 +151,12 @@ class NotificationDeepLinkResolver {
     }
 
     // Article target
-    if (contentType == 'article' || contentType == 'quote' || contentType == 'breaking') {
-      final slug = (contentSlug != null && contentSlug.isNotEmpty) ? contentSlug : contentId;
+    if (contentType == 'article' ||
+        contentType == 'quote' ||
+        contentType == 'breaking') {
+      final slug = (contentSlug != null && contentSlug.isNotEmpty)
+          ? contentSlug
+          : contentId;
       if (slug != null && slug.isNotEmpty) {
         return NotificationTarget.article(
           slugOrId: slug,
@@ -154,7 +168,8 @@ class NotificationDeepLinkResolver {
 
     // Poster target
     if (contentType == 'poster') {
-      final pId = (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      final pId =
+          (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
       if (pId != null && pId.isNotEmpty) {
         return NotificationTarget.poster(
           posterId: pId,
@@ -166,11 +181,12 @@ class NotificationDeepLinkResolver {
 
     // UGC target
     if (contentType == 'ugc') {
-      final uId = (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      final uId =
+          (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
       return NotificationTarget.ugc(
         submissionId: uId,
         notificationId: notificationId,
-        requiresAuth: true,
+        requiresAuth: false,
         originalPayload: data,
       );
     }
@@ -179,8 +195,10 @@ class NotificationDeepLinkResolver {
   }
 
   /// Resolves an [AppNotification] domain model from the inbox.
-  static NotificationTarget resolveFromAppNotification(AppNotification notification) {
-    if (notification.deepLink != null && notification.deepLink!.trim().isNotEmpty) {
+  static NotificationTarget resolveFromAppNotification(
+      AppNotification notification) {
+    if (notification.deepLink != null &&
+        notification.deepLink!.trim().isNotEmpty) {
       final target = resolveFromUri(
         notification.deepLink,
         notificationId: notification.notificationId ?? notification.id,
@@ -245,7 +263,9 @@ class NotificationDeepLinkResolver {
         String? action;
         String? id;
         if (segments.isNotEmpty) {
-          if (segments[0] == 'reporter' && segments.length > 1 && segments[1] == 'dashboard') {
+          if (segments[0] == 'reporter' &&
+              segments.length > 1 &&
+              segments[1] == 'dashboard') {
             action = 'dashboard';
           } else if (segments[0] == 'submit') {
             action = 'submit';
@@ -257,7 +277,7 @@ class NotificationDeepLinkResolver {
           submissionId: id,
           action: action,
           notificationId: notificationId,
-          requiresAuth: true,
+          requiresAuth: action != null,
           originalPayload: originalPayload,
         );
 

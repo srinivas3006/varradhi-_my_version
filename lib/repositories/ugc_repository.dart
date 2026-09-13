@@ -13,7 +13,8 @@ import '../services/api_service.dart';
 /// - Submission data retrieval
 /// - Safe error handling
 class UgcRepository {
-  UgcRepository({ApiClient? apiClient}) : _api = apiClient ?? ApiClient.instance;
+  UgcRepository({ApiClient? apiClient})
+      : _api = apiClient ?? ApiClient.instance;
 
   static final UgcRepository instance = UgcRepository();
 
@@ -24,15 +25,26 @@ class UgcRepository {
   Future<ApiResponse<List<NewsArticle>>> getUgcFeed({
     String? cursor,
     int pageSize = 20,
+    String? state,
+    String? district,
+    String? subdistrict,
+    String? village,
+    String? scope,
   }) async {
     try {
       final response = await ApiService.instance.getUgcFeed(
         cursor: cursor,
         pageSize: pageSize,
+        state: state,
+        district: district,
+        subdistrict: subdistrict,
+        village: village,
+        scope: scope,
       );
 
       final unifiedItems = response.data ?? [];
-      final articles = unifiedItems.map((u) => _mapUnifiedToArticle(u)).toList();
+      final articles =
+          unifiedItems.map((u) => _mapUnifiedToArticle(u)).toList();
 
       return ApiResponse<List<NewsArticle>>(
         data: articles,
@@ -56,10 +68,17 @@ class UgcRepository {
         ? u.title
         : (u.summary.isNotEmpty ? u.summary : 'Citizen Report');
 
-    final primaryImage = u.thumbnailUrl.isNotEmpty ? u.thumbnailUrl : u.mediaUrl;
+    final primaryImage =
+        u.thumbnailUrl.isNotEmpty ? u.thumbnailUrl : u.mediaUrl;
+    final mediaType =
+        u.metadata['media_type']?.toString().trim().toLowerCase() ?? '';
+    final isVideo = mediaType == 'video' ||
+        u.mediaUrl.toLowerCase().endsWith('.mp4') ||
+        u.mediaUrl.contains('youtube.com') ||
+        u.mediaUrl.contains('youtu.be');
     final images = [
       if (u.thumbnailUrl.isNotEmpty) u.thumbnailUrl,
-      if (u.mediaUrl.isNotEmpty) u.mediaUrl,
+      if (!isVideo && u.mediaUrl.isNotEmpty) u.mediaUrl,
     ];
 
     return NewsArticle(
@@ -82,6 +101,10 @@ class UgcRepository {
       district: u.district.isNotEmpty ? u.district : null,
       subdistrict: u.subdistrict.isNotEmpty ? u.subdistrict : null,
       village: u.village.isNotEmpty ? u.village : null,
+      coverageLevel: 'local',
+      contentKind: 'ugc',
+      mediaType: isVideo ? 'video' : 'image',
+      videoUrl: isVideo ? u.mediaUrl : '',
     );
   }
 
@@ -93,7 +116,8 @@ class UgcRepository {
       rethrow;
     } catch (e) {
       debugPrint('[UgcRepository] Error submitting UGC post: $e');
-      throw ApiException('వార్తను సమర్పించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
+      throw ApiException(
+          'వార్తను సమర్పించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }
   }
 
@@ -121,7 +145,8 @@ class UgcRepository {
       rethrow;
     } catch (e) {
       debugPrint('[UgcRepository] Error uploading media: $e');
-      throw ApiException('మీడియాను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
+      throw ApiException(
+          'మీడియాను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }
   }
 
@@ -149,7 +174,8 @@ class UgcRepository {
       rethrow;
     } catch (e) {
       debugPrint('[UgcRepository] Error uploading media batch: $e');
-      throw ApiException('మీడియా ఫైళ్లను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
+      throw ApiException(
+          'మీడియా ఫైళ్లను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }
   }
 }

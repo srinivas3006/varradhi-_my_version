@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../core/navigation/app_navigator.dart';
+import '../localization/app_translations.dart';
 import '../services/api_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -7,7 +7,6 @@ import 'account_login_screen.dart';
 import 'preferences_screen.dart';
 import 'notification_settings_screen.dart';
 import 'cms_page_screen.dart';
-import 'language_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -69,7 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () => Navigator.pop(context),
             ),
             title: Text(
-              'Settings',
+              tr('settings'),
               style: TextStyle(
                 color: isDark ? Colors.white : Colors.black87,
                 fontWeight: FontWeight.bold,
@@ -81,7 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               // 1. Account Section
-              _buildSectionTitle('ACCOUNT', isDark),
+              _buildSectionTitle(tr('account'), isDark),
               if (state.isLoggedIn) ...[
                 _buildCard(
                   isDark,
@@ -93,11 +92,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: const Icon(Icons.person_rounded, color: AppColors.primary),
                         ),
                         title: Text(
-                          state.userName.isNotEmpty ? state.userName : 'Subscriber',
+                          state.userName.isNotEmpty ? state.userName : tr('subscriber'),
                           style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
                         ),
                         subtitle: Text(
-                          state.userEmail ?? (state.userPhone.isNotEmpty ? state.userPhone : 'Logged In'),
+                          state.userEmail ?? (state.userPhone.isNotEmpty ? state.userPhone : tr('logged_in')),
                           style: TextStyle(color: isDark ? Colors.white54 : Colors.black54),
                         ),
                         trailing: IconButton(
@@ -113,8 +112,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   isDark,
                   child: ListTile(
                     leading: const Icon(Icons.account_circle_outlined, color: AppColors.primary, size: 36),
-                    title: Text('Sign In or Register', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
-                    subtitle: Text('Sync bookmarks, preferences, and notifications', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
+                    title: Text(tr('sign_in_or_register'), style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                    subtitle: Text(tr('sign_in_sync_sub'), style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
                     trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                     onTap: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
@@ -125,7 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 20),
 
               // 2. Preferences Section
-              _buildSectionTitle('CONTENT & DISPLAY', isDark),
+              _buildSectionTitle(tr('content_display'), isDark),
               _buildCard(
                 isDark,
                 child: Column(
@@ -133,15 +132,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     // Theme Selector
                     ListTile(
                       leading: const Icon(Icons.brightness_6_rounded, color: AppColors.primary),
-                      title: Text('Theme', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      title: Text(tr('theme'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: DropdownButton<ThemeMode>(
                         value: state.themeMode,
                         underline: const SizedBox.shrink(),
                         dropdownColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                         items: const [
-                          DropdownMenuItem(value: ThemeMode.system, child: Text('System')),
-                          DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
-                          DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+                          DropdownMenuItem(value: ThemeMode.system, child: Text('సిస్టమ్')),
+                          DropdownMenuItem(value: ThemeMode.light, child: Text('లైట్')),
+                          DropdownMenuItem(value: ThemeMode.dark, child: Text('డార్క్')),
                         ],
                         onChanged: (newMode) {
                           if (newMode != null) {
@@ -157,20 +156,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     // App Language
                     ListTile(
                       leading: const Icon(Icons.language_rounded, color: AppColors.primary),
-                      title: Text('App Language', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
-                      subtitle: Text(AppState.instance.language, style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
-                      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-                      onTap: () {
-                        AppNavigator.pushSafe(context, MaterialPageRoute(builder: (_) => const LanguageScreen()));
-                      },
+                      title: Text(tr('app_language'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      subtitle: Text(tr('telugu'), style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                      trailing: const Icon(Icons.check_circle_rounded, color: AppColors.primary),
                     ),
                     const Divider(height: 1),
 
                     // News Category Preferences
                     ListTile(
                       leading: const Icon(Icons.tune_rounded, color: AppColors.primary),
-                      title: Text('Category Preferences', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
-                      subtitle: Text('Personalize topics in your feed', style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                      title: Text(tr('category_preferences'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      subtitle: Text(tr('category_preferences_sub'), style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen()));
@@ -181,8 +177,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     // Notification Settings
                     ListTile(
                       leading: const Icon(Icons.notifications_none_rounded, color: AppColors.primary),
-                      title: Text('Push Notifications', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
-                      subtitle: Text('Manage alert frequency & categories', style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                      title: Text(tr('push_notifications'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      subtitle: Text(tr('notification_preferences_sub'), style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()));
@@ -199,7 +195,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Reading Font Size', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                              Text(tr('reading_font_size'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                               Text('${_fontSize.round()} pt', style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
                             ],
                           ),
@@ -225,44 +221,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 20),
 
               // 3. About & Policies (CMS Pages)
-              _buildSectionTitle('ABOUT & POLICIES', isDark),
+              _buildSectionTitle(tr('about_policies'), isDark),
               _buildCard(
                 isDark,
                 child: Column(
                   children: [
                     ListTile(
                       leading: const Icon(Icons.info_outline_rounded, color: AppColors.primary),
-                      title: Text('About Varadhi', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      title: Text(tr('about_varadhi'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const CMSPageScreen(slug: 'about', initialTitle: 'About Varadhi')));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'about', initialTitle: tr('about_varadhi'))));
                       },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.primary),
-                      title: Text('Privacy Policy', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      title: Text(tr('privacy_policy'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const CMSPageScreen(slug: 'privacy-policy', initialTitle: 'Privacy Policy')));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'privacy-policy', initialTitle: tr('privacy_policy'))));
                       },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.description_outlined, color: AppColors.primary),
-                      title: Text('Terms of Service', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      title: Text(tr('terms_of_service'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const CMSPageScreen(slug: 'terms', initialTitle: 'Terms of Service')));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'terms', initialTitle: tr('terms_of_service'))));
                       },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.support_agent_rounded, color: AppColors.primary),
-                      title: Text('Contact Us', style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
+                      title: Text(tr('contact_us'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => const CMSPageScreen(slug: 'contact', initialTitle: 'Contact Us')));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'contact', initialTitle: tr('contact_us'))));
                       },
                     ),
                   ],
@@ -276,7 +272,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   isDark,
                   child: ListTile(
                     leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                    title: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                    title: Text(tr('log_out'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
                     onTap: () {
                       _showLogoutDialog(context, state, isDark);
                     },
@@ -288,7 +284,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // Version info footer
               Center(
                 child: Text(
-                  'Varadhi News v1.0.0 (Build 2026.09)',
+                  tr('app_version'),
                   style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
                 ),
               ),
@@ -345,18 +341,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Edit Profile Name'),
+        title: Text(tr('edit_profile_name')),
         content: TextField(
           controller: _nameController,
           decoration: const InputDecoration(
-            hintText: 'Enter your full name',
+            hintText: tr('full_name_hint'),
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
@@ -368,7 +364,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }
               Navigator.pop(ctx);
             },
-            child: const Text('Save'),
+            child: Text(tr('save')),
           ),
         ],
       ),
@@ -381,12 +377,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Log Out'),
-        content: const Text('Are you sure you want to log out of your account?'),
+        title: Text(tr('log_out')),
+        content: Text(tr('logout_confirm')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
@@ -394,7 +390,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Navigator.pop(ctx);
               state.logout();
             },
-            child: const Text('Log Out'),
+            child: Text(tr('log_out')),
           ),
         ],
       ),

@@ -453,7 +453,7 @@ class FeedRepository {
       queryParameters: {
         if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
         'page_size': pageSize,
-        if (scope != null && scope == 'local') 'scope': 'local',
+        if (scope != null && scope.isNotEmpty) 'scope': scope,
         'lang': effectiveLang,
         if (category != null && category.isNotEmpty && category != 'For You' && category != 'Trending')
           'category': category.toLowerCase(),

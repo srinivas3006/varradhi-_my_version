@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/news_article.dart';
+import '../localization/app_translations.dart';
 import '../services/api_service.dart';
 import '../widgets/news_feed_card.dart';
 import 'news_detail_screen.dart';
@@ -50,7 +51,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to load saved articles.';
+          _error = tr('saved_load_failed');
           _isLoading = false;
         });
       }
@@ -73,7 +74,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Saved Articles',
+          tr('saved_articles'),
           style: TextStyle(
             color: isDark ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
@@ -96,7 +97,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               Icon(Icons.bookmark_border_rounded, size: 72, color: isDark ? Colors.white24 : Colors.black26),
               const SizedBox(height: 16),
               Text(
-                'Sign in to view saved articles',
+                tr('sign_in_saved'),
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -105,7 +106,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Save articles from the feed or detail screens to read them later anytime.',
+                tr('sign_in_saved_sub'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -129,7 +130,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('Sign In / Register', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: Text(tr('sign_in_register'), style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -156,7 +157,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Retry'),
+              child: Text(tr('retry')),
             ),
           ],
         ),
@@ -178,7 +179,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   Icon(Icons.bookmarks_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
                   const SizedBox(height: 16),
                   Text(
-                    'No saved articles yet',
+                    tr('no_saved_articles'),
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -187,7 +188,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Tap the bookmark icon on any article to save it here.',
+                    tr('no_saved_articles_sub'),
                     style: TextStyle(
                       fontSize: 14,
                       color: isDark ? Colors.white38 : Colors.black38,
@@ -229,7 +230,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 if (mounted) {
                   AppState.instance.toggleBookmark(article.id); // revert
                   messenger.showSnackBar(
-                    const SnackBar(content: Text('Failed to update bookmark')),
+                    SnackBar(content: Text(tr('bookmark_update_failed'))),
                   );
                 }
               } else if (!AppState.instance.isBookmarked(article.id)) {

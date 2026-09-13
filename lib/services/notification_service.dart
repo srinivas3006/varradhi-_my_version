@@ -8,6 +8,7 @@ import '../core/navigation/app_navigator.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../core/navigation/notification_navigation_gate.dart';
 import '../models/notification_target.dart';
+import '../models/news_article.dart';
 import '../repositories/news_article_repository.dart';
 import '../screens/account_login_screen.dart';
 import '../screens/bookmarks_screen.dart';
@@ -18,6 +19,7 @@ import '../screens/news_detail_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/poster_detail_screen.dart';
+import '../screens/ugc_feed_screen.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'api_service.dart';
@@ -68,7 +70,8 @@ class NotificationService {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('Foreground FCM message: ${message.messageId}');
         final data = message.data;
-        final notificationId = data['notification_id']?.toString() ?? message.messageId;
+        final notificationId =
+            data['notification_id']?.toString() ?? message.messageId;
 
         // Deduplicate foreground notifications
         if (notificationId != null) {
@@ -79,8 +82,11 @@ class NotificationService {
           }
         }
 
-        final title = message.notification?.title ?? data['title']?.toString() ?? 'New Notification';
-        final body = message.notification?.body ?? data['body']?.toString() ?? '';
+        final title = message.notification?.title ??
+            data['title']?.toString() ??
+            'New Notification';
+        final body =
+            message.notification?.body ?? data['body']?.toString() ?? '';
 
         messengerKey.currentState?.showSnackBar(
           SnackBar(
@@ -95,7 +101,8 @@ class NotificationService {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   if (body.isNotEmpty) ...[
                     const SizedBox(height: 2),
@@ -122,8 +129,10 @@ class NotificationService {
       // 4. Terminated state launch handler: store in navigation gate
       final initialMessage = await messaging.getInitialMessage();
       if (initialMessage != null) {
-        debugPrint('Initial notification on launch: ${initialMessage.messageId}');
-        final target = NotificationDeepLinkResolver.resolveFromPayload(initialMessage.data);
+        debugPrint(
+            'Initial notification on launch: ${initialMessage.messageId}');
+        final target = NotificationDeepLinkResolver.resolveFromPayload(
+            initialMessage.data);
         if (target.type != NotificationTargetType.unknown) {
           NotificationNavigationGate.instance.setPendingTarget(target);
         }
@@ -140,15 +149,18 @@ class NotificationService {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final alreadyRequested = prefs.getBool('hasRequestedNotificationPermission') ?? false;
+      final alreadyRequested =
+          prefs.getBool('hasRequestedNotificationPermission') ?? false;
       if (alreadyRequested || _permissionRequested) return;
 
       final messaging = FirebaseMessaging.instance;
       final currentSettings = await messaging.getNotificationSettings();
 
       // If user has already granted or determined permission, don't re-prompt
-      if (currentSettings.authorizationStatus == AuthorizationStatus.authorized ||
-          currentSettings.authorizationStatus == AuthorizationStatus.provisional ||
+      if (currentSettings.authorizationStatus ==
+              AuthorizationStatus.authorized ||
+          currentSettings.authorizationStatus ==
+              AuthorizationStatus.provisional ||
           currentSettings.authorizationStatus == AuthorizationStatus.denied) {
         _permissionRequested = true;
         await prefs.setBool('hasRequestedNotificationPermission', true);
@@ -170,7 +182,8 @@ class NotificationService {
         badge: true,
         sound: true,
       );
-      debugPrint('User notification permission status: ${settings.authorizationStatus}');
+      debugPrint(
+          'User notification permission status: ${settings.authorizationStatus}');
 
       final token = await messaging.getToken();
       if (token != null) {
@@ -211,7 +224,8 @@ class NotificationService {
 
     final target = NotificationDeepLinkResolver.resolveFromPayload(data);
     if (target.type == NotificationTargetType.unknown) {
-      debugPrint('[NotificationService] Unrecognized notification payload: $data');
+      debugPrint(
+          '[NotificationService] Unrecognized notification payload: $data');
       return;
     }
 
@@ -238,7 +252,9 @@ class NotificationService {
     // Mark as read asynchronously on backend if notification ID is available
     if (target.notificationId != null && target.notificationId!.isNotEmpty) {
       unawaited(
-        ApiService.instance.markNotificationRead(target.notificationId!).catchError((_) => false),
+        ApiService.instance
+            .markNotificationRead(target.notificationId!)
+            .catchError((_) => false),
       );
     }
 
@@ -263,12 +279,14 @@ class NotificationService {
           final slug = target.identifier;
           if (slug != null && slug.isNotEmpty) {
             try {
-              final article = await NewsArticleRepository.instance.getDetail(slug);
+              final article =
+                  await NewsArticleRepository.instance.getDetail(slug);
               if (navContext.mounted) {
                 AppNavigator.pushSafe(
                   navContext,
                   MaterialPageRoute(
-                    builder: (_) => NewsDetailScreen(article: article, slug: slug),
+                    builder: (_) =>
+                        NewsDetailScreen(article: article, slug: slug),
                   ),
                 );
               }
@@ -287,7 +305,9 @@ class NotificationService {
 
         case NotificationTargetType.category:
           final categorySlug = target.identifier;
-          if (categorySlug != null && categorySlug.isNotEmpty && navContext.mounted) {
+          if (categorySlug != null &&
+              categorySlug.isNotEmpty &&
+              navContext.mounted) {
             final categoryName = categorySlug.length > 1
                 ? '${categorySlug[0].toUpperCase()}${categorySlug.substring(1)}'
                 : categorySlug.toUpperCase();
@@ -320,7 +340,8 @@ class NotificationService {
               if (navContext.mounted) {
                 AppNavigator.pushSafe(
                   navContext,
-                  MaterialPageRoute(builder: (_) => PosterDetailScreen(poster: poster)),
+                  MaterialPageRoute(
+                      builder: (_) => PosterDetailScreen(poster: poster)),
                 );
               }
             } catch (_) {
@@ -347,30 +368,22 @@ class NotificationService {
               navContext,
               MaterialPageRoute(builder: (_) => const CreatePostScreen()),
             );
-          } else if (target.identifier != null && target.identifier!.isNotEmpty) {
-            try {
-              final article = await NewsArticleRepository.instance.getDetail(target.identifier!);
-              if (navContext.mounted) {
-                AppNavigator.pushSafe(
-                  navContext,
-                  MaterialPageRoute(
-                    builder: (_) => NewsDetailScreen(
-                      article: article,
-                      slug: target.identifier!,
-                    ),
-                  ),
-                );
-              }
-            } catch (_) {
-              if (navContext.mounted) {
-                ScaffoldMessenger.of(navContext).showSnackBar(
-                  const SnackBar(
-                    content: Text('This update is no longer available.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
-            }
+          } else if (target.identifier != null &&
+              target.identifier!.isNotEmpty) {
+            final article = _ugcArticleFromTarget(target);
+            AppNavigator.pushSafe(
+              navContext,
+              MaterialPageRoute(
+                builder: (_) => article != null
+                    ? NewsDetailScreen(article: article)
+                    : const UgcFeedScreen(),
+              ),
+            );
+          } else {
+            AppNavigator.pushSafe(
+              navContext,
+              MaterialPageRoute(builder: (_) => const UgcFeedScreen()),
+            );
           }
           break;
 
@@ -391,20 +404,53 @@ class NotificationService {
             case 'settings':
               AppNavigator.pushSafe(
                 navContext,
-                MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+                MaterialPageRoute(
+                    builder: (_) => const NotificationSettingsScreen()),
               );
               break;
             default:
-              debugPrint('[NotificationService] Unhandled screen target: ${target.screenName}');
+              debugPrint(
+                  '[NotificationService] Unhandled screen target: ${target.screenName}');
           }
           break;
 
         case NotificationTargetType.unknown:
-          debugPrint('[NotificationService] Unknown notification target: $target');
+          debugPrint(
+              '[NotificationService] Unknown notification target: $target');
           break;
       }
     } catch (e) {
       debugPrint('[NotificationService] Error routing notification target: $e');
     }
+  }
+
+  NewsArticle? _ugcArticleFromTarget(NotificationTarget target) {
+    final payload = target.originalPayload;
+    if (payload == null) return null;
+
+    final title = (payload['title'] ?? payload['notification_title'])
+            ?.toString()
+            .trim() ??
+        '';
+    final summary = (payload['summary'] ??
+                payload['message'] ??
+                payload['body'] ??
+                payload['description'])
+            ?.toString()
+            .trim() ??
+        '';
+    if (title.isEmpty && summary.isEmpty) return null;
+
+    return NewsArticle.fromJson({
+      ...payload,
+      'id': target.identifier ?? payload['content_id'] ?? '',
+      'title': title.isNotEmpty ? title : 'Citizen report',
+      'summary': summary,
+      'content': summary,
+      'thumbnail_url': payload['thumbnail_url'] ?? payload['image_url'] ?? '',
+      'feed_item_type': 'ugc',
+      'category': 'UGC',
+      'published_at': payload['published_at'] ?? payload['created_at'],
+    });
   }
 }

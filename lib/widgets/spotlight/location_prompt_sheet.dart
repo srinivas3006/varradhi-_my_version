@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../../services/location_service.dart';
-import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
+import '../../screens/location_selection_screen.dart';
 
 class LocationPromptSheet extends StatefulWidget {
   const LocationPromptSheet({super.key});
@@ -38,12 +38,24 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
 
     try {
       final deviceLocation = await LocationService.detectLocation();
-      try {
-        await ApiService.instance.resolveAndSyncCanonicalLocation(deviceLocation);
-      } catch (e) {
-        debugPrint('Location canonical sync error: $e');
-        AppState.instance.setDeviceLocation(deviceLocation);
+      final match =
+          await ApiService.instance.resolveCanonicalLocation(deviceLocation);
+      final confirmed = await LocationService.showCanonicalConfirmation(
+        context,
+        match,
+      );
+      if (!confirmed || !mounted) {
+        setState(() => _isLoading = false);
+        final changed = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const LocationSelectionScreen(),
+          ),
+        );
+        if (changed == true && mounted) Navigator.pop(context, true);
+        return;
       }
+      await ApiService.instance.applyCanonicalLocation(match);
 
       if (mounted) {
         Navigator.pop(context, true);
@@ -62,7 +74,8 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
       _rippleController.duration = const Duration(milliseconds: 1500);
       _rippleController.repeat();
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
     // We do NOT pop here. Let them try again or manually decline.
   }
 
@@ -95,7 +108,7 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            
+
             // Animated Radar Icon
             SizedBox(
               width: 120,
@@ -130,25 +143,31 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
                         ),
                       ],
                     ),
-                    child: const Icon(Icons.location_on_rounded, color: Colors.white, size: 32),
+                    child: const Icon(Icons.location_on_rounded,
+                        color: Colors.white, size: 32),
                   ),
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 24),
             const Text(
               'మీ ప్రాంత వార్తలు కావాలా?',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textDark, letterSpacing: -0.5),
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textDark,
+                  letterSpacing: -0.5),
             ),
             const SizedBox(height: 8),
             const Text(
               'మీ గ్రామం, మండలం మరియు జిల్లా తాజా వార్తలను ఎప్పటికప్పుడు పొందడానికి లొకేషన్ అనుమతిని ఇవ్వండి.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 14.5, height: 1.4),
+              style: TextStyle(
+                  color: AppColors.textMuted, fontSize: 14.5, height: 1.4),
             ),
             const SizedBox(height: 32),
-            
+
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -156,7 +175,8 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
                 onPressed: _isLoading ? null : _detectLocation,
@@ -164,18 +184,27 @@ class _LocationPromptSheetState extends State<LocationPromptSheet>
                     ? const SizedBox(
                         height: 24,
                         width: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: Colors.white),
                       )
-                    : const Text('అనుమతించండి (Allow)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                    : const Text('అనుమతించండి (Allow)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 16)),
               ),
             ),
             const SizedBox(height: 12),
             TextButton(
-              onPressed: _isLoading ? null : () => Navigator.pop(context, false),
+              onPressed:
+                  _isLoading ? null : () => Navigator.pop(context, false),
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
               ),
-              child: const Text('ప్రస్తుతానికి వద్దు (Maybe Later)', style: TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 15)),
+              child: const Text('ప్రస్తుతానికి వద్దు (Maybe Later)',
+                  style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15)),
             ),
           ],
         ),

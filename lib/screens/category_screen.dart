@@ -7,7 +7,7 @@ import '../state/app_state.dart';
 import 'news_detail_screen.dart';
 
 /// Screen 08: CategoryScreen
-/// - API: GET /api/v1/articles/feed/?category={category_slug}&state=...&district=...&city=...&lang=te
+/// - API: GET /api/v1/articles/feed/?category={category_slug}&state=...&district=...&city=...&lang=...
 /// - For local category: scope=local
 /// - Destination: NewsDetailScreen (ArticleDetailScreen)
 class CategoryScreen extends StatefulWidget {
@@ -33,6 +33,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _nextCursor;
   bool _hasMore = true;
   String? _error;
+  String get _feedLang => AppState.instance.contentLanguage;
 
   @override
   void initState() {
@@ -55,7 +56,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         city: AppState.instance.city,
         subdistrict: AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null,
         village: AppState.instance.village.isNotEmpty ? AppState.instance.village : null,
-        lang: 'te',
+        lang: _feedLang,
         pageSize: 20,
       );
 
@@ -89,7 +90,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         city: AppState.instance.city,
         subdistrict: AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null,
         village: AppState.instance.village.isNotEmpty ? AppState.instance.village : null,
-        lang: 'te',
+        lang: _feedLang,
         cursor: _nextCursor,
         pageSize: 20,
       );
@@ -102,6 +103,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _hasMore = response.nextCursor != null;
       });
     } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load more stories. Please try again.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }

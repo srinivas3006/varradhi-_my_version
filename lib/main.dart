@@ -5,11 +5,13 @@ import 'package:flutter/services.dart';
 import 'core/navigation/app_navigator_observer.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_service.dart';
+import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
 
-final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
@@ -44,7 +46,7 @@ void main() async {
     }
     return ErrorWidget(details.exception);
   };
-  
+
   // Set preferred orientations
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -55,6 +57,7 @@ void main() async {
     messengerKey: scaffoldMessengerKey,
     navigatorKey: navigatorKey,
   );
+  await DeepLinkService.instance.init();
 
   await AppState.instance.init();
 
