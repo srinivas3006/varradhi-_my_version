@@ -1,4 +1,4 @@
-# Varradhi (DailyBuzz) — Way2News-Style Mobile Application
+# Varradhi (DailyBuzz) — Mobile Application
 
 A production-grade, full-featured Telugu & English news aggregation and citizen journalism platform built with Flutter. Wired to live REST APIs with realistic fallbacks, offline caching, and responsive interactions.
 
