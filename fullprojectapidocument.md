@@ -1,42 +1,26 @@
-# VARADHI Complete Frontend API Documentation
+# VARADHI Backend API and Flutter APK Integration Handoff
 
-Generated from `openapi-schema.yml`, Django URL routes, DRF views, serializers, permissions, and the unified renderer.
+Last verified from backend source: 2026-09-04
 
-## 1. Overview
-
-Base URL:
+Production base URL:
 
 ```text
-https://<api-host>/api/v1
+https://api.vaaradhinews.com
 ```
 
-Admin API base:
+Development base URL:
 
 ```text
-https://<api-host>/admin/api
+https://varadhiadmin.netlify.app
 ```
 
-API version: `v1`
+This document is the implementation contract for the Flutter APK. It documents the current backend as implemented in this repository. It does not document planned APIs as if they already exist.
 
-Authentication:
+## 1. Global API Contract
 
-```http
-Authorization: Bearer <access_token>
-Content-Type: application/json
-```
+All API responses are wrapped by the backend renderer.
 
-Access labels used in this document:
-
-| Label | Meaning |
-| --- | --- |
-| PUBLIC | No login required. |
-| OPTIONAL AUTH | Works without login; token may add personalized fields. |
-| PRIVATE | JWT login required. |
-| REPORTER | JWT login required; data is scoped to the logged-in reporter/user. |
-| ADMIN | Staff/admin/superuser access required. |
-| INTERNAL | Operational endpoint; not for normal app UI. |
-
-Runtime response envelope:
+Success response:
 
 ```json
 {
@@ -46,21 +30,31 @@ Runtime response envelope:
 }
 ```
 
-Paginated runtime response:
+List response without pagination:
+
+```json
+{
+  "data": [],
+  "meta": {},
+  "errors": null
+}
+```
+
+Paginated response:
 
 ```json
 {
   "data": [],
   "meta": {
-    "count": 0,
-    "next": null,
+    "count": 20,
+    "next": "https://api.vaaradhinews.com/api/v1/articles/feed/?cursor=...",
     "previous": null
   },
   "errors": null
 }
 ```
 
-Runtime error response:
+Error response:
 
 ```json
 {
@@ -68,33 +62,1912 @@ Runtime error response:
   "meta": {},
   "errors": {
     "code": 400,
-    "message": "Validation error",
+    "message": "Search keyword is required.",
     "details": {
-      "field": ["This field is required."]
+      "q": "Search keyword is required."
     }
   }
 }
 ```
 
-Contract warning: the requested documentation example showed `errors` as an array. The actual backend renderer returns `errors` as an object with `code`, `message`, and `details`.
+Important frontend rule:
 
-Pagination:
+- Always read real payload from `data`.
+- Always read pagination from `meta.next` and `meta.previous`.
+- Always show API errors from `errors.message`.
+- Use `errors.details` only for field-level form errors.
+- Do not expect a top-level `success` field. The backend does not return it.
 
-Most list APIs use cursor-style pagination when the view returns `results`, `next`, and `previous`. The unified renderer lifts those values into `meta`. Frontend should load the next page by calling `meta.next` exactly as returned. If `meta.next` is `null`, stop infinite scroll.
+## 2. Headers
 
-Language and location:
+JSON request:
 
-Common language params are `lang` or `language`. Common location params are `state`, `district`, `city`, `subdistrict`, `village`, `latitude`, and `longitude`. Article/feed endpoints use these to rank or filter local content. Feed endpoints that support `scope` use `scope=main` by default for broad/ranked feeds and `scope=local` for strict local filtering with no fallback to unrelated regions.
+```http
+Content-Type: application/json
+Accept: application/json
+```
 
-## 2. Actual Backend Request Payloads
+Authenticated request:
 
-These examples use the exact field names accepted by the current DRF serializers. Frontend and QA should prefer these over older client examples.
+```http
+Authorization: Bearer <access_token>
+```
 
-### UGC Submit
+Guest personalization and reactions:
 
-`POST /api/v1/ugc/submit/`
+```http
+X-Device-ID: <stable_install_device_id>
+X-Session-ID: <guest_session_id>
+X-Device-Type: android
+```
 
-Auth: user/reporter JWT required.
+Use a stable `device_id` generated once per app install. Store it locally. Do not regenerate it on every launch.
+
+## 3. Authentication Lifecycle
+
+Backend auth uses JWT with stateful device sessions.
+
+Default token behavior:
+
+- Access token lifetime: 15 minutes.
+- Refresh token lifetime: 7 days.
+- Refresh token rotation: enabled.
+- Old refresh token is blacklisted after refresh.
+- Refresh requires the same `device_id` used at login/register.
+- Password change and password reset invalidate active device sessions.
+
+Flutter auth flow:
+
+```text
+App launch
+  -> load access token, refresh token, device_id
+  -> if no token: continue as guest or show login when user opens protected action
+  -> if access token exists: call protected API or GET /api/v1/auth/me/
+  -> if 401: call POST /api/v1/auth/token/refresh/
+  -> if refresh succeeds: store new access and refresh, retry original request once
+  -> if refresh fails: clear tokens, keep guest device_id, send user to login
+```
+
+Token storage:
+
+- Store access token and refresh token in secure storage.
+- Store `device_id` in persistent local storage.
+- Store user profile and preferences in local cache for fast startup.
+- Never store admin credentials in the APK.
+
+## 4. API Inventory
+
+| Area | Method | Endpoint | Auth | APK Use |
+| --- | --- | --- | --- | --- |
+| System | GET | `/api/v1/health/` | No | Yes |
+| Auth | POST | `/api/v1/auth/register/` | No | Yes |
+| Auth | POST | `/api/v1/auth/login/` | No | Yes |
+| Auth | POST | `/api/v1/auth/token/refresh/` | No | Yes |
+| Auth | POST | `/api/v1/auth/logout/` | Yes | Yes |
+| Auth | POST | `/api/v1/auth/password/change/` | Yes | Yes |
+| Auth | POST | `/api/v1/auth/password/reset/request/` | No | Yes |
+| Auth | POST | `/api/v1/auth/password/reset/verify/` | No | Yes |
+| Auth | POST | `/api/v1/auth/password/reset/confirm/` | No | Yes |
+| Auth | GET/PATCH | `/api/v1/auth/me/` | Yes | Yes |
+| Auth | GET | `/api/v1/auth/sessions/` | Yes | Yes |
+| Auth | DELETE | `/api/v1/auth/sessions/{session_id}/` | Yes | Yes |
+| User | POST | `/api/v1/user/location/` | Yes | Yes |
+| User | PATCH | `/api/v1/users/me/preferences/` | Yes | Yes |
+| User Locations | GET/PATCH | `/api/v1/auth/locations/profile/` | Yes | Yes |
+| User Locations | GET/POST | `/api/v1/auth/locations/followed/` | Yes | Yes |
+| User Locations | DELETE | `/api/v1/auth/locations/followed/{location_id}/` | Yes | Yes |
+| User Locations | GET | `/api/v1/auth/locations/recent/` | Yes | Yes |
+| Guest Location | GET/PATCH | `/api/v1/auth/locations/guest/` | No | Yes |
+| Locations | GET | `/api/v1/locations/states/` | No | Yes |
+| Locations | GET | `/api/v1/locations/districts/` | No | Yes |
+| Locations | GET | `/api/v1/locations/subdistricts/` | No | Yes |
+| Locations | GET | `/api/v1/locations/villages/` | No | Yes |
+| Locations | GET | `/api/v1/locations/search/` | No | Yes |
+| Home | GET | `/api/v1/feed/` | No | Yes |
+| Articles | GET | `/api/v1/articles/feed/` | No | Yes |
+| Articles | GET | `/api/v1/articles/featured/` | No | Yes |
+| Articles | GET | `/api/v1/articles/recommendations/` | No | Yes |
+| Articles | GET | `/api/v1/articles/{slug}/` | No | Yes |
+| Articles | POST | `/api/v1/articles/` | Contributor/Admin | APK only if contributor feature is enabled |
+| Reactions | PUT/DELETE | `/api/v1/articles/{article_id}/reaction/` | No or Yes | Yes |
+| Comments | GET/POST | `/api/v1/articles/{article_id}/comments/` | GET no, POST yes | Yes |
+| Comments | PATCH/DELETE | `/api/v1/articles/comments/{comment_id}/` | Yes | Yes |
+| Comments | POST | `/api/v1/articles/comments/{comment_id}/report/` | Yes | Yes |
+| Blogs | GET | `/api/v1/articles/blogs/` | No | Optional |
+| Live | GET | `/api/v1/articles/live/` | No | Yes |
+| Videos | GET | `/api/v1/articles/video-feed/` | No | Yes |
+| Shorts | GET | `/api/v1/articles/shorts-feed/` | No | Yes |
+| E-Paper | GET | `/api/v1/articles/epapers/` | No | Optional |
+| TTS | POST | `/api/v1/articles/tts/` | No | Optional |
+| TTS | GET | `/api/v1/articles/tts/status/{task_id}/` | No | Optional |
+| UGC | POST | `/api/v1/ugc/send-otp/` | No | Yes |
+| UGC | POST | `/api/v1/ugc/verify-otp/` | No | Yes |
+| UGC | POST | `/api/v1/ugc/submit/` | Yes | Yes |
+| UGC | POST | `/api/v1/ugc/upload-media/` | Yes | Yes |
+| UGC | POST | `/api/v1/ugc/report/` | Yes | Yes |
+| UGC | GET | `/api/v1/ugc/feed/` | No | Yes |
+| UGC Reporter | GET | `/api/v1/ugc/reporter/dashboard/` | Yes | Yes |
+| UGC Reporter | GET | `/api/v1/ugc/reporter/submissions/` | Yes | Yes |
+| Categories | GET | `/api/v1/categories/` | No | Yes |
+| Search | GET | `/api/v1/search/` | No | Yes |
+| Search | GET | `/api/v1/search/trending/` | No | Optional |
+| Ads | GET | `/api/v1/ads/` | No | Yes |
+| Ads | POST | `/api/v1/ads/event/` | No | Yes |
+| Ads | GET | `/api/v1/ads/areas/` | No | Yes |
+| Ads | GET | `/api/v1/ads/pricing/` | No | Yes |
+| Ads | POST | `/api/v1/ads/bookings/` | No | Yes |
+| Posters | GET | `/api/v1/posters/` | No | Yes |
+| Polls | GET | `/api/v1/polls/` | No | Yes |
+| Polls | GET | `/api/v1/polls/{poll_id}/` | No | Yes |
+| Polls | POST | `/api/v1/polls/{poll_id}/vote/` | No | Yes |
+| Bookmarks | GET | `/api/v1/bookmarks/` | Yes | Yes |
+| Bookmarks | POST | `/api/v1/bookmarks/` | Yes | Yes |
+| Bookmarks | DELETE | `/api/v1/bookmarks/{bookmark_id}/` | Yes | Yes |
+| Bookmarks | POST | `/api/v1/bookmarks/toggle/` | Yes | Yes |
+| Notifications | POST | `/api/v1/notifications/guest-device/` | No | Yes |
+| Notifications | GET/PATCH | `/api/v1/notifications/preferences/` | Yes | Yes |
+| Notifications | GET/POST | `/api/v1/notifications/subscriptions/` | Yes | Yes |
+| Notifications | DELETE | `/api/v1/notifications/subscriptions/{subscription_id}/` | Yes | Yes |
+| Notifications | GET | `/api/v1/notifications/statistics/` | Yes | Yes |
+| Notifications | GET | `/api/v1/notifications/inbox/` | Yes | Yes |
+| Notifications | GET | `/api/v1/notifications/inbox/unread-count/` | Yes | Yes |
+| Notifications | GET | `/api/v1/notifications/inbox/{user_notification_id}/` | Yes | Yes |
+| Notifications | POST | `/api/v1/notifications/inbox/{user_notification_id}/read/` | Yes | Yes |
+| Analytics | POST | `/api/v1/analytics/events/` | No | Yes |
+| Quotes | GET | `/api/v1/quotes/random/` | No | Optional |
+| CMS | GET | `/api/v1/cms/{slug}/` | No | Yes |
+| Rewards | GET | `/api/v1/rewards/wallet/` | Yes | Yes |
+| Rewards | GET | `/api/v1/rewards/transactions/` | Yes | Yes |
+| Rewards | GET/POST | `/api/v1/rewards/payouts/` | Yes | Yes |
+| Rewards | GET | `/api/v1/rewards/payouts/{payout_id}/` | Yes | Yes |
+
+Admin-only endpoints mounted under `/api/v1/...` or `/admin/api/...` must not be used by the public APK unless the APK is an admin/contributor app.
+
+## 4A. Admin API Inventory
+
+These endpoints require admin/staff permission unless a specific view states otherwise. They are included here so the backend contract is complete, but the public Flutter APK must not call them. A separate admin Flutter/web client can use them after admin login/JWT.
+
+| Area | Endpoint Pattern | Purpose |
+| --- | --- | --- |
+| Dashboard | `GET /admin/api/dashboard/summary/` | Admin dashboard summary |
+| Dashboard | `GET /admin/api/dashboard/queues/` | Queue counters |
+| System | `GET /admin/api/system/health/` | System health |
+| System | `GET /admin/api/system/readiness/` | Readiness checks |
+| System | `GET /admin/api/system/release-audit/` | Release audit |
+| Articles | `GET /admin/api/articles/` | Article editorial list |
+| Articles | `GET/PATCH/DELETE /admin/api/articles/{article_id}/` | Article detail/update/delete |
+| Articles | `POST /admin/api/articles/{article_id}/approve/` | Approve article |
+| Articles | `POST /admin/api/articles/{article_id}/reject/` | Reject article |
+| Articles | `POST /admin/api/articles/{article_id}/publish/` | Publish article |
+| Articles | `POST /admin/api/articles/{article_id}/archive/` | Archive article |
+| Articles | `POST /admin/api/articles/{article_id}/media/` | Upload article media |
+| Articles | `POST /admin/api/articles/thumbnail-upload-url/` | Pre-signed thumbnail upload URL |
+| Articles | `GET /admin/api/articles/workflow-logs/` | Article workflow logs |
+| Articles | `GET /admin/api/articles/reading-history/` | Reading history |
+| Articles | `GET /admin/api/articles/reactions/` | Article reactions |
+| Articles | `GET/DELETE /admin/api/articles/reactions/{reaction_id}/` | Reaction detail/delete |
+| Article Comments | `GET /admin/api/articles/comments/` | Comment moderation list |
+| Article Comments | `GET/PATCH /admin/api/articles/comments/{comment_id}/` | Comment detail/update |
+| Article Comments | `POST /admin/api/articles/comments/{comment_id}/publish/` | Publish comment |
+| Article Comments | `POST /admin/api/articles/comments/{comment_id}/hold/` | Hold comment |
+| Article Comments | `POST /admin/api/articles/comments/{comment_id}/reject/` | Reject comment |
+| Article Comments | `POST /admin/api/articles/comments/{comment_id}/hide/` | Hide comment |
+| Article Comments | `POST /admin/api/articles/comments/{comment_id}/restore/` | Restore comment |
+| Article Comments | `GET /admin/api/articles/comments/reports/` | Comment reports |
+| Article Comments | `GET /admin/api/articles/comments/moderation-logs/` | Comment moderation logs |
+| Blogs | `GET/POST /admin/api/articles/blogs/` | Blog list/create |
+| Blogs | `GET/PATCH/DELETE /admin/api/articles/blogs/{blog_id}/` | Blog detail/update/delete |
+| Videos | `GET/POST /admin/api/articles/videos/` | News video list/create |
+| Videos | `GET/PATCH/DELETE /admin/api/articles/videos/{video_id}/` | News video detail/update/delete |
+| Live News | `GET/POST /admin/api/articles/live-news/` | Live news list/create |
+| Live News | `GET/PATCH/DELETE /admin/api/articles/live-news/{live_news_id}/` | Live news detail/update/delete |
+| TTS | `GET /admin/api/articles/tts-cache/` | TTS cache list |
+| TTS | `GET/DELETE /admin/api/articles/tts-cache/{tts_id}/` | TTS cache detail/delete |
+| TTS | `GET /admin/api/articles/tts-metrics/` | TTS metrics |
+| TTS | `GET /admin/api/articles/tts-metrics/{metric_id}/` | TTS metric detail |
+| Recommendations | `GET /admin/api/articles/recommendation-stats/` | Recommendation stats |
+| UGC | `GET /admin/api/ugc/queue/` | Moderation queue |
+| UGC | `GET /admin/api/ugc/otp-deliveries/` | OTP delivery logs |
+| UGC | `GET /admin/api/ugc/reports/` | UGC reports |
+| UGC | `POST /admin/api/ugc/reports/{report_id}/review/` | Review report |
+| UGC | `POST /admin/api/ugc/reports/{report_id}/dismiss/` | Dismiss report |
+| UGC | `GET /admin/api/ugc/moderation-logs/` | Moderation logs |
+| UGC | `GET /admin/api/ugc/reporters/{user_id}/` | Reporter profile |
+| UGC | `POST /admin/api/ugc/submissions/bulk-action/` | Bulk moderation action |
+| UGC | `GET/PATCH /admin/api/ugc/submissions/{submission_id}/` | Submission detail/update |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/approve/` | Approve submission |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/reject/` | Reject submission |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/flag/` | Flag submission |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/block-uploader/` | Block uploader |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/unblock-uploader/` | Unblock uploader |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/increase-trust/` | Increase reporter trust |
+| UGC | `POST /admin/api/ugc/submissions/{submission_id}/decrease-trust/` | Decrease reporter trust |
+| Users | `GET /admin/api/users/` | User list |
+| Users | `GET/PATCH /admin/api/users/{user_id}/` | User detail/update |
+| Users | `POST /admin/api/users/{user_id}/activate/` | Activate user |
+| Users | `POST /admin/api/users/{user_id}/deactivate/` | Deactivate user |
+| Users | `GET /admin/api/users/sessions/` | All sessions |
+| Users | `GET /admin/api/users/{user_id}/sessions/` | User sessions |
+| Users | `POST /admin/api/users/{user_id}/sessions/{session_id}/revoke/` | Revoke session |
+| Users | `POST /admin/api/users/{user_id}/force-logout/` | Force logout |
+| Users | `GET /admin/api/users/password-reset-audits/` | Password reset audit logs |
+| Users | `GET /admin/api/users/{user_id}/locations/followed/` | User followed locations |
+| Users | `GET /admin/api/users/{user_id}/locations/recent/` | User recent locations |
+| Analytics | `/admin/api/analytics/editorial/*` | Editorial overview, locations, categories, trends, feed, search, ranking debug |
+| Analytics | `GET /admin/api/analytics/dashboard/` | Analytics dashboard |
+| Analytics | `GET /admin/api/analytics/content/` | Content analytics |
+| Analytics | `GET /admin/api/analytics/ugc/` | UGC analytics |
+| Analytics | `GET /admin/api/analytics/search/` | Search analytics |
+| Analytics | `GET /admin/api/analytics/notifications/` | Notification analytics |
+| Search | `GET /admin/api/search/logs/` | Search logs |
+| Search | `POST /admin/api/search/logs/anonymize/` | Anonymize logs |
+| Search | `GET /admin/api/search/trending/` | Trending searches |
+| Search | `GET /admin/api/search/zero-results/` | Zero-result searches |
+| Notifications | `GET /admin/api/notifications/` | Notification list |
+| Notifications | `POST /admin/api/notifications/send/` | Send notification |
+| Notifications | `POST /admin/api/notifications/target-preview/` | Preview target audience |
+| Notifications | `GET /admin/api/notifications/logs/` | Delivery logs |
+| Notifications | `GET /admin/api/notifications/preferences/` | User notification preferences |
+| Notifications | `GET /admin/api/notifications/subscriptions/` | Notification subscriptions |
+| Notifications | `GET/PATCH/DELETE /admin/api/notifications/subscriptions/{subscription_id}/` | Subscription detail/update/delete |
+| Notifications | `GET /admin/api/notifications/user-notifications/` | User inbox records |
+| Notifications | `GET/PATCH/DELETE /admin/api/notifications/user-notifications/{user_notification_id}/` | User notification detail |
+| Notifications | `GET /admin/api/notifications/{notification_id}/` | Notification detail |
+| Notifications | `POST /admin/api/notifications/{notification_id}/retry-failed/` | Retry failed sends |
+| Polls | `GET/POST /admin/api/polls/` | Poll list/create |
+| Polls | `GET/PATCH/DELETE /admin/api/polls/{poll_id}/` | Poll detail/update/delete |
+| Polls | `POST /admin/api/polls/{poll_id}/close/` | Close poll |
+| Polls | `GET /admin/api/polls/{poll_id}/results/` | Poll results |
+| Polls | `GET /admin/api/polls/votes/` | Poll votes |
+| Polls | `GET/DELETE /admin/api/polls/votes/{vote_id}/` | Poll vote detail/delete |
+| Bookmarks | `GET /admin/api/bookmarks/` | Bookmark list |
+| Bookmarks | `GET/DELETE /admin/api/bookmarks/{bookmark_id}/` | Bookmark detail/delete |
+| Categories | `GET/POST /admin/api/categories/` | Category list/create |
+| Categories | `PATCH/DELETE /admin/api/categories/{slug}/` | Category update/delete |
+| Ads | `GET/POST /admin/api/ads/` | Ad list/create |
+| Ads | `GET/PATCH/DELETE /admin/api/ads/{ad_id}/` | Ad detail/update/delete |
+| Ads | `GET /admin/api/ads/intelligence/` | Campaign health |
+| Ads | `GET/POST /admin/api/ads/areas/` | Ad areas list/create |
+| Ads | `GET/PATCH/DELETE /admin/api/ads/areas/{area_id}/` | Ad area detail/update/delete |
+| Ads | `GET/POST /admin/api/ads/pricing/` | Pricing list/create |
+| Ads | `GET/PATCH/DELETE /admin/api/ads/pricing/{pricing_id}/` | Pricing detail/update/delete |
+| Ads | `GET /admin/api/ads/bookings/` | Booking list |
+| Ads | `GET/PATCH /admin/api/ads/bookings/{booking_id}/` | Booking detail/update |
+| Posters | `GET/POST /admin/api/posters/` | Poster list/create |
+| Posters | `GET/PATCH/DELETE /admin/api/posters/{poster_id}/` | Poster detail/update/delete |
+| Posters | `POST /admin/api/posters/{poster_id}/images/` | Add poster image |
+| Posters | `GET/PATCH/DELETE /admin/api/posters/{poster_id}/images/{image_id}/` | Poster image detail/update/delete |
+| E-Papers | `GET/POST /admin/api/epapers/` | E-paper list/create |
+| E-Papers | `GET/PATCH/DELETE /admin/api/epapers/{epaper_id}/` | E-paper detail/update/delete |
+| Locations | `/admin/api/locations/states/*` | State CRUD, bulk, enable/disable |
+| Locations | `/admin/api/locations/districts/*` | District CRUD, bulk, enable/disable |
+| Locations | `/admin/api/locations/subdistricts/*` | Subdistrict CRUD, bulk, enable/disable |
+| Locations | `/admin/api/locations/villages/*` | Village CRUD, bulk, enable/disable |
+| Locations | `/admin/api/locations/aliases/*` | Alias CRUD, bulk, enable/disable |
+| Locations | `/admin/api/locations/imports/*` | Validate/import/history |
+| CMS | `/admin/api/cms/` | CMS page ModelViewSet |
+| Quotes | `/admin/api/quotes/` | Quote ModelViewSet |
+| Rewards | `GET /admin/api/rewards/dashboard/` | Reward dashboard |
+| Rewards | `GET /admin/api/rewards/wallets/` | Wallet list |
+| Rewards | `GET /admin/api/rewards/wallets/{user_id}/` | Wallet detail |
+| Rewards | `POST /admin/api/rewards/wallets/{user_id}/adjust/` | Wallet adjustment |
+| Rewards | `GET /admin/api/rewards/transactions/` | Reward transactions |
+| Rewards | `GET /admin/api/rewards/payouts/` | Payout list |
+| Rewards | `GET /admin/api/rewards/payouts/{payout_id}/` | Payout detail |
+| Rewards | `POST /admin/api/rewards/payouts/{payout_id}/mark-paid/` | Mark payout paid |
+| Rewards | `POST /admin/api/rewards/payouts/{payout_id}/reject/` | Reject payout |
+| Rewards | `GET/PATCH /admin/api/rewards/settings/` | Reward settings |
+
+## 5. Common Models
+
+### Category
+
+```json
+{
+  "id": "uuid",
+  "name": "Business",
+  "slug": "business",
+  "display_name": "Business",
+  "icon_url": "",
+  "color_hex": "#7B1FA2",
+  "sort_order": 5
+}
+```
+
+### Article Card
+
+```json
+{
+  "id": "uuid",
+  "title": "Bill Gates Proposes Global Tax on AI and Automation",
+  "slug": "bill-gates-proposes-global-tax-on-ai-and-automation",
+  "summary": "Short preview text.",
+  "thumbnail_url": "https://cdn.example.com/thumb.png",
+  "media_type": "image",
+  "video_url": "",
+  "video_duration_seconds": 0,
+  "category": {},
+  "author_name": "John",
+  "media_items": [],
+  "source_name": "VARADHI Desk",
+  "language": "en",
+  "is_featured": false,
+  "is_breaking": true,
+  "is_bookmarked": false,
+  "share_url": null,
+  "read_time_minutes": 1,
+  "view_count": 0,
+  "like_count": 0,
+  "dislike_count": 0,
+  "comment_count": 0,
+  "my_reaction": null,
+  "published_at": "2026-08-31T14:38:48.442253+05:30",
+  "state": "Telangana",
+  "district": "Mahabubabad",
+  "village": "Mahabubabad (Ct)",
+  "subdistrict": "Mahabubabad",
+  "is_regional": true,
+  "priority_score": 10.0,
+  "location_tags": ["Telangana", "Mahabubabad"]
+}
+```
+
+Article `media_type` values: `image`, `video`.
+
+### Media Item
+
+Article media item:
+
+```json
+{
+  "id": "uuid",
+  "media_type": "image",
+  "url": "https://cdn.example.com/image.jpg",
+  "thumbnail_url": "https://cdn.example.com/thumb.jpg",
+  "caption": "",
+  "sort_order": 0,
+  "is_primary": true,
+  "created_at": "2026-09-04T10:00:00+05:30"
+}
+```
+
+UGC media item:
+
+```json
+{
+  "id": "uuid",
+  "media_type": "IMAGE",
+  "media_url": "https://cdn.example.com/ugc.jpg",
+  "thumbnail_url": "",
+  "sort_order": 0,
+  "is_primary": true,
+  "upload_status": "READY",
+  "validation_status": "VALID",
+  "created_at": "2026-09-04T10:00:00+05:30"
+}
+```
+
+UGC media values: `IMAGE`, `VIDEO`, `SHORT_VIDEO`.
+
+## 6. Authentication APIs
+
+### Register
+
+Purpose: create user, create device session, return JWT tokens.
+
+```http
+POST /api/v1/auth/register/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "StrongPass123!",
+  "password_confirm": "StrongPass123!",
+  "full_name": "John Doe",
+  "preferred_language": "en",
+  "device_id": "android-device-123",
+  "device_name": "Pixel 8",
+  "device_type": "android",
+  "fcm_token": "firebase_fcm_token"
+}
+```
+
+Fields:
+
+- `email`: required string email.
+- `password`: required string, min 8 and Django password validators.
+- `password_confirm`: required string.
+- `full_name`: required string max 150.
+- `preferred_language`: optional enum `en`, `hi`, `te`, `ta`, `ar`, `ur`; default `en`.
+- `device_id`: required string max 255.
+- `device_name`: optional string.
+- `device_type`: optional enum `ios`, `android`, `web`, `unknown`; default `unknown`.
+- `fcm_token`: optional string.
+
+Success 201:
+
+```json
+{
+  "data": {
+    "access": "<jwt_access>",
+    "refresh": "<jwt_refresh>",
+    "session_id": "uuid",
+    "user": {
+      "id": "uuid",
+      "email": "user@example.com",
+      "full_name": "John Doe",
+      "profile_image": null,
+      "preferred_language": "en",
+      "theme": "system",
+      "font_size": 16,
+      "is_contributor": false,
+      "is_admin": false,
+      "created_at": "2026-09-04T10:00:00+05:30"
+    }
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "An account with this email already exists.",
+    "details": {
+      "email": ["An account with this email already exists."]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Passwords do not match.",
+    "details": {
+      "password_confirm": ["Passwords do not match."]
+    }
+  }
+}
+```
+
+Frontend usage: registration screen. On success store tokens, user, session_id, device_id, then navigate to HomeScreen.
+
+### Login
+
+```http
+POST /api/v1/auth/login/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "StrongPass123!",
+  "device_id": "android-device-123",
+  "device_name": "Pixel 8",
+  "device_type": "android",
+  "fcm_token": "firebase_fcm_token"
+}
+```
+
+Success 200: same shape as register.
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 401,
+    "message": "Invalid credentials.",
+    "details": {
+      "detail": "Invalid credentials."
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 401,
+    "message": "This account has been deactivated.",
+    "details": {
+      "detail": "This account has been deactivated."
+    }
+  }
+}
+```
+
+Login is rate limited. For 429 show: "Too many attempts. Please wait and try again."
+
+### Refresh Token
+
+```http
+POST /api/v1/auth/token/refresh/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "refresh": "<current_refresh_token>",
+  "device_id": "android-device-123"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "access": "<new_access_token>",
+    "refresh": "<new_refresh_token>",
+    "session_id": "uuid"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 401,
+    "message": "Session is invalid or has been revoked.",
+    "details": {
+      "detail": "Session is invalid or has been revoked."
+    }
+  }
+}
+```
+
+Frontend usage: API interceptor only. Do not show this as a screen. Retry the failed original request only once.
+
+### Logout
+
+```http
+POST /api/v1/auth/logout/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "refresh": "<refresh_token>",
+  "logout_all_devices": false
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "Successfully logged out."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Frontend usage: clear access token, refresh token, user cache, then continue as guest or open LoginScreen.
+
+### Change Password
+
+```http
+POST /api/v1/auth/password/change/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "current_password": "OldPass123!",
+  "new_password": "NewPass456!",
+  "new_password_confirm": "NewPass456!"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "Password changed successfully. Please log in again."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Current password is incorrect.",
+    "details": {
+      "detail": "Current password is incorrect."
+    }
+  }
+}
+```
+
+Navigation after success: clear tokens and navigate to LoginScreen.
+
+### Forgot Password
+
+Step 1: request reset.
+
+```http
+POST /api/v1/auth/password/reset/request/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "If an account exists, password reset instructions have been sent."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Throttle errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 429,
+    "message": "Please wait before requesting another reset.",
+    "details": {
+      "detail": "Please wait before requesting another reset."
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 429,
+    "message": "Password reset request limit reached.",
+    "details": {
+      "detail": "Password reset request limit reached."
+    }
+  }
+}
+```
+
+Step 2: verify token.
+
+```http
+POST /api/v1/auth/password/reset/verify/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "token": "<reset_token_from_email>"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "Reset token verified.",
+    "verified": true
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Invalid reset token.",
+    "details": {
+      "token": ["Invalid reset token."]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Reset token is expired or already used.",
+    "details": {
+      "token": ["Reset token is expired or already used."]
+    }
+  }
+}
+```
+
+Step 3: confirm new password.
+
+```http
+POST /api/v1/auth/password/reset/confirm/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "token": "<reset_token_from_email>",
+  "new_password": "NewPass456!",
+  "new_password_confirm": "NewPass456!"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "Password reset successfully. Please log in again."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Navigation after success: LoginScreen.
+
+## 7. Profile, Preferences, and Location
+
+### Get Profile
+
+```http
+GET /api/v1/auth/me/
+Authorization: Bearer <access_token>
+```
+
+Success 200: `UserProfile` object.
+
+### Update Profile
+
+```http
+PATCH /api/v1/auth/me/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "full_name": "John Doe",
+  "preferred_language": "te",
+  "theme": "system",
+  "font_size": 16
+}
+```
+
+Allowed editable fields:
+
+- `full_name`: optional string.
+- `preferred_language`: optional enum `en`, `hi`, `te`, `ta`, `ar`, `ur`.
+- `theme`: optional enum `light`, `dark`, `system`.
+- `font_size`: optional integer 12 to 24.
+
+Font size error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Font size must be between 12 and 24.",
+    "details": {
+      "font_size": ["Font size must be between 12 and 24."]
+    }
+  }
+}
+```
+
+### Category Preferences
+
+```http
+PATCH /api/v1/users/me/preferences/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "category_weights": {
+    "business": 0.8,
+    "technology": 0.6,
+    "sports": 0.2
+  }
+}
+```
+
+Rules:
+
+- `category_weights`: required non-empty object.
+- Keys must be active category slugs.
+- Values are floats from 0.0 to 1.0.
+
+Success 200:
+
+```json
+{
+  "data": {
+    "user": "uuid",
+    "category_weights": {
+      "business": 0.8,
+      "technology": 0.6
+    },
+    "top_categories": ["business", "technology"],
+    "updated_at": "2026-09-04T10:00:00+05:30"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Invalid category keys: unknown",
+    "details": {
+      "category_weights": ["Invalid category keys: unknown"]
+    }
+  }
+}
+```
+
+### Lightweight User Location
+
+```http
+POST /api/v1/user/location/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "lat": 17.385,
+  "lon": 78.4867,
+  "city": "Hyderabad",
+  "district": "Hyderabad",
+  "state": "Telangana",
+  "country": "India",
+  "subdistrict": "Khairatabad",
+  "village": "Khairatabad"
+}
+```
+
+`lat`, `lon`, `city`, `state`, and `country` are serializer fields. The backend also accepts structured raw fields `village`, `subdistrict`, and `district`.
+
+Use this after user grants location permission or manually selects location.
+
+### Canonical Location Profile
+
+Authenticated:
+
+```http
+GET /api/v1/auth/locations/profile/
+PATCH /api/v1/auth/locations/profile/
+Authorization: Bearer <access_token>
+```
+
+Guest:
+
+```http
+GET /api/v1/auth/locations/guest/
+PATCH /api/v1/auth/locations/guest/
+```
+
+Patch request:
+
+```json
+{
+  "state_id": "uuid",
+  "district_id": "uuid",
+  "subdistrict_id": "uuid",
+  "village_id": "uuid"
+}
+```
+
+At least one canonical id is required.
+
+Error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "At least one canonical location id is required.",
+    "details": {
+      "non_field_errors": ["At least one canonical location id is required."]
+    }
+  }
+}
+```
+
+Success shape:
+
+```json
+{
+  "data": {
+    "location_type": "village",
+    "location_id": "uuid",
+    "state": {},
+    "district": {},
+    "subdistrict": {},
+    "village": {},
+    "legacy": {
+      "state": "Telangana",
+      "district": "Hyderabad",
+      "subdistrict": "Khairatabad",
+      "village": "Khairatabad"
+    },
+    "location_updated_at": "2026-09-04T10:00:00+05:30"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+## 8. Public Location APIs
+
+### States
+
+```http
+GET /api/v1/locations/states/?page_size=20&cursor=<cursor>
+```
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "name_en": "Telangana",
+  "name_te": "",
+  "slug": "telangana",
+  "code": "TS",
+  "sort_order": 1
+}
+```
+
+### Districts
+
+```http
+GET /api/v1/locations/districts/?state=telangana
+GET /api/v1/locations/districts/?state_id=<state_uuid>
+```
+
+District item:
+
+```json
+{
+  "id": "uuid",
+  "state": "uuid",
+  "name_en": "Hyderabad",
+  "name_te": "Hyderabad",
+  "slug": "hyderabad",
+  "code": "",
+  "sort_order": 0
+}
+```
+
+### Subdistricts
+
+```http
+GET /api/v1/locations/subdistricts/?district_id=<district_uuid>
+GET /api/v1/locations/subdistricts/?state=telangana&district=hyderabad
+```
+
+### Villages
+
+```http
+GET /api/v1/locations/villages/?subdistrict_id=<subdistrict_uuid>
+GET /api/v1/locations/villages/?state=telangana&district=hyderabad&subdistrict=khairatabad
+GET /api/v1/locations/villages/?pincode=500001
+```
+
+Village item:
+
+```json
+{
+  "id": "uuid",
+  "subdistrict": "uuid",
+  "name_en": "Khairatabad",
+  "name_te": "",
+  "slug": "khairatabad",
+  "pincode": "",
+  "latitude": null,
+  "longitude": null,
+  "sort_order": 0
+}
+```
+
+### Location Search
+
+```http
+GET /api/v1/locations/search/?q=hyderabad&limit=10
+```
+
+`limit` default is 20, maximum is 50.
+
+Success:
+
+```json
+{
+  "data": [
+    {
+      "type": "district",
+      "id": "uuid",
+      "name_en": "Hyderabad",
+      "name_te": "Hyderabad",
+      "slug": "hyderabad",
+      "state": "Telangana",
+      "district": "Hyderabad",
+      "subdistrict": "",
+      "pincode": ""
+    }
+  ],
+  "meta": {},
+  "errors": null
+}
+```
+
+Frontend location selection flow:
+
+```text
+LocationSelectionScreen
+  -> search q after 300 ms debounce
+  -> user taps result
+  -> if logged in: PATCH /api/v1/auth/locations/profile/
+  -> if guest: PATCH /api/v1/auth/locations/guest/
+  -> refresh HomeScreen feeds with state/district/subdistrict/village query params
+```
+
+## 9. Home and Feed APIs
+
+### Unified Home Feed
+
+Use this as the main mixed HomeScreen feed.
+
+```http
+GET /api/v1/feed/?include=all&lang=en&scope=main&page_size=20
+```
+
+Query parameters:
+
+- `include`: optional enum `all`, `articles`, `ugc`, `live`; default `all`. Invalid values fall back to `all`.
+- `lang` or `language`: optional string; default authenticated user preference, else `en`.
+- `state`, `district`, `city`, `village`, `subdistrict`: optional location filters/ranking inputs.
+- `scope`: optional enum `main`, `local`; invalid values fall back to `main`.
+- `category`: optional category slug.
+- `cursor`: optional pagination cursor.
+- `page_size`: optional integer default 20, maximum 50.
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "type": "article",
+  "title": "News title",
+  "summary": "Short summary",
+  "thumbnail_url": "https://cdn.example.com/thumb.jpg",
+  "media_url": "",
+  "created_at": "2026-09-04T10:00:00+05:30",
+  "district": "Hyderabad",
+  "subdistrict": "Khairatabad",
+  "village": "Khairatabad",
+  "state": "Telangana",
+  "priority_score": 10,
+  "source": "VARADHI Desk",
+  "trust_score": 0,
+  "metadata": {
+    "slug": "news-title",
+    "category": "business"
+  }
+}
+```
+
+Frontend usage:
+
+- Render a mixed feed.
+- For `type=article`, open ArticleDetailScreen using `metadata.slug` when available.
+- For `type=ugc`, open UGC detail view only if frontend builds one from available feed fields; no separate public UGC detail endpoint is currently implemented.
+- For `type=live`, open LiveVideoPlayerScreen using YouTube fields from metadata if present.
+
+### Article Feed
+
+Use this for article-only screens and category pages.
+
+```http
+GET /api/v1/articles/feed/?page_size=20
+GET /api/v1/articles/feed/?lang=te&category=business&scope=local&state=Telangana&district=Hyderabad
+```
+
+Actual language behavior:
+
+- If `lang` is omitted, backend uses `all` and returns all article languages.
+- If `lang=te`, only Telugu content is returned.
+- If `lang=en`, only English content is returned.
+
+Sorting:
+
+- Latest published articles first.
+- Ordering is `-published_at`, `-created_at`, `-id`.
+
+Query parameters:
+
+- `lang`: optional enum-like string. Use `en`, `te`, `hi`, `ta`; omitted means all languages.
+- `category`: optional category slug.
+- `breaking`: optional boolean. Accepted truthy values: `1`, `true`, `yes`, `y`.
+- `scope`: `main` or `local`; local applies stricter location filtering where supported.
+- `state`, `district`, `city`, `village`, `subdistrict`: optional.
+- `latitude`, `longitude`: optional float.
+- `cursor`, `page_size`: cursor pagination; max page_size 100.
+
+Frontend usage:
+
+- Home article section.
+- CategoryScreen.
+- LatestNewsScreen.
+- LocalNewsScreen.
+- BreakingNewsScreen with `breaking=true`.
+
+### Featured Articles
+
+```http
+GET /api/v1/articles/featured/?lang=en
+```
+
+If `lang` is absent:
+
+- Authenticated users use `preferred_language`.
+- Guests use `en`.
+
+Use for top carousel/hero content.
+
+### Recommendations
+
+```http
+GET /api/v1/articles/recommendations/?limit=10&lang=en
+```
+
+Query parameters:
+
+- `limit`: optional integer default 10, maximum 50.
+- `lang`: optional language.
+- `state`, `district`, `city`, `village`, `subdistrict`: optional.
+- `category`: optional slug.
+
+Behavior:
+
+- Authenticated users receive personalized recommendations.
+- Guests receive default/trending style recommendations.
+
+Recommendation tracking:
+
+```http
+POST /api/v1/articles/recommendation/impression/
+Content-Type: application/json
+```
+
+```json
+{
+  "article_id": "uuid",
+  "session_id": "guest-session-1234"
+}
+```
+
+Click:
+
+```http
+POST /api/v1/articles/recommendation/click/
+```
+
+Dwell:
+
+```http
+POST /api/v1/articles/recommendation/dwell/
+```
+
+```json
+{
+  "article_id": "uuid",
+  "seconds": 18,
+  "session_id": "guest-session-1234"
+}
+```
+
+Errors:
+
+```json
+{"error": "session_id required"}
+{"error": "invalid session_id"}
+{"error": "article_id required"}
+{"error": "article_id and positive seconds required"}
+{"error": "rate_limited"}
+{"status": "duplicate"}
+```
+
+These endpoints currently return raw response payloads before renderer wrapping may be applied. Frontend should still treat non-2xx as failure and ignore duplicate events silently.
+
+## 10. Article Detail, Reactions, Comments
+
+### Article Detail
+
+```http
+GET /api/v1/articles/{slug}/
+X-Device-ID: <device_id>
+```
+
+Authentication optional. Send `Authorization` if logged in. Send `X-Device-ID` for guest reaction state.
+
+Success fields: all Article Card fields plus:
+
+```json
+{
+  "content": "<p>Full article body</p>",
+  "source_url": "https://source.example.com/story",
+  "source_logo_url": "",
+  "seo_title": "",
+  "seo_description": "",
+  "seo_tags": [],
+  "tts_url": ""
+}
+```
+
+404:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 404,
+    "message": "Article \"slug-here\" not found.",
+    "details": {
+      "detail": "Article \"slug-here\" not found."
+    }
+  }
+}
+```
+
+Frontend rendering:
+
+- Header image/video from `media_items` first.
+- Fallback image from `thumbnail_url`.
+- If `media_type=video`, show video player using `video_url`; use `thumbnail_url` as poster.
+- Render HTML `content` safely.
+- Show `category.display_name`, `author_name`, `source_name`, `published_at`, `read_time_minutes`.
+- Show reaction and comment counters.
+
+### Set Reaction
+
+```http
+PUT /api/v1/articles/{article_id}/reaction/
+Authorization: Bearer <access_token>   # optional
+X-Device-ID: <device_id>               # required for guest
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "reaction_type": "like"
+}
+```
+
+`reaction_type` values: `like`, `dislike`.
+
+Success 200:
+
+```json
+{
+  "data": {
+    "article_id": "uuid",
+    "reaction_type": "like",
+    "my_reaction": "like",
+    "like_count": 11,
+    "dislike_count": 1
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "X-Device-ID is required for guest reactions.",
+    "details": {
+      "device_id": ["X-Device-ID is required for guest reactions."]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "reaction_type must be like or dislike.",
+    "details": {
+      "reaction_type": ["reaction_type must be like or dislike."]
+    }
+  }
+}
+```
+
+### Remove Reaction
+
+```http
+DELETE /api/v1/articles/{article_id}/reaction/
+Authorization: Bearer <access_token>   # optional
+X-Device-ID: <device_id>               # required for guest
+```
+
+Success returns same counter payload with `reaction_type` and `my_reaction` as `null`.
+
+### List Comments
+
+```http
+GET /api/v1/articles/{article_id}/comments/?cursor=<cursor>&page_size=20
+Authorization: Bearer <access_token>   # optional
+```
+
+Authentication optional for reading. Logged-in authors can see their own pending/held comments.
+
+Comment item:
+
+```json
+{
+  "id": "uuid",
+  "article_id": "uuid",
+  "content": "Nice update",
+  "author": {
+    "id": "uuid",
+    "display_name": "John"
+  },
+  "parent_id": null,
+  "status": "published",
+  "visibility": "published",
+  "created_at": "2026-09-04T10:00:00+05:30",
+  "edited_at": null,
+  "replies": []
+}
+```
+
+Status values: `pending`, `published`, `held`, `rejected`, `hidden`, `deleted`.
+
+Visibility values used by frontend:
+
+- `published`: show normally.
+- `author_only`: show only to current author with "Pending review" badge.
+- `public_tombstone`: show "Comment deleted".
+- `hidden`: hide from normal public UI.
+
+### Create Comment
+
+```http
+POST /api/v1/articles/{article_id}/comments/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "content": "Nice update",
+  "parent_id": null
+}
+```
+
+Rules:
+
+- `content`: required string, max 1000 chars, non-empty after trim.
+- `parent_id`: optional UUID. Reply-to-reply is not supported.
+- New comments are created as `pending`.
+
+Success 201 returns Comment item.
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Comment cannot be empty.",
+    "details": {
+      "content": ["Comment cannot be empty."]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Parent comment not found for this article.",
+    "details": {
+      "parent_id": ["Parent comment not found for this article."]
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Reply-to-reply is not supported.",
+    "details": {
+      "parent_id": ["Reply-to-reply is not supported."]
+    }
+  }
+}
+```
+
+### Edit Comment
+
+```http
+PATCH /api/v1/articles/comments/{comment_id}/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "content": "Updated comment"
+}
+```
+
+Rules:
+
+- User can edit only own comment.
+- Editing a published comment moves it back to pending.
+
+Errors:
+
+- `You can edit only your own comment.`
+- `This comment cannot be edited.`
+- `Comment not found.`
+
+### Delete Comment
+
+```http
+DELETE /api/v1/articles/comments/{comment_id}/
+Authorization: Bearer <access_token>
+```
+
+Success 200 returns deleted comment object.
+
+Errors:
+
+- `You can delete only your own comment.`
+- `Comment not found.`
+
+### Report Comment
+
+```http
+POST /api/v1/articles/comments/{comment_id}/report/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "reason": "spam",
+  "notes": "Repeated promotion"
+}
+```
+
+Reason values:
+
+`spam`, `abuse`, `hate`, `harassment`, `misinformation`, `sexual_content`, `violence`, `personal_information`, `other`.
+
+Errors:
+
+- `Invalid report reason.`
+- `Notes must be 1000 characters or shorter.`
+- `You cannot report your own comment.`
+- `Comment not found.`
+
+## 11. Videos and Live News
+
+### Live News List
+
+```http
+GET /api/v1/articles/live/
+```
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "title": "Live News",
+  "youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "youtube_video_id": "VIDEO_ID",
+  "thumbnail_url": "https://i.ytimg.com/vi/VIDEO_ID/hqdefault.jpg",
+  "description": "",
+  "channel_name": "VARADHI",
+  "is_active": true,
+  "autoplay": true,
+  "sort_order": 1
+}
+```
+
+### Video Feed
+
+```http
+GET /api/v1/articles/video-feed/?page_size=20
+GET /api/v1/articles/video-feed/?scope=local&state=Telangana&district=Hyderabad
+```
+
+Query parameters:
+
+- `lang`: optional, currently used in cache key.
+- `scope`: `main` or `local`.
+- `state`, `district`, `city`, `subdistrict`, `village`: optional local filters.
+- `cursor`, `page_size`: max 50.
+
+Sorting:
+
+- `-video_priority`, `-published_at`, `-id`.
+- First page of main scope may prepend active live streams.
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "created_at": "2026-09-04T10:00:00+05:30",
+  "updated_at": "2026-09-04T10:00:00+05:30",
+  "title": "Video title",
+  "youtube_video_id": "VIDEO_ID",
+  "youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "video_url": "",
+  "thumbnail_url": "https://cdn.example.com/thumb.jpg",
+  "description": "",
+  "channel_name": "VARADHI",
+  "published_at": "2026-09-04T10:00:00+05:30",
+  "is_live": false,
+  "is_trending": false,
+  "is_breaking": false,
+  "is_short": false,
+  "video_priority": 10,
+  "state": "Telangana",
+  "district": "Hyderabad",
+  "city": "Hyderabad",
+  "subdistrict": "",
+  "village": "",
+  "location_tags": [],
+  "language": "te",
+  "views_count": 0,
+  "likes_count": 0,
+  "concurrent_viewers": 0,
+  "duration_seconds": 90
+}
+```
+
+For prepended live items, some model-only fields may be omitted. Flutter must handle missing/null optional fields.
+
+### Shorts Feed
+
+```http
+GET /api/v1/articles/shorts-feed/?page_size=20
+```
+
+Important current backend behavior:
+
+- The queryset filters `is_short=true` and `language='te'`.
+- The `lang` query parameter is currently used only in cache key, not in queryset filtering.
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "title": "Short title",
+  "thumbnail_url": "https://cdn.example.com/thumb.jpg",
+  "youtube_video_id": "VIDEO_ID",
+  "youtube_url": "https://www.youtube.com/shorts/VIDEO_ID",
+  "video_url": "",
+  "is_live": false,
+  "is_breaking": false,
+  "is_trending": false,
+  "channel_name": "VARADHI",
+  "video_priority": 10,
+  "is_short": true,
+  "duration_seconds": 45,
+  "state": "Telangana",
+  "district": "Hyderabad",
+  "city": "Hyderabad",
+  "subdistrict": "",
+  "village": "",
+  "location_tags": []
+}
+```
+
+## 12. Video Playback Architecture
+
+Flutter must not treat YouTube page URLs as direct MP4 streams.
+
+Detection:
+
+```text
+if youtube_video_id is not empty -> YouTube player
+else if youtube_url contains youtube.com/watch, youtu.be, youtube.com/shorts -> extract id and use YouTube player
+else if video_url ends with .m3u8 -> HLS capable player
+else if video_url is http/https -> direct video player
+else -> show thumbnail and unavailable state
+```
+
+YouTube URL forms to support:
+
+```text
+https://www.youtube.com/watch?v=VIDEO_ID
+https://youtu.be/VIDEO_ID
+https://www.youtube.com/shorts/VIDEO_ID
+```
+
+Direct video UX:
+
+- Use a Flutter video player that supports MP4 and HLS.
+- Show thumbnail until controller is initialized.
+- Show buffering spinner while loading.
+- Pause when navigating away.
+- Dispose controller when card leaves the active window.
+- Retry on network error.
+- Support fullscreen and orientation switch on detail/player screens.
+
+YouTube UX:
+
+- Use a YouTube-compatible Flutter player/webview package.
+- Initialize from `youtube_video_id` when present.
+- For shorts, use the same extracted ID but render in 9:16 layout.
+- Handle private/deleted/unavailable videos with a friendly unavailable card.
+
+Shorts/Reels UX:
+
+```text
+ShortsScreen
+  -> Vertical PageView
+  -> one video per full screen
+  -> auto-play active item
+  -> pause previous item
+  -> preload next item only
+  -> dispose far-away controllers
+```
+
+Do not initialize all videos at once. Keep active, previous, and next controllers only.
+
+Behavior by network:
+
+- Wi-Fi/5G: autoplay active item after thumbnail.
+- 4G: autoplay with buffering indicator.
+- Slow network: show thumbnail, spinner, retry button after timeout.
+- Offline: show cached thumbnails and "No internet connection".
+- App background/screen locked: pause playback.
+- Navigation away: pause and dispose if leaving screen.
+
+## 13. Images and Media Handling
+
+Article image fields:
+
+- Card image: `thumbnail_url`.
+- Multi-image/media carousel: `media_items`.
+- Video poster: `thumbnail_url` or media item `thumbnail_url`.
+- Direct article video: `video_url`.
+
+UGC image/video fields:
+
+- Primary image/video: `media_url`.
+- Thumbnail: `thumbnail_url`.
+- Multi-media carousel: `media_items`.
+
+Poster image fields:
+
+- Primary: `image_url`.
+- Multi-poster carousel: `images`.
+- Thumbnail: `thumbnail_url`.
+
+Frontend image rules:
+
+- Use cached network images.
+- Use 16:9 for article feed images.
+- Use 1:1 or 4:5 for poster cards.
+- Use 9:16 for shorts.
+- Show neutral placeholder if URL is empty.
+- Show broken-image fallback if image fails.
+- Lazy load images in feed.
+
+## 14. UGC APIs
+
+UGC upload is authenticated. OTP verification is one-time for first-time uploader/mobile verification. After the backend marks the user/mobile verified, future uploads with the same verified mobile do not need OTP again.
+
+Production media limits currently verified:
+
+- `MAX_IMAGE_MB`: 10
+- `MAX_VIDEO_MB`: 50
+- `UGC_MAX_MEDIA_ITEMS`: 10
+- `ARTICLE_MAX_MEDIA_ITEMS`: 10
+
+### Send OTP
+
+```http
+POST /api/v1/ugc/send-otp/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "mobile": "9876543210"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "OTP sent."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Possible errors from service:
+
+- HTTP 429 with service message, for example OTP throttle text.
+- HTTP 503 if OTP provider is unavailable.
+- Validation error for invalid Indian mobile number.
+
+### Verify OTP
+
+```http
+POST /api/v1/ugc/verify-otp/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "mobile": "9876543210",
+  "otp": "123456"
+}
+```
+
+Success 200:
+
+```json
+{
+  "data": {
+    "message": "OTP verified.",
+    "verified": true
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+- HTTP 400 with OTP verification message.
+- HTTP 429 with throttle message.
+- HTTP 503 with OTP service unavailable message.
+
+### Submit UGC News
+
+```http
+POST /api/v1/ugc/submit/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+Request:
 
 ```json
 {
@@ -102,9 +1975,18 @@ Auth: user/reporter JWT required.
   "title": "Suryapet road repair update",
   "description": "Local road repair work started near the market area.",
   "category": "local",
-  "content_type": "video",
+  "content_type": "VIDEO",
   "media_url": "",
   "thumbnail_url": "",
+  "media_items": [
+    {
+      "media_type": "IMAGE",
+      "media_url": "https://cdn.example.com/ugc-1.jpg",
+      "thumbnail_url": "",
+      "sort_order": 0,
+      "is_primary": true
+    }
+  ],
   "location_lat": "17.141500",
   "location_lon": "79.623600",
   "village": "",
@@ -115,1430 +1997,228 @@ Auth: user/reporter JWT required.
 }
 ```
 
-Required backend fields: `mobile`, `title`, `description`, `content_type`, `location_lat`, `location_lon`.
-
-Valid `content_type` values come from the backend `UserNewsSubmission.ContentType` choices. Use Swagger for the generated enum list.
-
-### UGC Media Upload
-
-`POST /api/v1/ugc/upload-media/`
-
-Auth: user/reporter JWT required.
-
-Multipart form-data:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `submission_id` | Yes | UUID returned by UGC submit. |
-| `mobile` | Yes | Must match verified mobile. |
-| `media_type` | Yes | Backend media type enum. |
-| `file` | Yes | Binary image/video file. |
-
-### Admin Branded Media Upload
-
-`POST /api/v1/ugc/admin/submissions/{submission_id}/branded-media/`
-
-Auth: admin JWT required.
-
-Multipart form-data:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `file` | Yes | Branded image/video file. |
-| `thumbnail` | No | Optional binary thumbnail. |
-| `notes` | No | Stored as admin notes when provided. |
-
-Public UGC feed returns `media_url`; it does not expose `original_media_url` or `branded_media_url` separately.
-
-### Admin Create Advertisement Area
-
-`POST /api/v1/ads/admin/areas/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "name": "Suryapet Local Area",
-  "state": "Telangana",
-  "district": "Suryapet",
-  "city": "Suryapet",
-  "village": "",
-  "subdistrict": "",
-  "is_active": true,
-  "sort_order": 1
-}
-```
-
-### Admin Create Advertisement Pricing
-
-`POST /api/v1/ads/admin/pricing/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "ad_type": "local",
-  "area": "08c5c4f8-7334-4135-a6c8-b16c12a7c4de",
-  "duration_days": 7,
-  "price": "1500.00",
-  "currency": "INR",
-  "is_active": true
-}
-```
-
-Important: admin pricing uses `area`, not `area_id`.
-
-### Admin Create Advertisement Banner
-
-`POST /api/v1/ads/admin/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "title": "Suryapet banner",
-  "image_url": "https://cdn.varadhi.example.com/ads/suryapet-banner.jpg",
-  "destination_url": "https://wa.me/919876543210",
-  "ad_type": "banner",
-  "placement_zone": "feed",
-  "target_scope": "area",
-  "area_id": "08c5c4f8-7334-4135-a6c8-b16c12a7c4de",
-  "display_frequency": 1,
-  "is_active": true,
-  "start_date": "2026-06-28T09:00:00+05:30",
-  "end_date": "2026-07-05T09:00:00+05:30"
-}
-```
-
-Important: admin ad create uses `area_id` for area-targeted ads. `placement_zone` currently supports backend enum values such as `feed`, `article`, `splash`, and `search`; do not send undocumented values like `home_top`.
-
-### Public Advertisement Booking
-
-`POST /api/v1/ads/bookings/`
-
-Auth: not required.
-
-```json
-{
-  "advertiser_name": "Ravi",
-  "phone": "9876543210",
-  "business_name": "Ravi Mobiles",
-  "ad_type": "local",
-  "area_id": "08c5c4f8-7334-4135-a6c8-b16c12a7c4de",
-  "duration_days": 7,
-  "message": "Need banner ad in Suryapet"
-}
-```
-
-Local bookings require `area_id`. Main bookings do not require `area_id`.
-
-### Public Advertisement Event
-
-`POST /api/v1/ads/event/`
-
-Auth: not required.
-
-```json
-{
-  "ad_id": "2c85b3d0-ec89-4bf8-9874-08809c2fbb04",
-  "event_type": "impression"
-}
-```
-
-Valid `event_type` values: `impression`, `click`.
-
-### Admin Create Poster/Card
-
-`POST /api/v1/posters/admin/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "title": "Daily Quote",
-  "category": "daily_quote",
-  "image_url": "https://cdn.varadhi.example.com/posters/daily-quote.jpg",
-  "thumbnail_url": "",
-  "language": "te",
-  "festival_name": "",
-  "event_date": null,
-  "is_active": true,
-  "sort_order": 1
-}
-```
-
-The admin may also upload an `image` file when using multipart form-data. Public `image_url` resolves to uploaded file URL first, then falls back to the text `image_url`.
-
-### Admin Add Poster/Card Image
-
-`POST /api/v1/posters/admin/{poster_id}/images/`
-
-Auth: admin JWT required.
-
-Multipart or JSON-compatible fields:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `image` | No | Binary file upload. |
-| `image_url` | No | CDN/remote image URL. |
-| `caption` | No | Text caption. |
-| `sort_order` | No | Integer ordering. |
-| `is_active` | No | Boolean. |
-
-At least one of `image` or `image_url` should be provided for a usable card image.
-
-### Admin Notification Target Preview
-
-`POST /api/v1/notifications/admin/target-preview/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "target_scope": "category_location",
-  "category_slug": "education",
-  "state": "Telangana",
-  "district": "Suryapet",
-  "city": "Suryapet",
-  "village": "",
-  "subdistrict": ""
-}
-```
-
-Valid targeting scopes: `all`, `location`, `category`, `category_location`.
-
-### Admin Send Notification
-
-`POST /api/v1/notifications/send/`
-
-Alternative admin route: `POST /admin/api/notifications/send/`
-
-Auth: admin JWT required.
-
-```json
-{
-  "title": "Education update",
-  "body": "New local education update is available.",
-  "image_url": "",
-  "notification_type": "local",
-  "deep_link": "varadhi://category/education",
-  "target_scope": "category_location",
-  "category_slug": "education",
-  "state": "Telangana",
-  "district": "Suryapet",
-  "city": "Suryapet",
-  "village": "",
-  "subdistrict": ""
-}
-```
-
-Important: notification create uses `body`, not `message`. There is no generic `data` request field in the current serializer.
-
-## 3. Frontend Screen to API Mapping
-
-| Frontend Screen | Purpose | APIs Used | Auth Required | Notes |
-| --- | --- | --- | --- | --- |
-| Splash / App Launch | Optional service check and load cached token/location/language | `GET /api/v1/health/` | No | Do not call on every screen. |
-| Onboarding | Register/login, set language/location | `POST /api/v1/auth/register/`, `POST /api/v1/auth/login/`, `POST /api/v1/user/location/`, `PATCH /api/v1/users/me/preferences/` | Mixed | Location/preferences require JWT. |
-| Location Selection | Persist user location | `POST /api/v1/user/location/` | Yes | Guest can still pass location params to feed. |
-| Language Selection | Persist category/language preference | `PATCH /api/v1/users/me/preferences/`, feed params `lang` | Yes for stored preference | Guest can use `lang` query param. |
-| Home Shorts | Shorts-first home UI | `GET /api/v1/articles/shorts-feed/` | No | Cursor paginated. |
-| Main News | Personalized main feed | `GET /api/v1/articles/feed/` or `GET /api/v1/feed/` | No | Use `lang`, category and location params. |
-| Local News | Strict local news by place | `GET /api/v1/feed/?scope=local&state=&district=&subdistrict=&village=` or `GET /api/v1/ugc/feed/?scope=local&state=&district=` | No | No separate local-news API needed. Empty local results should show app empty state. |
-| Article Detail | Full article view | `GET /api/v1/articles/{slug}/` | No | `is_bookmarked=false` for guests. |
-| Search | Article/news search | `GET /api/v1/search/?q=` | No | Search endpoint is throttled. |
-| Categories | Category selector | `GET /api/v1/categories/` | No | Public. |
-| Posters / Info Cards | Poster/cards list, Jyothishyam, Panchangam, health, education, govt cards | `GET /api/v1/posters/?category=` | No | Supports `images[]` for swipe UI; `share_url` is always `null`. |
-| Poster Detail / Share | Share poster image | `GET /api/v1/posters/` | No | No poster detail API exists. Use list item data. |
-| Post News / UGC Submit | User news submission | `POST /api/v1/ugc/submit/` | Yes | Login required. |
-| UGC Media Upload | Upload UGC media | `POST /api/v1/ugc/upload-media/` | Yes | Multipart form data. |
-| Reporter Dashboard | Reporter stats | `GET /api/v1/ugc/reporter/dashboard/` | Yes | User-scoped. |
-| Reporter Submission List | Reporter submissions and statuses | `GET /api/v1/ugc/reporter/submissions/` | Yes | User-scoped cursor list. |
-| Rewards Wallet | User coin balance | `GET /api/v1/rewards/wallet/` | Yes | Coins earned from approved image/video UGC. |
-| Rewards Payouts | Manual payout workflow | `GET/POST /api/v1/rewards/payouts/` | Yes | Locks coins while payout is pending. |
-| Login | Authenticate user | `POST /api/v1/auth/login/` | No | Store access/refresh tokens. |
-| Register | Create account | `POST /api/v1/auth/register/` | No | Device fields required. |
-| OTP Verification | UGC mobile verification | `POST /api/v1/ugc/send-otp/`, `POST /api/v1/ugc/verify-otp/` | No | Used for UGC mobile verification flow. |
-| Password Reset | Account recovery | `POST /api/v1/auth/password/reset/request/`, `/verify/`, `/confirm/` | No | Email token flow. |
-| Profile | View/update account | `GET/PATCH /api/v1/auth/me/` | Yes | JWT required. |
-| User Preferences | Category weights | `PATCH /api/v1/users/me/preferences/` | Yes | Category slugs must be active. |
-| Bookmarks | Save/read articles | `GET/POST /api/v1/bookmarks/`, `POST /toggle/`, `DELETE /{id}/` | Yes | Guest should show login prompt. |
-| Notifications | Inbox/read state | `GET /api/v1/notifications/inbox/`, unread count, mark read | Yes | User-specific data. |
-| Polls | Poll list/detail/vote | `GET /api/v1/polls/`, `GET /api/v1/polls/{id}/`, `POST /vote/` | No | Public APK voting. Send `X-Device-ID` to prevent duplicate votes per device. |
-| Ads Display | Global and location-matched ads | `GET /api/v1/ads/`, `POST /api/v1/ads/event/` | No | Global ads show everywhere; area ads need matching location/area. |
-| Ad Booking | Booking inquiry and WhatsApp handoff | `GET /ads/areas/`, `GET /ads/pricing/`, `POST /ads/bookings/` | No | Backend returns `whatsapp_url`. |
-| CMS Pages | Static policy/about pages | `GET /api/v1/cms/{slug}/` | No | Public active pages only. |
-| Quotes / Daily Cards | Random quote card | `GET /api/v1/quotes/random/` | No | Public. |
-| Admin / Moderator | Editorial, UGC moderation, analytics, system | `/admin/api/...`, selected `/api/v1/...` admin routes | Admin | Not for mobile consumer UI. |
-
-## 4. API Summary Table
-
-The table below lists every OpenAPI operation discovered in the current schema.
-
-| Method | Endpoint | Access | Group | Query / Path Params |
-| --- | --- | --- | --- | --- |
-| GET | `/admin/api/analytics/content/` | ADMIN / INTERNAL | Admin Analytics | days |
-| GET | `/admin/api/analytics/dashboard/` | ADMIN / INTERNAL | Admin Analytics | days |
-| GET | `/admin/api/analytics/notifications/` | ADMIN / INTERNAL | Admin Analytics | - |
-| GET | `/admin/api/analytics/search/` | ADMIN / INTERNAL | Admin Analytics | days |
-| GET | `/admin/api/analytics/ugc/` | ADMIN / INTERNAL | Admin Analytics | - |
-| GET | `/admin/api/articles/` | ADMIN / INTERNAL | Admin Articles | author, created_at, status |
-| POST | `/admin/api/articles/` | ADMIN / INTERNAL | Admin Articles | - |
-| GET | `/admin/api/articles/blogs/` | ADMIN / INTERNAL | Admin Blogs | cursor, page_size |
-| POST | `/admin/api/articles/blogs/` | ADMIN / INTERNAL | Admin Blogs | - |
-| GET | `/admin/api/articles/blogs/{blog_id}/` | ADMIN / INTERNAL | Admin Blogs | blog_id |
-| PATCH | `/admin/api/articles/blogs/{blog_id}/` | ADMIN / INTERNAL | Admin Blogs | blog_id |
-| DELETE | `/admin/api/articles/blogs/{blog_id}/` | ADMIN / INTERNAL | Admin Blogs | blog_id |
-| GET | `/admin/api/articles/{article_id}/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| PATCH | `/admin/api/articles/{article_id}/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| POST | `/admin/api/articles/{article_id}/approve/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| POST | `/admin/api/articles/{article_id}/archive/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| POST | `/admin/api/articles/{article_id}/publish/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| POST | `/admin/api/articles/{article_id}/reject/` | ADMIN / INTERNAL | Admin Articles | article_id |
-| POST | `/admin/api/articles/thumbnail-upload-url/` | ADMIN / INTERNAL | Admin Articles | - |
-| GET | `/admin/api/cms/` | ADMIN / INTERNAL | admin | cursor, ordering, page_size, search |
-| POST | `/admin/api/cms/` | ADMIN / INTERNAL | admin | - |
-| GET | `/admin/api/cms/{slug}/` | ADMIN / INTERNAL | admin | slug |
-| PUT | `/admin/api/cms/{slug}/` | ADMIN / INTERNAL | admin | slug |
-| PATCH | `/admin/api/cms/{slug}/` | ADMIN / INTERNAL | admin | slug |
-| DELETE | `/admin/api/cms/{slug}/` | ADMIN / INTERNAL | admin | slug |
-| GET | `/admin/api/dashboard/queues/` | ADMIN / INTERNAL | Admin Dashboard | - |
-| GET | `/admin/api/dashboard/summary/` | ADMIN / INTERNAL | Admin Dashboard | - |
-| GET | `/admin/api/epapers/` | ADMIN / INTERNAL | Admin EPapers | is_active, language |
-| POST | `/admin/api/epapers/` | ADMIN / INTERNAL | Admin EPapers | - |
-| PATCH | `/admin/api/epapers/{epaper_id}/` | ADMIN / INTERNAL | Admin EPapers | epaper_id |
-| DELETE | `/admin/api/epapers/{epaper_id}/` | ADMIN / INTERNAL | Admin EPapers | epaper_id |
-| POST | `/admin/api/epapers/{epaper_id}/activate/` | ADMIN / INTERNAL | Admin EPapers | epaper_id |
-| POST | `/admin/api/epapers/{epaper_id}/deactivate/` | ADMIN / INTERNAL | Admin EPapers | epaper_id |
-| GET | `/admin/api/notifications/` | ADMIN / INTERNAL | Admin Notifications | status |
-| GET | `/admin/api/notifications/{notification_id}/` | ADMIN / INTERNAL | Admin Notifications | notification_id |
-| POST | `/admin/api/notifications/{notification_id}/retry-failed/` | ADMIN / INTERNAL | Admin Notifications | notification_id |
-| POST | `/admin/api/notifications/send/` | ADMIN / INTERNAL | Admin Notifications | - |
-| POST | `/admin/api/notifications/target-preview/` | ADMIN / INTERNAL | Admin Notifications | target_scope, location/category |
-| GET | `/admin/api/polls/` | ADMIN / INTERNAL | Admin Polls | is_active |
-| POST | `/admin/api/polls/` | ADMIN / INTERNAL | Admin Polls | - |
-| GET | `/admin/api/polls/{poll_id}/` | ADMIN / INTERNAL | Admin Polls | poll_id |
-| PATCH | `/admin/api/polls/{poll_id}/` | ADMIN / INTERNAL | Admin Polls | poll_id |
-| DELETE | `/admin/api/polls/{poll_id}/` | ADMIN / INTERNAL | Admin Polls | poll_id |
-| POST | `/admin/api/polls/{poll_id}/close/` | ADMIN / INTERNAL | Admin Polls | poll_id |
-| GET | `/admin/api/polls/{poll_id}/results/` | ADMIN / INTERNAL | Admin Polls | poll_id |
-| GET | `/admin/api/quotes/` | ADMIN / INTERNAL | admin | cursor, ordering, page_size, search |
-| POST | `/admin/api/quotes/` | ADMIN / INTERNAL | admin | - |
-| GET | `/admin/api/quotes/{id}/` | ADMIN / INTERNAL | admin | id |
-| PUT | `/admin/api/quotes/{id}/` | ADMIN / INTERNAL | admin | id |
-| PATCH | `/admin/api/quotes/{id}/` | ADMIN / INTERNAL | admin | id |
-| DELETE | `/admin/api/quotes/{id}/` | ADMIN / INTERNAL | admin | id |
-| GET | `/admin/api/search/logs/` | ADMIN / INTERNAL | Admin Search | is_anonymized, keyword, zero_results |
-| POST | `/admin/api/search/logs/anonymize/` | ADMIN / INTERNAL | Admin Search | - |
-| GET | `/admin/api/search/trending/` | ADMIN / INTERNAL | Admin Search | days, limit |
-| GET | `/admin/api/search/zero-results/` | ADMIN / INTERNAL | Admin Search | days, limit |
-| GET | `/admin/api/system/health/` | ADMIN / INTERNAL | System | - |
-| GET | `/admin/api/system/readiness/` | ADMIN / INTERNAL | Admin System | - |
-| GET | `/admin/api/system/release-audit/` | ADMIN / INTERNAL | Admin System | - |
-| GET | `/admin/api/ugc/otp-deliveries/` | ADMIN / INTERNAL | UGC Admin | cursor, page_size |
-| GET | `/admin/api/ugc/queue/` | ADMIN / INTERNAL | UGC Admin | cursor, page_size |
-| GET | `/admin/api/ugc/submissions/{submission_id}/` | ADMIN / INTERNAL | UGC Admin | submission_id |
-| POST | `/admin/api/ugc/submissions/{submission_id}/approve/` | ADMIN / INTERNAL | UGC Admin | submission_id |
-| POST | `/admin/api/ugc/submissions/{submission_id}/flag/` | ADMIN / INTERNAL | UGC Admin | submission_id |
-| POST | `/admin/api/ugc/submissions/{submission_id}/reject/` | ADMIN / INTERNAL | UGC Admin | submission_id |
-| GET | `/admin/api/users/` | ADMIN / INTERNAL | Admin Users | is_active, q |
-| GET | `/admin/api/users/{user_id}/` | ADMIN / INTERNAL | Admin Users | user_id |
-| POST | `/admin/api/users/{user_id}/activate/` | ADMIN / INTERNAL | Admin Users | user_id |
-| POST | `/admin/api/users/{user_id}/deactivate/` | ADMIN / INTERNAL | Admin Users | user_id |
-| GET | `/api/v1/ads/` | PUBLIC | Ads | zone, placement_zone, scope, area_id, state, district, city, subdistrict, village |
-| GET | `/api/v1/ads/admin/` | ADMIN / INTERNAL | Ads | - |
-| POST | `/api/v1/ads/admin/` | ADMIN / INTERNAL | Ads | - |
-| GET | `/api/v1/ads/admin/{ad_id}/` | ADMIN / INTERNAL | Ads | ad_id |
-| PATCH | `/api/v1/ads/admin/{ad_id}/` | ADMIN / INTERNAL | Ads | ad_id |
-| DELETE | `/api/v1/ads/admin/{ad_id}/` | ADMIN / INTERNAL | Ads | ad_id |
-| GET | `/api/v1/ads/admin/areas/` | ADMIN / INTERNAL | Ads | - |
-| POST | `/api/v1/ads/admin/areas/` | ADMIN / INTERNAL | Ads | - |
-| PATCH | `/api/v1/ads/admin/areas/{area_id}/` | ADMIN / INTERNAL | Ads | area_id |
-| GET | `/api/v1/ads/admin/pricing/` | ADMIN / INTERNAL | Ads | - |
-| POST | `/api/v1/ads/admin/pricing/` | ADMIN / INTERNAL | Ads | - |
-| PATCH | `/api/v1/ads/admin/pricing/{pricing_id}/` | ADMIN / INTERNAL | Ads | pricing_id |
-| GET | `/api/v1/ads/admin/bookings/` | ADMIN / INTERNAL | Ads | status |
-| PATCH | `/api/v1/ads/admin/bookings/{booking_id}/` | ADMIN / INTERNAL | Ads | booking_id |
-| GET | `/api/v1/ads/areas/` | PUBLIC | Ads | - |
-| POST | `/api/v1/ads/bookings/` | PUBLIC | Ads | - |
-| POST | `/api/v1/ads/event/` | PUBLIC | Ads | - |
-| GET | `/api/v1/ads/pricing/` | PUBLIC | Ads | ad_type, area_id, duration_days |
-| GET | `/api/v1/analytics/dashboard/` | ADMIN / INTERNAL | Analytics | days |
-| GET | `/api/v1/analytics/user-preferences/` | ADMIN / INTERNAL | Analytics | - |
-| POST | `/api/v1/articles/` | PRIVATE / CONTRIBUTOR | Feed & Articles | - |
-| GET | `/api/v1/articles/{slug}/` | PUBLIC | Feed & Articles | slug |
-| GET | `/api/v1/articles/blogs/` | PUBLIC | Blogs | - |
-| GET | `/api/v1/articles/editorial/queue/` | ADMIN / INTERNAL | Editorial | author, created_at, status |
-| GET | `/api/v1/articles/epapers/` | PUBLIC | E-Paper | lang |
-| GET | `/api/v1/articles/featured/` | PUBLIC | Feed & Articles | lang |
-| GET | `/api/v1/articles/feed/` | PUBLIC | Feed & Articles | breaking, category, city, cursor, district, lang, latitude, longitude, page_size, scope, state, subdistrict, village |
-| GET | `/api/v1/articles/live/` | PUBLIC | Live News | - |
-| GET | `/api/v1/articles/recommendation-metrics/` | ADMIN / INTERNAL | api | - |
-| POST | `/api/v1/articles/recommendation/click/` | PUBLIC | Feed & Articles | - |
-| POST | `/api/v1/articles/recommendation/dwell/` | PUBLIC | Feed & Articles | - |
-| POST | `/api/v1/articles/recommendation/impression/` | PUBLIC | Feed & Articles | - |
-| GET | `/api/v1/articles/recommendations/` | PUBLIC | Feed & Articles | category, city, district, lang, limit, state, subdistrict, village |
-| GET | `/api/v1/articles/shorts-feed/` | PUBLIC | Videos | cursor, lang, page_size, scope, state, district, city, subdistrict, village |
-| POST | `/api/v1/articles/tts/` | PUBLIC | TTS | - |
-| GET | `/api/v1/articles/tts/stats/` | ADMIN / INTERNAL | api | - |
-| GET | `/api/v1/articles/tts/status/{task_id}/` | PUBLIC | TTS | task_id |
-| GET | `/api/v1/articles/video-feed/` | PUBLIC | Videos | cursor, lang, page_size, scope, state, district, city, subdistrict, village |
-| POST | `/api/v1/auth/login/` | PUBLIC | Auth | - |
-| POST | `/api/v1/auth/logout/` | PRIVATE | Auth | - |
-| GET | `/api/v1/auth/me/` | PRIVATE | Auth | - |
-| PATCH | `/api/v1/auth/me/` | PRIVATE | Auth | - |
-| POST | `/api/v1/auth/password/change/` | PRIVATE | Auth | - |
-| POST | `/api/v1/auth/password/reset/confirm/` | PUBLIC | Auth | - |
-| POST | `/api/v1/auth/password/reset/request/` | PUBLIC | Auth | - |
-| POST | `/api/v1/auth/password/reset/verify/` | PUBLIC | Auth | - |
-| POST | `/api/v1/auth/register/` | PUBLIC | Auth | - |
-| POST | `/api/v1/auth/revoke/` | PRIVATE | api | - |
-| GET | `/api/v1/auth/sessions/` | PRIVATE | Auth | - |
-| DELETE | `/api/v1/auth/sessions/{session_id}/` | PRIVATE | Auth | session_id |
-| POST | `/api/v1/auth/token/refresh/` | PUBLIC | Auth | - |
-| GET | `/api/v1/bookmarks/` | PRIVATE | Bookmarks | - |
-| POST | `/api/v1/bookmarks/` | PRIVATE | Bookmarks | - |
-| DELETE | `/api/v1/bookmarks/{bookmark_id}/` | PRIVATE | Bookmarks | bookmark_id |
-| POST | `/api/v1/bookmarks/toggle/` | PRIVATE | Bookmarks | - |
-| GET | `/api/v1/categories/` | PUBLIC | Categories | - |
-| POST | `/api/v1/categories/admin/` | ADMIN / INTERNAL | Categories | - |
-| PATCH | `/api/v1/categories/admin/{slug}/` | ADMIN / INTERNAL | Categories | slug |
-| DELETE | `/api/v1/categories/admin/{slug}/` | ADMIN / INTERNAL | Categories | slug |
-| GET | `/api/v1/cms/{slug}/` | PUBLIC | CMS | slug |
-| GET | `/api/v1/feed/` | PUBLIC | Unified Feed | category, city, cursor, district, include, lang, language, page_size, scope, state, subdistrict, village |
-| GET | `/api/v1/health/` | PUBLIC | System | - |
-| GET | `/api/v1/live/channel-info/` | ADMIN / INTERNAL | Live News | - |
-| GET | `/api/v1/notifications/` | PRIVATE | Notifications | - |
-| GET | `/api/v1/notifications/{notification_id}/` | PRIVATE | Notifications | notification_id |
-| GET | `/api/v1/notifications/inbox/` | PRIVATE | Notifications | unread |
-| GET | `/api/v1/notifications/inbox/{user_notification_id}/` | PRIVATE | Notifications | user_notification_id |
-| POST | `/api/v1/notifications/inbox/{user_notification_id}/read/` | PRIVATE | Notifications | user_notification_id |
-| GET | `/api/v1/notifications/inbox/unread-count/` | PRIVATE | Notifications | - |
-| POST | `/api/v1/notifications/send/` | ADMIN / INTERNAL | Notifications | target_scope, category/location |
-| POST | `/api/v1/notifications/admin/target-preview/` | ADMIN / INTERNAL | Notifications | target_scope, category/location |
-| GET | `/api/v1/polls/` | PUBLIC | Polls | - |
-| GET | `/api/v1/polls/{poll_id}/` | PUBLIC | Polls | poll_id |
-| POST | `/api/v1/polls/{poll_id}/vote/` | PUBLIC | Polls | poll_id |
-| POST | `/api/v1/polls/admin/` | ADMIN / INTERNAL | Polls | - |
-| GET | `/api/v1/posters/` | PUBLIC | Posters | category, cursor, lang, page_size |
-| GET | `/api/v1/posters/admin/` | ADMIN / INTERNAL | Posters Admin | category, cursor, page_size |
-| POST | `/api/v1/posters/admin/` | ADMIN / INTERNAL | Posters Admin | - |
-| GET | `/api/v1/posters/admin/{poster_id}/` | ADMIN / INTERNAL | Posters Admin | poster_id |
-| PATCH | `/api/v1/posters/admin/{poster_id}/` | ADMIN / INTERNAL | Posters Admin | poster_id |
-| DELETE | `/api/v1/posters/admin/{poster_id}/` | ADMIN / INTERNAL | Posters Admin | poster_id |
-| POST | `/api/v1/posters/admin/{poster_id}/images/` | ADMIN / INTERNAL | Posters Admin | poster_id |
-| PATCH | `/api/v1/posters/admin/{poster_id}/images/{image_id}/` | ADMIN / INTERNAL | Posters Admin | poster_id, image_id |
-| DELETE | `/api/v1/posters/admin/{poster_id}/images/{image_id}/` | ADMIN / INTERNAL | Posters Admin | poster_id, image_id |
-| GET | `/api/v1/quotes/random/` | PUBLIC | Quotes | - |
-| GET | `/api/v1/search/` | PUBLIC | Search | category, lang, q |
-| GET | `/api/v1/search/trending/` | PUBLIC | Search | days |
-| GET | `/api/v1/search/zero-results/` | PUBLIC | Search | days |
-| GET | `/api/v1/system/health/` | ADMIN / INTERNAL | System | - |
-| GET | `/api/v1/rewards/wallet/` | PRIVATE | Rewards | - |
-| GET | `/api/v1/rewards/transactions/` | PRIVATE | Rewards | cursor, page_size |
-| GET | `/api/v1/rewards/payouts/` | PRIVATE | Rewards | cursor, page_size |
-| POST | `/api/v1/rewards/payouts/` | PRIVATE | Rewards | - |
-| GET | `/api/v1/rewards/payouts/{payout_id}/` | PRIVATE | Rewards | payout_id |
-| GET | `/api/v1/rewards/admin/dashboard/` | ADMIN / INTERNAL | Rewards Admin | - |
-| GET | `/api/v1/rewards/admin/wallets/` | ADMIN / INTERNAL | Rewards Admin | user, q, has_balance, cursor, page_size |
-| GET | `/api/v1/rewards/admin/wallets/{user_id}/` | ADMIN / INTERNAL | Rewards Admin | user_id |
-| POST | `/api/v1/rewards/admin/wallets/{user_id}/adjust/` | ADMIN / INTERNAL | Rewards Admin | user_id |
-| GET | `/api/v1/rewards/admin/transactions/` | ADMIN / INTERNAL | Rewards Admin | user_id, transaction_type, date_from, date_to, cursor, page_size |
-| GET | `/api/v1/rewards/admin/payouts/` | ADMIN / INTERNAL | Rewards Admin | status, payout_method, user_id, date_from, date_to, cursor, page_size |
-| GET | `/api/v1/rewards/admin/payouts/{payout_id}/` | ADMIN / INTERNAL | Rewards Admin | payout_id |
-| POST | `/api/v1/rewards/admin/payouts/{payout_id}/mark-paid/` | ADMIN / INTERNAL | Rewards Admin | payout_id |
-| POST | `/api/v1/rewards/admin/payouts/{payout_id}/reject/` | ADMIN / INTERNAL | Rewards Admin | payout_id |
-| GET | `/api/v1/rewards/admin/settings/` | ADMIN / INTERNAL | Rewards Admin | - |
-| PATCH | `/api/v1/rewards/admin/settings/` | ADMIN / INTERNAL | Rewards Admin | - |
-| POST | `/api/v1/ugc/admin/submissions/{submission_id}/branded-media/` | ADMIN / INTERNAL | UGC Admin | multipart file, optional thumbnail, notes |
-| GET | `/api/v1/ugc/feed/` | PUBLIC | UGC | city, cursor, district, page_size, scope, state, subdistrict, village |
-| GET | `/api/v1/ugc/moderation/queue/` | ADMIN / INTERNAL | UGC Admin | cursor, page_size |
-| POST | `/api/v1/ugc/report/` | PRIVATE | UGC | - |
-| GET | `/api/v1/ugc/reporter/dashboard/` | PRIVATE | UGC Reporter | - |
-| GET | `/api/v1/ugc/reporter/submissions/` | PRIVATE | UGC Reporter | cursor, page_size, status |
-| POST | `/api/v1/ugc/send-otp/` | PUBLIC | UGC | - |
-| POST | `/api/v1/ugc/submit/` | PRIVATE | UGC | - |
-| POST | `/api/v1/ugc/upload-media/` | PRIVATE | UGC | - |
-| POST | `/api/v1/ugc/verify-otp/` | PUBLIC | UGC | - |
-| POST | `/api/v1/user/location/` | PRIVATE | Users | - |
-| PATCH | `/api/v1/users/me/preferences/` | PRIVATE | Users | - |
-
-## 5. Detailed Frontend API Contracts
-
-### 4.1 Auth / Accounts
-
-#### Register
-
-Purpose: create an account and device session.
-
-Frontend screen: Register / Onboarding.
-
-Access: PUBLIC.
-
-Method and endpoint:
-
-```http
-POST /api/v1/auth/register/
-```
-
-Request:
-
-```json
-{
-  "email": "ravi@example.com",
-  "password": "StrongPass123!",
-  "password_confirm": "StrongPass123!",
-  "full_name": "Ravi Kumar",
-  "preferred_language": "te",
-  "device_id": "android-uuid-123",
-  "device_name": "Pixel 8",
-  "device_type": "android",
-  "fcm_token": "optional-fcm-token"
-}
-```
-
-Response:
+Fields:
+
+- `mobile`: required Indian mobile string.
+- `title`: required string max 255.
+- `description`: required string.
+- `category`: optional string max 100.
+- `content_type`: required enum `TEXT`, `IMAGE`, `VIDEO`.
+- `media_url`: optional URL.
+- `thumbnail_url`: optional URL.
+- `media_items`: optional array, max `UGC_MAX_MEDIA_ITEMS`.
+- `location_lat`, `location_lon`: optional decimal.
+- `village`, `subdistrict`, `district`, `state`, `country`: optional strings.
+
+Success 201:
 
 ```json
 {
   "data": {
-    "access": "jwt-access-token",
-    "refresh": "jwt-refresh-token",
-    "session_id": "1d0d9b0e-88ec-45ca-924b-5d9ba0615f10",
-    "user": {
-      "id": "c52f9153-d3b6-45e8-99dd-ffbf6a44bb16",
-      "email": "ravi@example.com",
-      "full_name": "Ravi Kumar",
-      "profile_image": null,
-      "preferred_language": "te",
-      "theme": "system",
-      "font_size": 16,
-      "is_contributor": false,
-      "is_admin": false,
-      "created_at": "2026-06-22T10:00:00+05:30"
+    "id": "uuid",
+    "title": "Suryapet road repair update",
+    "description": "Local road repair work started near the market area.",
+    "category": "local",
+    "content_type": "VIDEO",
+    "media_url": "",
+    "thumbnail_url": "",
+    "media_type": "",
+    "media_items": [],
+    "media_metadata": {},
+    "upload_status": "PENDING",
+    "validation_status": "VALID",
+    "duplicate_score": 0,
+    "duplicate_matches": [],
+    "duplicate_flagged": false,
+    "location_lat": "17.141500",
+    "location_lon": "79.623600",
+    "village": "",
+    "subdistrict": "Suryapet",
+    "district": "Suryapet",
+    "state": "Telangana",
+    "country": "India",
+    "status": "PENDING_REVIEW",
+    "source_type": "USER_UPLOAD",
+    "mobile_verified": true,
+    "created_at": "2026-09-04T10:00:00+05:30",
+    "updated_at": "2026-09-04T10:00:00+05:30"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+- `Submitted mobile does not match verified mobile.`
+- Rate-limit service reason text.
+- Upload validation text.
+
+### Upload UGC Media
+
+Use this after creating a submission when the user selected local files.
+
+```http
+POST /api/v1/ugc/upload-media/
+Authorization: Bearer <access_token>
+Content-Type: multipart/form-data
+```
+
+Single file:
+
+```text
+submission_id=<submission_uuid>
+mobile=9876543210
+media_type=VIDEO
+file=<binary>
+```
+
+Multiple files:
+
+```text
+submission_id=<submission_uuid>
+mobile=9876543210
+media_type=IMAGE
+media_types=IMAGE,IMAGE,VIDEO
+files=<binary file 1>
+files=<binary file 2>
+files=<binary file 3>
+```
+
+Rules:
+
+- `media_types` count must match uploaded file count when supplied.
+- If `media_types` is omitted, all files use `media_type`.
+- Total existing plus new media cannot exceed `UGC_MAX_MEDIA_ITEMS`.
+- Images and videos are validated by backend size/type rules from environment settings.
+
+Success 200 returns full `UserNewsSubmission` with `media_items`.
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "media_types must match the number of uploaded files.",
+    "details": {
+      "detail": "media_types must match the number of uploaded files."
     }
-  },
-  "meta": {},
-  "errors": null
-}
-```
-
-Status codes: `201`, `400`, `429`, `500`.
-
-#### Login
-
-Purpose: authenticate and create/update a device session.
-
-Access: PUBLIC.
-
-```http
-POST /api/v1/auth/login/
-```
-
-Request:
-
-```json
-{
-  "email": "ravi@example.com",
-  "password": "StrongPass123!",
-  "device_id": "android-uuid-123",
-  "device_name": "Pixel 8",
-  "device_type": "android",
-  "fcm_token": "optional-fcm-token"
-}
-```
-
-Response: same auth token shape as register.
-
-Status codes: `200`, `400`, `401`, `429`, `500`.
-
-#### Refresh Token
-
-Access: PUBLIC.
-
-```http
-POST /api/v1/auth/token/refresh/
-```
-
-Request:
-
-```json
-{
-  "refresh": "jwt-refresh-token",
-  "device_id": "android-uuid-123"
-}
-```
-
-Response:
-
-```json
-{
-  "data": {
-    "access": "new-access-token",
-    "refresh": "new-refresh-token"
-  },
-  "meta": {},
-  "errors": null
-}
-```
-
-#### Logout / Revoke
-
-Access: PRIVATE.
-
-```http
-POST /api/v1/auth/logout/
-POST /api/v1/auth/revoke/
-```
-
-Logout request:
-
-```json
-{
-  "refresh": "jwt-refresh-token",
-  "logout_all_devices": false
-}
-```
-
-#### Profile
-
-Access: PRIVATE.
-
-```http
-GET /api/v1/auth/me/
-PATCH /api/v1/auth/me/
-```
-
-Patch request:
-
-```json
-{
-  "full_name": "Ravi Kumar",
-  "preferred_language": "te",
-  "theme": "system",
-  "font_size": 16
-}
-```
-
-Profile fields: `id`, `email`, `full_name`, `profile_image`, `preferred_language`, `theme`, `font_size`, `is_contributor`, `is_admin`, `created_at`.
-
-#### Password APIs
-
-Access:
-
-| API | Access |
-| --- | --- |
-| `POST /api/v1/auth/password/change/` | PRIVATE |
-| `POST /api/v1/auth/password/reset/request/` | PUBLIC |
-| `POST /api/v1/auth/password/reset/verify/` | PUBLIC |
-| `POST /api/v1/auth/password/reset/confirm/` | PUBLIC |
-
-Password change request:
-
-```json
-{
-  "current_password": "OldPass123!",
-  "new_password": "NewPass123!",
-  "new_password_confirm": "NewPass123!"
-}
-```
-
-Password reset request:
-
-```json
-{
-  "email": "ravi@example.com"
-}
-```
-
-Password reset verify:
-
-```json
-{
-  "email": "ravi@example.com",
-  "token": "reset-token-from-email"
-}
-```
-
-Password reset confirm:
-
-```json
-{
-  "email": "ravi@example.com",
-  "token": "reset-token-from-email",
-  "new_password": "NewPass123!",
-  "new_password_confirm": "NewPass123!"
-}
-```
-
-#### Device Sessions
-
-Access: PRIVATE.
-
-```http
-GET /api/v1/auth/sessions/
-DELETE /api/v1/auth/sessions/{session_id}/
-```
-
-Session fields: `id`, `device_name`, `device_type`, `last_used_at`, `ip_address`, `is_active`, `created_at`.
-
-#### User Location and Preferences
-
-Access: PRIVATE.
-
-```http
-POST /api/v1/user/location/
-PATCH /api/v1/users/me/preferences/
-```
-
-Location request:
-
-```json
-{
-  "lat": 17.385,
-  "lon": 78.4867,
-  "city": "Hyderabad",
-  "state": "Telangana",
-  "country": "India"
-}
-```
-
-Location response fields: `lat`, `lon`, `village`, `city`, `subdistrict`, `district`, `state`, `country`, `location_source`, `location_updated_at`.
-
-Preferences request:
-
-```json
-{
-  "category_weights": {
-    "local": 1.0,
-    "politics": 0.7,
-    "sports": 0.5
   }
 }
 ```
 
-Preferences response fields: `user`, `category_weights`, `top_categories`, `updated_at`.
-
-### 4.2 Articles / News
-
-#### Article Feed
-
-Purpose: main/home/local article feed.
-
-Frontend screen: Home, Main News, Local News, Category News.
-
-Access: PUBLIC. Token is optional in practice for personalized fields such as `is_bookmarked`.
-
-```http
-GET /api/v1/articles/feed/
-```
-
-Query params:
-
-| Param | Type | Required | Example | Purpose |
-| --- | --- | --- | --- | --- |
-| `cursor` | string | No | `cD0...` | Next page cursor. |
-| `page_size` | integer | No | `20` | Page size. |
-| `lang` | string | No | `te` | Language filter/preference. |
-| `category` | string | No | `politics` | Category filter/ranking. |
-| `breaking` | boolean | No | `true` | Return breaking articles only. |
-| `state` | string | No | `Telangana` | Location ranking/filter. |
-| `district` | string | No | `Hyderabad` | Location ranking/filter. |
-| `city` | string | No | `Hyderabad` | City alias. |
-| `subdistrict` | string | No | `Secunderabad` | Local ranking. |
-| `village` | string | No | `Madhapur` | Local ranking. |
-| `latitude` | number | No | `17.385` | Proximity ranking. |
-| `longitude` | number | No | `78.4867` | Proximity ranking. |
-
-Response item fields from `ArticleFeedSerializer`:
-
-`id`, `title`, `slug`, `summary`, `thumbnail_url`, `category`, `author_name`, `source_name`, `language`, `is_featured`, `is_breaking`, `is_bookmarked`, `share_url`, `read_time_minutes`, `view_count`, `published_at`, `state`, `district`, `village`, `subdistrict`, `is_regional`, `priority_score`, `location_tags`.
-
-Example:
-
 ```json
 {
-  "data": [
-    {
-      "id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-      "title": "Metro services extended in Hyderabad",
-      "slug": "metro-services-extended-hyderabad",
-      "summary": "Metro timings have been extended for the weekend.",
-      "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-      "category": {
-        "id": "2d35a2f8-0e71-45c0-a2d1-fec74ec1b7ff",
-        "name": "Local",
-        "slug": "local",
-        "icon": "",
-        "order": 1,
-        "is_active": true
-      },
-      "author_name": "VARADHI News",
-      "source_name": "Reporter",
-      "language": "te",
-      "is_featured": false,
-      "is_breaking": true,
-      "is_bookmarked": false,
-      "share_url": null,
-      "read_time_minutes": 2,
-      "view_count": 125,
-      "published_at": "2026-06-22T08:30:00+05:30",
-      "state": "Telangana",
-      "district": "Hyderabad",
-      "village": "",
-      "subdistrict": "",
-      "is_regional": true,
-      "priority_score": 90,
-      "location_tags": ["Hyderabad"]
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Invalid media_types value.",
+    "details": {
+      "detail": "Invalid media_types value."
     }
-  ],
-  "meta": {
-    "count": null,
-    "next": null,
-    "previous": null
-  },
-  "errors": null
+  }
 }
 ```
 
-Empty state:
-
 ```json
 {
-  "data": [],
-  "meta": {
-    "count": 0,
-    "next": null,
-    "previous": null
-  },
-  "errors": null
-}
-```
-
-Status codes: `200`, `400`, `429`, `500`.
-
-#### Article Detail
-
-Purpose: full article body by slug.
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/{slug}/
-```
-
-Response fields from `ArticleDetailSerializer`: feed fields plus `content`, `source_url`, `source_logo_url`, `seo_title`, `seo_description`, `seo_tags`, and `tts_url`. Detail does not include `state` or `district` in the serializer.
-
-Example:
-
-```json
-{
-  "data": {
-    "id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-    "title": "Metro services extended in Hyderabad",
-    "slug": "metro-services-extended-hyderabad",
-    "summary": "Metro timings have been extended for the weekend.",
-    "content": "Full article body...",
-    "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-    "category": {
-      "id": "2d35a2f8-0e71-45c0-a2d1-fec74ec1b7ff",
-      "name": "Local",
-      "slug": "local",
-      "icon": "",
-      "order": 1,
-      "is_active": true
-    },
-    "author_name": "VARADHI News",
-    "source_url": "https://example.com/source",
-    "source_name": "Reporter",
-    "source_logo_url": "",
-    "language": "te",
-    "is_featured": false,
-    "is_breaking": true,
-    "seo_title": "",
-    "seo_description": "",
-    "seo_tags": [],
-    "read_time_minutes": 2,
-    "view_count": 126,
-    "published_at": "2026-06-22T08:30:00+05:30",
-    "is_bookmarked": false,
-    "share_url": null,
-    "village": "",
-    "subdistrict": "",
-    "tts_url": ""
-  },
+  "data": null,
   "meta": {},
-  "errors": null
-}
-```
-
-Status codes: `200`, `404`, `429`, `500`.
-
-#### Featured Articles
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/featured/?lang=te
-```
-
-Response: list of `ArticleFeedSerializer` items in the envelope.
-
-#### Recommendations
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/recommendations/
-```
-
-Query params: `limit`, `lang`, `state`, `district`, `city`, `village`, `subdistrict`, `category`.
-
-Response: non-cursor list of `RecommendationSerializer` article items. Additional field: `tts_url`.
-
-Contract warning: recommendations are not cursor paginated. Use `limit`, not `cursor`.
-
-#### Recommendation Tracking
-
-Access: PUBLIC, throttled.
-
-```http
-POST /api/v1/articles/recommendation/impression/
-POST /api/v1/articles/recommendation/click/
-POST /api/v1/articles/recommendation/dwell/
-```
-
-Impression/click request:
-
-```json
-{
-  "article_id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-  "session_id": "guest-session-123"
-}
-```
-
-Dwell request:
-
-```json
-{
-  "article_id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-  "seconds": 18,
-  "session_id": "guest-session-123"
-}
-```
-
-Status codes: `200`, `400`, `429`, `500`.
-
-#### Live News
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/live/
-```
-
-Fields from `LiveNewsSerializer`: `id`, `title`, `youtube_url`, `youtube_video_id`, `thumbnail_url`, `description`, `channel_name`, `is_active`, `autoplay`, `sort_order`.
-
-#### Video Feed
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/video-feed/?lang=te&page_size=20
-GET /api/v1/articles/video-feed/?scope=local&state=Telangana&district=Suryapet&lang=te&page_size=20
-```
-
-Location note: video feed supports `scope=main` for broad/ranked video results and `scope=local` for strict local filtering when `NewsVideo` location fields are populated. Local scope accepts `state`, `district`, `city`, `subdistrict`, and `village`; legacy videos without deep location remain available in main scope and do not appear in strict local results.
-
-Fields include: `id`, `title`, `youtube_video_id`, `youtube_url`, `thumbnail_url`, `description`, `channel_name`, `published_at`, `is_live`, `is_trending`, `is_breaking`, `is_short`, `video_priority`, `state`, `district`, `city`, `subdistrict`, `village`, `location_tags`, `language`, `views_count`, `likes_count`, `concurrent_viewers`, `duration_seconds`, `created_at`, `updated_at`.
-
-Contract warning: first-page live items may omit optional `NewsVideo` fields. If `is_live=true`, treat `duration_seconds`, `concurrent_viewers`, `likes_count`, `views_count`, `state`, `district`, `city`, `subdistrict`, `village`, `location_tags`, `language`, `created_at`, and `updated_at` as optional.
-
-#### Shorts Feed
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/articles/shorts-feed/?lang=te&page_size=20
-GET /api/v1/articles/shorts-feed/?scope=local&state=Telangana&district=Suryapet&lang=te&page_size=20
-```
-
-Location note: shorts feed uses the same strict local filtering as video feed. Use `scope=local` with APK location params for local shorts. Items without matching deep location fields are excluded from local scope.
-
-Fields from `ShortsVideoSerializer`: `id`, `title`, `thumbnail_url`, `youtube_video_id`, `youtube_url`, `is_live`, `is_breaking`, `is_trending`, `channel_name`, `video_priority`, `is_short`, `duration_seconds`, `state`, `district`, `city`, `subdistrict`, `village`, `location_tags`.
-
-#### Blogs, EPapers, TTS
-
-| API | Access | Purpose |
-| --- | --- | --- |
-| `GET /api/v1/articles/blogs/` | PUBLIC | Short blog list. |
-| `GET /api/v1/articles/epapers/?lang=te` | PUBLIC | E-paper list with pre-signed `pdf_url`. |
-| `POST /api/v1/articles/tts/` | PUBLIC | Generate/fetch text-to-speech audio. |
-| `GET /api/v1/articles/tts/status/{task_id}/` | PUBLIC | Poll async TTS task status. |
-
-Admin blog workflow:
-
-```http
-GET /admin/api/articles/blogs/
-POST /admin/api/articles/blogs/
-GET /admin/api/articles/blogs/{blog_id}/
-PATCH /admin/api/articles/blogs/{blog_id}/
-DELETE /admin/api/articles/blogs/{blog_id}/
-```
-
-Access: ADMIN / INTERNAL. Delete is soft delete. Public mobile apps should continue to read blogs from `GET /api/v1/articles/blogs/`.
-
-Create/update payload:
-
-```json
-{
-  "title": "Short Blog",
-  "slug": "short-blog",
-  "content": "This is a short backend verified blog.",
-  "thumbnail_url": "",
-  "category": "7c7b120a-6b79-4926-972e-e08ba616ec9e",
-  "seo_title": "",
-  "seo_description": "",
-  "seo_tags": [],
-  "is_published": true,
-  "scheduled_at": null
-}
-```
-
-`content` is limited to short blog content by backend validation. `author` defaults to the authenticated admin user when omitted.
-
-Admin article create workflow:
-
-```http
-POST /admin/api/articles/
-```
-
-Access: ADMIN / INTERNAL. Use JWT bearer token from an admin user. The authenticated admin user becomes the article `author`.
-
-Request fields:
-
-`title`, `summary`, `content`, `thumbnail_url`, `thumbnail_upload`, `category`, `language`, `is_featured`, `is_breaking`, `status`, `scheduled_at`, `seo_title`, `seo_description`, `seo_tags`, `source_url`, `source_name`, `state`, `district`, `city`, `village`, `subdistrict`, `priority_score`, `location_tags`.
-
-Request example:
-
-```json
-{
-  "title": "Hyderabad Metro services extended",
-  "summary": "Metro services will run longer for festival traffic.",
-  "content": "Full article body content for the admin-created news story.",
-  "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-  "category": "7c7b120a-6b79-4926-972e-e08ba616ec9e",
-  "language": "en",
-  "status": "published",
-  "is_featured": false,
-  "is_breaking": true,
-  "state": "Telangana",
-  "district": "Hyderabad",
-  "city": "Hyderabad",
-  "village": "Madhapur",
-  "subdistrict": "Serilingampally",
-  "priority_score": 10,
-  "location_tags": ["Telangana", "Hyderabad", "Madhapur", "Serilingampally"],
-  "seo_title": "Hyderabad Metro services extended",
-  "seo_description": "Metro services will run longer for festival traffic.",
-  "seo_tags": ["hyderabad", "metro"],
-  "source_name": "VARADHI Desk"
-}
-```
-
-Multipart upload example:
-
-```http
-POST /admin/api/articles/
-Content-Type: multipart/form-data
-Authorization: Bearer <admin_access_token>
-```
-
-Form fields:
-
-```text
-title=Hyderabad Metro services extended
-summary=Metro services will run longer for festival traffic.
-content=Full article body content for the admin-created news story.
-thumbnail_upload=<image file>
-category=7c7b120a-6b79-4926-972e-e08ba616ec9e
-language=en
-status=published
-is_featured=false
-is_breaking=true
-state=Telangana
-district=Hyderabad
-city=Hyderabad
-village=Madhapur
-subdistrict=Serilingampally
-priority_score=10
-location_tags=["Telangana","Hyderabad","Madhapur","Serilingampally"]
-source_name=VARADHI Desk
-```
-
-Response example:
-
-```json
-{
-  "data": {
-    "id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-    "title": "Hyderabad Metro services extended",
-    "slug": "hyderabad-metro-services-extended",
-    "summary": "Metro services will run longer for festival traffic.",
-    "content": "Full article body content for the admin-created news story.",
-    "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-    "category": "7c7b120a-6b79-4926-972e-e08ba616ec9e",
-    "category_name": "General",
-    "author_email": "admin@example.com",
-    "language": "en",
-    "status": "published",
-    "is_featured": false,
-    "is_breaking": true,
-    "scheduled_at": null,
-    "published_at": "2026-07-01T10:00:00+05:30",
-    "seo_title": "Hyderabad Metro services extended",
-    "seo_description": "Metro services will run longer for festival traffic.",
-    "seo_tags": ["hyderabad", "metro"],
-    "source_url": "",
-    "source_name": "VARADHI Desk",
-    "state": "Telangana",
-    "district": "Hyderabad",
-    "city": "Hyderabad",
-    "village": "Madhapur",
-    "subdistrict": "Serilingampally",
-    "priority_score": 10,
-    "created_at": "2026-07-01T10:00:00+05:30",
-    "updated_at": "2026-07-01T10:00:00+05:30"
-  },
-  "meta": {},
-  "errors": null
-}
-```
-
-Notes:
-
-- `status="published"` automatically sets `published_at` and invalidates the feed cache.
-- `status="scheduled"` requires a future `scheduled_at`.
-- `location_tags` is accepted on create, but the admin response currently returns `state`, `district`, `city`, `village`, `subdistrict`, and `priority_score`; frontend should not require `location_tags` in the response.
-- For thumbnail, admin frontend can use either `thumbnail_url` or `thumbnail_upload`.
-- If using `thumbnail_upload`, send the request as `multipart/form-data`; uploaded file takes priority over `thumbnail_url`.
-- Alternative direct-to-S3 flow: call `POST /admin/api/articles/thumbnail-upload-url/`, upload directly to S3 using the returned fields, then send the returned `file_url` as `thumbnail_url`.
-
-TTS request:
-
-```json
-{
-  "content": "Article text to read aloud",
-  "language": "te",
-  "object_type": "article",
-  "object_id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-  "force_regenerate": false
-}
-```
-
-TTS status fields: `task_id`, `state`, `tts_id`, `file_url`, `error`.
-
-#### Contributor Article Create
-
-Access: PRIVATE / CONTRIBUTOR.
-
-```http
-POST /api/v1/articles/
-```
-
-Request fields: `title`, `summary`, `content`, `thumbnail_url`, `thumbnail_upload`, `category`, `language`, `is_featured`, `is_breaking`, `status`, `scheduled_at`, `seo_title`, `seo_description`, `seo_tags`, `source_url`, `source_name`, `state`, `district`, `city`, `village`, `subdistrict`, `priority_score`, `location_tags`.
-
-### 4.3 Unified Feed
-
-Purpose: mixed feed of articles, UGC, and live content.
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/feed/
-```
-
-Query params: `include`, `lang`, `language`, `state`, `district`, `city`, `village`, `subdistrict`, `category`, `cursor`, `page_size`.
-
-Unified item fields from `UnifiedFeedItemSerializer`: `id`, `type`, `title`, `summary`, `thumbnail_url`, `media_url`, `created_at`, `district`, `subdistrict`, `village`, `state`, `priority_score`, `source`, `trust_score`, `metadata`.
-
-Example:
-
-```json
-{
-  "data": [
-    {
-      "id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-      "type": "article",
-      "title": "Metro services extended",
-      "summary": "Metro timings extended.",
-      "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-      "media_url": "",
-      "created_at": "2026-06-22T08:30:00+05:30",
-      "district": "Hyderabad",
-      "subdistrict": "",
-      "village": "",
-      "state": "Telangana",
-      "priority_score": 90,
-      "source": "VARADHI News",
-      "trust_score": 0,
-      "metadata": {}
+  "errors": {
+    "code": 400,
+    "message": "Media validation failed.",
+    "details": {
+      "detail": "Media validation failed.",
+      "errors": [
+        {
+          "filename": "video.mov",
+          "errors": ["..."]
+        }
+      ]
     }
-  ],
-  "meta": {
-    "count": null,
-    "next": null,
-    "previous": null
-  },
-  "errors": null
+  }
 }
 ```
 
-### 4.4 Search
-
-Purpose: search articles/news.
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/search/?q=metro&lang=te&category=local
-```
-
-Query params:
-
-| Param | Type | Required | Purpose |
-| --- | --- | --- | --- |
-| `q` | string | No | Search keyword. |
-| `lang` | string | No | Language filter. |
-| `category` | string | No | Category filter. |
-
-Actual response shape:
-
 ```json
 {
-  "data": {
-    "keyword": "metro",
-    "result_count": 1,
-    "results": [
-      {
-        "id": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3",
-        "title": "Metro services extended in Hyderabad",
-        "slug": "metro-services-extended-hyderabad",
-        "summary": "Metro timings have been extended.",
-        "thumbnail_url": "https://cdn.varadhi.example.com/articles/metro.jpg",
-        "category": {
-          "id": "2d35a2f8-0e71-45c0-a2d1-fec74ec1b7ff",
-          "name": "Local",
-          "slug": "local",
-          "icon": "",
-          "order": 1,
-          "is_active": true
-        },
-        "author_name": "VARADHI News",
-        "source_name": "Reporter",
-        "language": "te",
-        "is_featured": false,
-        "is_breaking": false,
-        "is_bookmarked": false,
-        "share_url": null,
-        "read_time_minutes": 2,
-        "view_count": 125,
-        "published_at": "2026-06-22T08:30:00+05:30",
-        "state": "Telangana",
-        "district": "Hyderabad",
-        "village": "",
-        "subdistrict": "",
-        "is_regional": true,
-        "priority_score": 90,
-        "location_tags": ["Hyderabad"]
-      }
-    ]
-  },
+  "data": null,
   "meta": {},
-  "errors": null
+  "errors": {
+    "code": 404,
+    "message": "Submission not found.",
+    "details": {
+      "detail": "Submission not found."
+    }
+  }
 }
 ```
 
-Public search discovery:
+### UGC Feed
 
 ```http
-GET /api/v1/search/trending/
-GET /api/v1/search/zero-results/
+GET /api/v1/ugc/feed/?scope=main&page_size=20
+GET /api/v1/ugc/feed/?scope=local&state=Telangana&district=Suryapet
 ```
 
-Admin-only search analytics:
+Query:
 
-```http
-GET /admin/api/search/logs/
-POST /admin/api/search/logs/anonymize/
-GET /admin/api/search/trending/
-GET /admin/api/search/zero-results/
-```
+- `state`, `district`, `city`, `village`, `subdistrict`: optional.
+- `scope`: `main` or `local`; invalid values fallback to `main`.
+- `cursor`, `page_size`: page_size max 50.
 
-### 4.5 Categories
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/categories/
-```
-
-Category fields: `id`, `name`, `slug`, `icon`, `order`, `is_active`.
-
-Admin category APIs:
-
-```http
-POST /api/v1/categories/admin/
-PATCH /api/v1/categories/admin/{slug}/
-DELETE /api/v1/categories/admin/{slug}/
-```
-
-Access: ADMIN.
-
-### 4.6 Bookmarks
-
-Access: PRIVATE.
-
-```http
-GET /api/v1/bookmarks/
-POST /api/v1/bookmarks/
-POST /api/v1/bookmarks/toggle/
-DELETE /api/v1/bookmarks/{bookmark_id}/
-```
-
-Create/toggle request:
+Item:
 
 ```json
 {
-  "article": "5f90fd61-6bbf-43d5-9d92-d4269c1052d3"
-}
-```
-
-Frontend notes:
-
-If guest taps bookmark, show login prompt. Article feed/detail safely return `is_bookmarked: false` for guests.
-
-### 4.7 UGC / Reporter
-
-#### Public UGC OTP
-
-```http
-POST /api/v1/ugc/send-otp/
-POST /api/v1/ugc/verify-otp/
-```
-
-Access: PUBLIC.
-
-Request:
-
-```json
-{
-  "mobile": "9876543210"
-}
-```
-
-Verify request:
-
-```json
-{
-  "mobile": "9876543210",
-  "otp": "123456"
-}
-```
-
-#### UGC Submit
-
-Access: PRIVATE.
-
-```http
-POST /api/v1/ugc/submit/
-```
-
-Request:
-
-```json
-{
-  "mobile": "9876543210",
-  "title": "Road repair work started",
-  "description": "Road work has started near the market.",
-  "category": "local",
-  "content_type": "TEXT",
-  "media_url": "",
+  "id": "uuid",
+  "type": "ugc",
+  "title": "Local update",
+  "description": "User submitted news.",
   "thumbnail_url": "",
-  "location_lat": "17.385000",
-  "location_lon": "78.486700",
-  "village": "Madhapur",
-  "subdistrict": "Serilingampally",
-  "district": "Hyderabad",
+  "media_url": "https://cdn.example.com/ugc.mp4",
+  "media_type": "VIDEO",
+  "media_items": [],
+  "district": "Suryapet",
   "state": "Telangana",
-  "country": "India"
+  "village": "",
+  "subdistrict": "Suryapet",
+  "created_at": "2026-09-04T10:00:00+05:30",
+  "priority_score": 0,
+  "source": "USER_UPLOAD",
+  "trust_level": "NEW_USER",
+  "trust_score": 0,
+  "uploader": {
+    "id": "uuid",
+    "display_name": "user",
+    "trust_level": "NEW_USER"
+  }
 }
 ```
 
-Submission response fields from `UserNewsSubmissionSerializer`: `id`, `title`, `description`, `category`, `content_type`, `media_url`, `thumbnail_url`, `media_type`, `media_metadata`, `upload_status`, `validation_status`, `duplicate_score`, `duplicate_matches`, `duplicate_flagged`, `location_lat`, `location_lon`, `village`, `subdistrict`, `district`, `state`, `country`, `status`, `source_type`, `mobile_verified`, `created_at`, `updated_at`.
-
-#### Upload Media
-
-Access: PRIVATE.
-
-```http
-POST /api/v1/ugc/upload-media/
-```
-
-Request type: `multipart/form-data`.
-
-Fields: `submission_id`, `mobile`, `media_type`, `file`.
-
-#### UGC Feed
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/ugc/feed/?state=Telangana&district=Hyderabad&page_size=20
-```
-
-Use `scope=local` for Local News. Local scope uses the most specific supplied location and does not fall back to other regions:
-
-```http
-GET /api/v1/ugc/feed/?scope=local&state=Telangana&district=Suryapet&page_size=20
-```
-
-Response fields from `UGCFeedItemSerializer`: `id`, `type`, `title`, `description`, `thumbnail_url`, `media_url`, `media_type`, `district`, `state`, `village`, `subdistrict`, `created_at`, `priority_score`, `source`, `trust_level`, `trust_score`, `uploader`.
-
-#### UGC Admin Branded Media
-
-Access: ADMIN / INTERNAL.
-
-```http
-POST /api/v1/ugc/admin/submissions/{submission_id}/branded-media/
-```
-
-Request type: `multipart/form-data`.
-
-Fields: `file`, optional `thumbnail`, optional `notes`.
-
-Behavior: preserves the original user upload in admin-only fields, stores the uploaded branded media, and keeps public `media_url` pointing to the active display media.
-
-#### Reporter Dashboard
-
-Access: PRIVATE / REPORTER.
+### Reporter Dashboard
 
 ```http
 GET /api/v1/ugc/reporter/dashboard/
+Authorization: Bearer <access_token>
 ```
 
-Response:
+Success:
 
 ```json
 {
   "data": {
-    "total_submissions": 4,
+    "total_submissions": 3,
     "pending_count": 1,
     "approved_count": 2,
     "published_count": 2,
-    "rejected_count": 1,
-    "trust_score": 65,
-    "reporter_level": "TRUSTED",
+    "rejected_count": 0,
+    "trust_score": 10,
+    "reporter_level": "NEW_USER",
     "recent_submissions": []
   },
   "meta": {},
@@ -1546,281 +2226,305 @@ Response:
 }
 ```
 
-#### Reporter Submissions
-
-Access: PRIVATE / REPORTER.
+### Reporter Submissions
 
 ```http
 GET /api/v1/ugc/reporter/submissions/?status=pending&page_size=20
+Authorization: Bearer <access_token>
 ```
 
-Supported `status`: `pending`, `approved`, `published`, `rejected`. `published` aliases approved.
+Status filter values:
 
-#### Report Submission
+- `pending`
+- `approved`
+- `published`
+- `rejected`
 
-Access: PRIVATE.
+Invalid filter error: `Invalid status filter.`
+
+### Report UGC Submission
 
 ```http
 POST /api/v1/ugc/report/
+Authorization: Bearer <access_token>
+Content-Type: application/json
 ```
 
 Request:
 
 ```json
 {
-  "submission_id": "67de3618-96ca-4bbf-9501-d3161321ee4b",
-  "reason": "spam",
-  "notes": "Repeated duplicate content"
+  "submission_id": "uuid",
+  "reason": "misinformation",
+  "notes": "Looks incorrect"
 }
 ```
 
-Admin moderation:
+Errors:
+
+- `Submission not found.`
+- `Submission already reported by this user.`
+
+## 15. Categories
 
 ```http
-GET /api/v1/ugc/moderation/queue/
-GET /admin/api/ugc/queue/
-GET /admin/api/ugc/otp-deliveries/
-GET /admin/api/ugc/submissions/{submission_id}/
-POST /admin/api/ugc/submissions/{submission_id}/approve/
-POST /admin/api/ugc/submissions/{submission_id}/reject/
-POST /admin/api/ugc/submissions/{submission_id}/flag/
+GET /api/v1/categories/?lang=te
 ```
 
-Access: ADMIN.
-
-### 4.8 Rewards
-
-Rewards are private/user or admin-only. A user earns coins only when an admin approves an image/video UGC submission. Text-only UGC does not earn coins. Duplicate approval cannot create duplicate coins because the ledger uses `reward:ugc_approved_media:{submission_id}` as the idempotency key.
-
-#### User Rewards APIs
-
-```http
-GET /api/v1/rewards/wallet/
-GET /api/v1/rewards/transactions/?page_size=20
-GET /api/v1/rewards/payouts/?page_size=20
-POST /api/v1/rewards/payouts/
-GET /api/v1/rewards/payouts/{payout_id}/
-```
-
-Access: PRIVATE.
-
-Wallet response fields from `RewardWalletSummarySerializer`: `available_coins`, `locked_coins`, `redeemed_coins`, `lifetime_earned_coins`, `coin_value_rupees`, `available_value_rupees`, `minimum_withdrawal_coins`.
-
-Payout create payload:
-
-```json
-{
-  "coins_requested": 1,
-  "payout_method": "PHONEPE",
-  "payout_mobile": "9876543210",
-  "payout_upi_id": "user@upi",
-  "user_notes": "Please send to PhonePe"
-}
-```
-
-Payout response fields from `RewardPayoutRequestSerializer`: `id`, `coins_requested`, `coin_value_rupees`, `amount_rupees`, `payout_method`, `payout_mobile`, `payout_upi_id`, `payout_account_name`, `status`, `user_notes`, `payment_reference`, `requested_at`, `approved_at`, `paid_at`, `rejected_at`, `created_at`, `updated_at`.
-
-Transaction fields from `RewardTransactionSerializer`: `id`, `transaction_type`, `coins`, `value_rupees`, `status`, `source_app`, `source_model`, `source_object_id`, `metadata`, `created_at`.
-
-#### Admin Rewards APIs
-
-```http
-GET /api/v1/rewards/admin/dashboard/
-GET /api/v1/rewards/admin/wallets/
-GET /api/v1/rewards/admin/wallets/{user_id}/
-POST /api/v1/rewards/admin/wallets/{user_id}/adjust/
-GET /api/v1/rewards/admin/transactions/
-GET /api/v1/rewards/admin/payouts/
-GET /api/v1/rewards/admin/payouts/{payout_id}/
-POST /api/v1/rewards/admin/payouts/{payout_id}/mark-paid/
-POST /api/v1/rewards/admin/payouts/{payout_id}/reject/
-GET /api/v1/rewards/admin/settings/
-PATCH /api/v1/rewards/admin/settings/
-```
-
-Access: ADMIN.
-
-Admin adjustment payload:
-
-```json
-{
-  "coins": 1,
-  "reason": "Manual correction for approved story"
-}
-```
-
-Mark paid payload:
-
-```json
-{
-  "payment_reference": "PHONEPE-TXN-12345",
-  "admin_notes": "Paid manually via PhonePe"
-}
-```
-
-Reject payload:
-
-```json
-{
-  "admin_notes": "Invalid UPI ID"
-}
-```
-
-Reward settings payload:
-
-```json
-{
-  "coin_value_rupees": "5.00",
-  "coins_per_approved_media_submission": 1,
-  "minimum_withdrawal_coins": 1,
-  "is_active": true
-}
-```
-
-Workflow:
-
-1. User uploads UGC image/video.
-2. Admin approves UGC.
-3. Backend awards `+1` coin using immutable ledger transaction `EARN_APPROVED_UGC_MEDIA`.
-4. User checks wallet.
-5. User requests payout.
-6. Coins move `available -> locked` using `WITHDRAWAL_HOLD`.
-7. Client/admin pays manually through PhonePe/UPI/mobile outside the backend.
-8. Admin marks payout paid with `payment_reference`.
-9. Coins move `locked -> redeemed` using `WITHDRAWAL_PAID`.
-10. Duplicate approval does not duplicate coins.
-
-### 4.9 Posters
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/posters/?category=good_morning&lang=te&page_size=20
-```
-
-Query params: `category`, `lang`, `cursor`, `page_size`.
-
-Response fields from `PosterSerializer`: `id`, `title`, `category`, `image_url`, `thumbnail_url`, `images`, `language`, `festival_name`, `event_date`, `share_url`, `created_at`.
-
-Important: `share_url` is always `null`. `image_url` returns uploaded image file URL when present; otherwise it falls back to stored `image_url`. `images` is for swipe UI. Existing single-image posters still return one primary image item in `images`.
-
-Info/card categories:
-
-`good_morning`, `devotional`, `love`, `motivational`, `festival`, `special_day`, `jyothishyam`, `panchangam`, `daily_quote`, `health_tip`, `education`, `government_update`.
-
-Example:
+Success:
 
 ```json
 {
   "data": [
     {
-      "id": "2cd0f967-c7fc-4b68-8a95-bd595ac3a1ab",
-      "title": "Good Morning",
-      "category": "good_morning",
-      "image_url": "https://cdn.varadhi.example.com/posters/good-morning.jpg",
-      "thumbnail_url": "",
-      "images": [
-        {
-          "id": "2cd0f967-c7fc-4b68-8a95-bd595ac3a1ab",
-          "image_url": "https://cdn.varadhi.example.com/posters/good-morning.jpg",
-          "caption": "",
-          "sort_order": 0
-        }
-      ],
-      "language": "te",
-      "festival_name": "",
-      "event_date": null,
-      "share_url": null,
-      "created_at": "2026-06-22T08:00:00+05:30"
+      "id": "uuid",
+      "name": "Business",
+      "slug": "business",
+      "display_name": "Business",
+      "icon_url": "",
+      "color_hex": "#7B1FA2",
+      "sort_order": 5
     }
   ],
-  "meta": {
-    "count": null,
-    "next": null,
-    "previous": null
-  },
+  "meta": {},
   "errors": null
 }
 ```
 
-Admin card APIs:
+Use on HomeScreen top category chips and CategorySelectionScreen.
+
+## 16. Search
 
 ```http
-GET /api/v1/posters/admin/
-POST /api/v1/posters/admin/
-GET /api/v1/posters/admin/{poster_id}/
-PATCH /api/v1/posters/admin/{poster_id}/
-DELETE /api/v1/posters/admin/{poster_id}/
-POST /api/v1/posters/admin/{poster_id}/images/
-PATCH /api/v1/posters/admin/{poster_id}/images/{image_id}/
-DELETE /api/v1/posters/admin/{poster_id}/images/{image_id}/
+GET /api/v1/search/?q=ai&lang=en&category=technology
 ```
 
-Access: ADMIN. Use these for Jyothishyam, Panchangam, daily quote cards, health tips, education cards, and government update cards.
+Query:
 
-### 4.9 Ads
+- `q`: required string, minimum 2 characters.
+- `lang`: optional. If absent and logged in, user preferred language is used. Guests default `en`.
+- `category`: optional category slug.
 
-#### Active Ads
+Success:
 
-Access: PUBLIC.
+```json
+{
+  "data": {
+    "keyword": "ai",
+    "result_count": 3,
+    "results": []
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Search keyword is required.",
+    "details": {
+      "q": "Search keyword is required."
+    }
+  }
+}
+```
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Search keyword must be at least 2 characters.",
+    "details": {
+      "q": "Search keyword must be at least 2 characters."
+    }
+  }
+}
+```
+
+Frontend search flow:
+
+```text
+SearchScreen
+  -> wait until q has at least 2 characters
+  -> debounce 300 ms
+  -> call /api/v1/search/
+  -> render article cards from data.results
+  -> empty state if result_count is 0
+  -> tap article -> ArticleDetailScreen
+```
+
+Trending:
 
 ```http
-GET /api/v1/ads/?placement_zone=feed&state=Telangana&district=Suryapet
+GET /api/v1/search/trending/?days=7
 ```
 
-Query params: `zone` legacy alias, `placement_zone`, `scope`, `area_id`, `state`, `district`, `city`, `subdistrict`, `village`.
+Returns:
 
-Behavior: global ads show everywhere. Area ads show only when `area_id` or location params match the ad area. If no location is supplied, only global ads are returned.
+```json
+{
+  "data": [
+    {
+      "keyword": "hyderabad",
+      "search_count": 25
+    }
+  ],
+  "meta": {},
+  "errors": null
+}
+```
 
-Fields: `id`, `image_url`, `destination_url`, `ad_type`, `placement_zone`, `target_scope`, `area`, `display_frequency`, `ctr`.
+## 17. Ads and Bookings
 
-#### Ad Event
+### Get Ads
 
-Access: PUBLIC, throttled.
+```http
+GET /api/v1/ads/?zone=feed&scope=main&lang=te
+X-Device-ID: <device_id>
+X-Session-ID: <session_id>
+X-Device-Type: android
+```
+
+Query:
+
+- `zone` or `placement_zone`: optional; default `feed`.
+- Placement values: `feed`, `article`, `splash`, `search`.
+- `state`, `district`, `city`, `subdistrict`, `village`, `area_id`: optional.
+- `scope`: `main` or `local`.
+- `lang` or `language`: optional.
+- `category`: optional.
+
+Ad type values:
+
+`banner`, `interstitial`, `native`, `video`, `poster`, `sponsored_card`, `breaking_strip`, `local_listing`, `full_screen`, `bottom_sticky`.
+
+Success item:
+
+```json
+{
+  "id": "uuid",
+  "image_url": "https://cdn.example.com/ad.jpg",
+  "video_url": null,
+  "destination_url": "https://business.example.com",
+  "ad_type": "banner",
+  "placement_zone": "feed",
+  "target_scope": "global",
+  "area": null,
+  "display_frequency": 5,
+  "ctr": 0.0
+}
+```
+
+Frontend placement:
+
+- `splash`: App open ad screen.
+- `feed`: insert after every `display_frequency` content cards.
+- `article`: show inside article body after paragraph break or at bottom.
+- `search`: show between search results.
+
+### Track Ad Event
 
 ```http
 POST /api/v1/ads/event/
+Content-Type: application/json
+X-Device-ID: <device_id>
+X-Session-ID: <session_id>
+X-Device-Type: android
 ```
 
 Request:
 
 ```json
 {
-  "ad_id": "016d68c8-5b68-4c4f-9e09-d19a3a67d2ee",
-  "event_type": "impression"
+  "ad_id": "uuid",
+  "event_type": "impression",
+  "placement_zone": "feed",
+  "device_id": "android-device-123",
+  "session_id": "guest-session-123"
 }
 ```
 
-`event_type`: `impression` or `click`.
+`event_type`: `impression`, `viewability`, `click`, `dismiss`, `skip`, `hide`.
 
-#### Advertisement Areas
+Success:
 
-Access: PUBLIC.
+```json
+{
+  "data": {
+    "recorded": true
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+### Advertisement Areas
 
 ```http
 GET /api/v1/ads/areas/
 ```
 
-Fields: `id`, `name`, `state`, `district`, `city`, `village`, `subdistrict`, `sort_order`.
+Item:
 
-#### Advertisement Pricing
-
-Access: PUBLIC.
-
-```http
-GET /api/v1/ads/pricing/?ad_type=local&area_id=<uuid>&duration_days=7
+```json
+{
+  "id": "uuid",
+  "name": "Hyderabad",
+  "state": "Telangana",
+  "district": "Hyderabad",
+  "city": "Hyderabad",
+  "village": "",
+  "subdistrict": "",
+  "sort_order": 1
+}
 ```
 
-For `ad_type=local`, `area_id` is required. For `ad_type=main`, area may be null.
+### Pricing Quote
 
-Response fields: `ad_type`, `area`, `duration_days`, `price`, `currency`.
+```http
+GET /api/v1/ads/pricing/?ad_type=local&area_id=<area_uuid>&duration_days=7
+```
 
-#### Advertisement Booking
+`ad_type`: `local` or `main`.
 
-Access: PUBLIC, throttled.
+Success:
+
+```json
+{
+  "data": {
+    "ad_type": "local",
+    "area": {
+      "id": "uuid",
+      "name": "Hyderabad"
+    },
+    "duration_days": 7,
+    "price": "1500.00",
+    "currency": "INR"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Errors:
+
+- `area_id is required for local advertisements.`
+- `Active advertisement area not found.`
+- `Advertisement pricing not found.`
+
+### Create Booking
 
 ```http
 POST /api/v1/ads/bookings/
+Content-Type: application/json
 ```
 
 Request:
@@ -1831,163 +2535,146 @@ Request:
   "phone": "9876543210",
   "business_name": "Ravi Mobiles",
   "ad_type": "local",
-  "area_id": "6d5b3d3b-138d-4adf-88ef-3d5e9f51967a",
+  "area_id": "uuid",
   "duration_days": 7,
   "message": "Need banner ad in Hyderabad"
 }
 ```
 
-Response:
+Success 201:
 
 ```json
 {
   "data": {
-    "id": "ce154de3-59d6-41c6-a587-7be2483fdc2f",
+    "id": "uuid",
     "status": "pending",
     "quoted_price": "1500.00",
     "currency": "INR",
-    "whatsapp_url": "https://wa.me/919876543210?text=..."
+    "whatsapp_url": "https://wa.me/..."
   },
   "meta": {},
   "errors": null
 }
 ```
 
-Frontend flow: load areas, request pricing after type/area/duration selection, create booking, then open `whatsapp_url` using the platform browser/intent.
+Frontend flow:
 
-Admin ad APIs:
-
-```http
-GET /api/v1/ads/admin/
-POST /api/v1/ads/admin/
-GET /api/v1/ads/admin/{ad_id}/
-PATCH /api/v1/ads/admin/{ad_id}/
-DELETE /api/v1/ads/admin/{ad_id}/
-GET /api/v1/ads/admin/areas/
-POST /api/v1/ads/admin/areas/
-PATCH /api/v1/ads/admin/areas/{area_id}/
-GET /api/v1/ads/admin/pricing/
-POST /api/v1/ads/admin/pricing/
-PATCH /api/v1/ads/admin/pricing/{pricing_id}/
-GET /api/v1/ads/admin/bookings/
-PATCH /api/v1/ads/admin/bookings/{booking_id}/
+```text
+AdsBookingScreen
+  -> load areas
+  -> user chooses main/local
+  -> if local, select area
+  -> choose duration
+  -> call pricing
+  -> show quote
+  -> submit booking
+  -> success screen with WhatsApp contact button using whatsapp_url
 ```
 
-Access: ADMIN.
-
-Ad create/update supports `target_scope=global|area` and `area_id` for area ads. Existing ads without targeting remain global.
-
-### 4.10 Notifications
-
-User notification APIs are PRIVATE.
+## 18. Posters
 
 ```http
-GET /api/v1/notifications/inbox/?unread=true
-GET /api/v1/notifications/inbox/unread-count/
-GET /api/v1/notifications/inbox/{user_notification_id}/
-POST /api/v1/notifications/inbox/{user_notification_id}/read/
+GET /api/v1/posters/?category=good_morning&lang=te&page_size=20
 ```
 
-User notification fields: `id`, `notification_id`, `title`, `body`, `image_url`, `deep_link`, `is_read`, `read_at`, `notification_created_at`, `created_at`.
+Poster categories:
 
-Admin/legacy notification APIs:
+`good_morning`, `devotional`, `love`, `motivational`, `festival`, `special_day`, `jyothishyam`, `panchangam`, `daily_quote`, `health_tip`, `education`, `government_update`.
 
-```http
-POST /api/v1/notifications/send/
-POST /api/v1/notifications/admin/target-preview/
-GET /api/v1/notifications/
-GET /api/v1/notifications/{notification_id}/
-GET /admin/api/notifications/
-POST /admin/api/notifications/send/
-POST /admin/api/notifications/target-preview/
-GET /admin/api/notifications/{notification_id}/
-POST /admin/api/notifications/{notification_id}/retry-failed/
-```
-
-Access: ADMIN.
-
-Location/category targeting payload:
+Success item:
 
 ```json
 {
-  "title": "Suryapet Alert",
-  "body": "Local update",
-  "notification_type": "local",
-  "target_scope": "location",
-  "state": "Telangana",
-  "district": "Suryapet",
-  "category_slug": ""
+  "id": "uuid",
+  "title": "Good Morning",
+  "category": "good_morning",
+  "image_url": "https://cdn.example.com/poster.jpg",
+  "thumbnail_url": "",
+  "images": [
+    {
+      "id": "uuid",
+      "image_url": "https://cdn.example.com/poster.jpg",
+      "caption": "",
+      "sort_order": 0
+    }
+  ],
+  "language": "te",
+  "festival_name": "",
+  "event_date": null,
+  "share_url": null,
+  "created_at": "2026-09-04T10:00:00+05:30"
 }
 ```
 
-`target_scope`: `all`, `location`, `category`, `category_location`.
+Frontend UX:
 
-Preview:
+- Home horizontal poster strip.
+- PosterCategoryScreen grid.
+- PosterDetailScreen with swipe carousel using `images`.
+- Download/share buttons should use image URL. Backend does not provide a poster download API.
 
-```http
-POST /api/v1/notifications/admin/target-preview/
-```
+## 19. Polls
 
-Response:
-
-```json
-{
-  "data": {
-    "target_count": 10
-  },
-  "meta": {},
-  "errors": null
-}
-```
-
-Category targeting uses existing user category preference weights when available. The selected category and location are stored in `target_data`.
-
-### 4.11 Polls
-
-#### Poll List and Detail
-
-Access: PUBLIC.
+### List Polls
 
 ```http
 GET /api/v1/polls/
-GET /api/v1/polls/{poll_id}/
+X-Device-ID: <device_id>
 ```
 
-Fields from `PollSerializer`: `id`, `question`, `option_a`, `option_b`, `vote_a_count`, `vote_b_count`, `total_votes`, `options`, `percentages`, `user_vote`, `user_vote_option_id`, `is_active`, `is_expired`, `ends_at`, `created_at`.
+Returns active polls only, last 20, no pagination.
 
-`options` supports multi-option polls:
-
-```json
-[
-  {
-    "id": "f6d0c8b7-8e0e-47d7-8b82-49e504cf7301",
-    "label": "Roads",
-    "sort_order": 0,
-    "vote_count": 12,
-    "percentage": 42.9
-  }
-]
-```
-
-For guests, `user_vote` and `user_vote_option_id` are returned when the APK sends the same `X-Device-ID` used for voting.
-
-#### Vote
-
-Access: PUBLIC, throttled. APK should send `X-Device-ID` so one device can vote only once per poll.
-
-```http
-POST /api/v1/polls/{poll_id}/vote/
-```
-
-Request:
+Poll item:
 
 ```json
 {
-  "option_id": "f6d0c8b7-8e0e-47d7-8b82-49e504cf7301"
+  "id": "uuid",
+  "question": "Who will win?",
+  "option_a": "A",
+  "option_b": "B",
+  "vote_a_count": 10,
+  "vote_b_count": 5,
+  "total_votes": 15,
+  "options": [
+    {
+      "id": "uuid",
+      "label": "A",
+      "sort_order": 0,
+      "vote_count": 10,
+      "percentage": 66.7
+    }
+  ],
+  "percentages": {
+    "a": 66.7,
+    "b": 33.3
+  },
+  "user_vote": null,
+  "user_vote_option_id": null,
+  "is_active": true,
+  "is_expired": false,
+  "ends_at": null,
+  "created_at": "2026-09-04T10:00:00+05:30"
 }
 ```
 
-Legacy two-option payload still works:
+### Vote
+
+```http
+POST /api/v1/polls/{poll_id}/vote/
+Authorization: Bearer <access_token>   # optional
+X-Device-ID: <device_id>               # recommended for guests
+Content-Type: application/json
+```
+
+Preferred request:
+
+```json
+{
+  "option_id": "uuid"
+}
+```
+
+Legacy request:
 
 ```json
 {
@@ -1995,294 +2682,1194 @@ Legacy two-option payload still works:
 }
 ```
 
-Status codes: `200`, `400`, `404`, `429`, `500`.
-
-Admin poll APIs:
-
-```http
-POST /api/v1/polls/admin/
-GET /admin/api/polls/
-POST /admin/api/polls/
-GET /admin/api/polls/{poll_id}/
-PATCH /admin/api/polls/{poll_id}/
-DELETE /admin/api/polls/{poll_id}/
-POST /admin/api/polls/{poll_id}/close/
-GET /admin/api/polls/{poll_id}/results/
-```
-
-Access: ADMIN.
-
-Create multi-option poll:
+Error if neither supplied:
 
 ```json
 {
-  "question": "Best local issue?",
-  "options": ["Roads", "Water", "Power", "Schools"],
-  "is_active": true,
-  "ends_at": null
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Provide option_id or legacy choice.",
+    "details": {
+      "option_id": ["Provide option_id or legacy choice."]
+    }
+  }
 }
 ```
 
-Legacy two-option create still works with `option_a` and `option_b`.
+Frontend UX:
 
-### 4.12 CMS
+- Show option buttons.
+- After vote, replace buttons with percentage bars.
+- Do not allow repeat tap while request is pending.
 
-Access: PUBLIC.
+## 20. Bookmarks
+
+All bookmark APIs require login.
+
+### List
+
+```http
+GET /api/v1/bookmarks/?page_size=20
+Authorization: Bearer <access_token>
+```
+
+Item:
+
+```json
+{
+  "id": "uuid",
+  "article": {},
+  "created_at": "2026-09-04T10:00:00+05:30"
+}
+```
+
+### Add
+
+```http
+POST /api/v1/bookmarks/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "article_id": "uuid"
+}
+```
+
+Success 201:
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "message": "Bookmarked successfully."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Already bookmarked 200:
+
+```json
+{
+  "data": {
+    "message": "Article already bookmarked."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+### Toggle
+
+```http
+POST /api/v1/bookmarks/toggle/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "article_id": "uuid"
+}
+```
+
+Success add:
+
+```json
+{
+  "data": {
+    "bookmarked": true,
+    "message": "Bookmarked."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Success remove:
+
+```json
+{
+  "data": {
+    "bookmarked": false,
+    "message": "Bookmark removed."
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+### Delete
+
+```http
+DELETE /api/v1/bookmarks/{bookmark_id}/
+Authorization: Bearer <access_token>
+```
+
+Success 204: empty body.
+
+Error: `Bookmark not found.`
+
+## 21. Notifications
+
+### Guest Device Registration
+
+Use this for users who install the APK and do not log in. This lets admin broadcast/location notifications reach guest devices.
+
+```http
+POST /api/v1/notifications/guest-device/
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "device_id": "guest-device-123",
+  "device_name": "Pixel 8",
+  "device_type": "android",
+  "app_version": "1.0.0",
+  "fcm_token": "real_firebase_fcm_token_value",
+  "state": "Telangana",
+  "district": "Hyderabad",
+  "subdistrict": "Khairatabad",
+  "village": "Khairatabad",
+  "country": "India",
+  "state_id": "uuid",
+  "district_id": "uuid",
+  "subdistrict_id": "uuid",
+  "village_id": "uuid"
+}
+```
+
+Required:
+
+- `device_id`
+- `fcm_token`
+
+Optional:
+
+- `device_name`, `device_type`, `app_version`
+- text location fields
+- canonical location ids
+
+Error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Invalid FCM token.",
+    "details": {
+      "fcm_token": ["Invalid FCM token."]
+    }
+  }
+}
+```
+
+Important:
+
+- Guest devices can receive push notifications.
+- Guest notification inbox/list API is not implemented. Inbox APIs require login.
+- If user later logs in, include `fcm_token` in login/register so the authenticated `DeviceSession` is updated.
+
+### Notification Preferences
+
+```http
+GET /api/v1/notifications/preferences/
+PATCH /api/v1/notifications/preferences/
+Authorization: Bearer <access_token>
+```
+
+Patch request:
+
+```json
+{
+  "enabled": true,
+  "breaking_news": true,
+  "live_news": true,
+  "local_news": true,
+  "sports": true,
+  "politics": true,
+  "entertainment": true,
+  "business": true,
+  "quiet_hours_start": "22:00:00",
+  "quiet_hours_end": "07:00:00",
+  "timezone": "Asia/Kolkata",
+  "max_per_hour": 5,
+  "max_per_day": 25,
+  "snoozed_until": null
+}
+```
+
+Errors:
+
+- `max_per_hour`: `Must be zero or greater.`
+- `max_per_day`: `Must be zero or greater.`
+
+### Notification Subscriptions
+
+```http
+GET /api/v1/notifications/subscriptions/
+POST /api/v1/notifications/subscriptions/
+Authorization: Bearer <access_token>
+```
+
+Create location subscription:
+
+```json
+{
+  "subscription_type": "location",
+  "village_id": "uuid"
+}
+```
+
+Create category subscription:
+
+```json
+{
+  "subscription_type": "category",
+  "category_id": "uuid"
+}
+```
+
+Create breaking/live subscription:
+
+```json
+{
+  "subscription_type": "breaking"
+}
+```
+
+Subscription types: `location`, `category`, `breaking`, `live`.
+
+Errors:
+
+- `A valid active location is required.`
+- `Category not found or inactive.`
+
+Delete:
+
+```http
+DELETE /api/v1/notifications/subscriptions/{subscription_id}/
+Authorization: Bearer <access_token>
+```
+
+Error: `Subscription not found.`
+
+### Inbox
+
+```http
+GET /api/v1/notifications/inbox/?unread=true&page_size=20
+Authorization: Bearer <access_token>
+```
+
+`unread=true` returns unread. `unread=false` returns read.
+
+Item:
+
+```json
+{
+  "id": "uuid",
+  "notification_id": "uuid",
+  "title": "Breaking update",
+  "body": "News body",
+  "image_url": "",
+  "deep_link": "article://article-slug",
+  "is_read": false,
+  "read_at": null,
+  "notification_created_at": "2026-09-04T10:00:00+05:30",
+  "created_at": "2026-09-04T10:00:00+05:30"
+}
+```
+
+Unread count:
+
+```http
+GET /api/v1/notifications/inbox/unread-count/
+Authorization: Bearer <access_token>
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "unread_count": 5
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Mark read:
+
+```http
+POST /api/v1/notifications/inbox/{user_notification_id}/read/
+Authorization: Bearer <access_token>
+```
+
+Error: `Notification not found.`
+
+Push notification frontend flow:
+
+```text
+App start
+  -> initialize Firebase Messaging
+  -> ask notification permission at a good moment
+  -> get FCM token
+  -> if guest: POST /api/v1/notifications/guest-device/
+  -> if logged in: send fcm_token during login/register
+  -> on token refresh from Firebase: register again
+  -> foreground message: show in-app banner
+  -> background tap: parse deep_link
+  -> open ArticleDetail, Category, Home, or Notifications screen
+```
+
+Deep link examples used by backend/admin:
+
+```text
+article://article-slug
+screen://bookmarks
+varadhi://category/education
+```
+
+Flutter should maintain a deep-link parser. If the link is unknown, open HomeScreen.
+
+## 22. Analytics
+
+```http
+POST /api/v1/analytics/events/
+Content-Type: application/json
+Authorization: Bearer <access_token>   # optional
+```
+
+Request:
+
+```json
+{
+  "event_type": "article_open",
+  "article_id": "uuid",
+  "notification_id": "uuid",
+  "category_id": "uuid",
+  "state_id": "uuid",
+  "district_id": "uuid",
+  "subdistrict_id": "uuid",
+  "village_id": "uuid",
+  "language": "te",
+  "device_type": "android",
+  "guest_id": "guest-device-123",
+  "session_id": "guest-session-123",
+  "dwell_seconds": 30,
+  "scroll_depth": 80,
+  "metadata": {
+    "screen": "ArticleDetailScreen"
+  }
+}
+```
+
+For anonymous events, `guest_id` or `session_id` is required.
+
+Success 202:
+
+```json
+{
+  "data": {
+    "status": "accepted"
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "guest_id or session_id is required for anonymous analytics events.",
+    "details": {
+      "guest_id": ["guest_id or session_id is required for anonymous analytics events."]
+    }
+  }
+}
+```
+
+Frontend rule: analytics failures must not block UI.
+
+## 23. Rewards
+
+All rewards APIs require login.
+
+Wallet:
+
+```http
+GET /api/v1/rewards/wallet/
+Authorization: Bearer <access_token>
+```
+
+Response:
+
+```json
+{
+  "data": {
+    "available_coins": 10,
+    "locked_coins": 0,
+    "redeemed_coins": 0,
+    "lifetime_earned_coins": 10,
+    "coin_value_rupees": "1.00",
+    "available_value_rupees": "10.00",
+    "minimum_withdrawal_coins": 100
+  },
+  "meta": {},
+  "errors": null
+}
+```
+
+Transactions:
+
+```http
+GET /api/v1/rewards/transactions/?page_size=20
+Authorization: Bearer <access_token>
+```
+
+Transaction item:
+
+```json
+{
+  "id": "uuid",
+  "transaction_type": "earned",
+  "coins": 5,
+  "value_rupees": "5.00",
+  "status": "completed",
+  "source_app": "ugc",
+  "source_model": "UserNewsSubmission",
+  "source_object_id": "uuid",
+  "metadata": {},
+  "created_at": "2026-09-04T10:00:00+05:30"
+}
+```
+
+Create payout:
+
+```http
+POST /api/v1/rewards/payouts/
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "coins_requested": 100,
+  "payout_method": "PHONEPE",
+  "payout_mobile": "9876543210",
+  "payout_upi_id": "user@upi",
+  "payout_account_name": "John Doe",
+  "user_notes": "Please send to PhonePe"
+}
+```
+
+At least one of `payout_mobile`, `payout_upi_id`, or `payout_account_name` is required.
+
+Error:
+
+```json
+{
+  "data": null,
+  "meta": {},
+  "errors": {
+    "code": 400,
+    "message": "Provide payout mobile, UPI ID, or account name.",
+    "details": {
+      "non_field_errors": ["Provide payout mobile, UPI ID, or account name."]
+    }
+  }
+}
+```
+
+Payout detail:
+
+```http
+GET /api/v1/rewards/payouts/{payout_id}/
+Authorization: Bearer <access_token>
+```
+
+Error: `Payout request not found.`
+
+## 24. CMS, Quotes, Blogs, E-Paper, TTS
+
+CMS page:
 
 ```http
 GET /api/v1/cms/{slug}/
 ```
 
-Public CMS fields: `id`, `slug`, `title`, `content`, `updated_at` as defined by `CMSPagePublicSerializer`.
+Response:
 
-Admin CMS APIs:
-
-```http
-GET /admin/api/cms/
-POST /admin/api/cms/
-GET /admin/api/cms/{slug}/
-PUT /admin/api/cms/{slug}/
-PATCH /admin/api/cms/{slug}/
-DELETE /admin/api/cms/{slug}/
+```json
+{
+  "data": {
+    "title": "Privacy Policy",
+    "slug": "privacy-policy",
+    "content": "<p>...</p>"
+  },
+  "meta": {},
+  "errors": null
+}
 ```
 
-### 4.13 Quotes / Daily Cards
+Use for About, Privacy Policy, Terms, Contact if pages are configured.
 
-Access: PUBLIC.
+Random quote:
 
 ```http
 GET /api/v1/quotes/random/
 ```
 
-Purpose: show one random active quote/daily card.
+Response:
 
-Admin quote APIs:
-
-```http
-GET /admin/api/quotes/
-POST /admin/api/quotes/
-GET /admin/api/quotes/{id}/
-PUT /admin/api/quotes/{id}/
-PATCH /admin/api/quotes/{id}/
-DELETE /admin/api/quotes/{id}/
+```json
+{
+  "data": {
+    "text": "Quote text",
+    "author": "Author"
+  },
+  "meta": {},
+  "errors": null
+}
 ```
 
-### 4.14 Analytics / Metrics / Health
+Error: `No active quote found.`
 
-#### Lightweight Health
-
-Access: PUBLIC.
+Blogs:
 
 ```http
-GET /api/v1/health/
+GET /api/v1/articles/blogs/
 ```
 
-Use only for app startup diagnostics or deployment checks. Do not block normal app launch on this endpoint unless product requires it.
+Blog fields: `id`, `title`, `slug`, `content`, `thumbnail_url`, `author_name`, `category`, `seo_title`, `seo_description`, `seo_tags`, `published_at`, `view_count`.
 
-#### System Health
-
-Access: ADMIN / INTERNAL.
+E-Papers:
 
 ```http
-GET /api/v1/system/health/
-GET /admin/api/system/health/
-GET /admin/api/system/readiness/
-GET /admin/api/system/release-audit/
+GET /api/v1/articles/epapers/?lang=en
 ```
 
-#### Metrics
+E-Paper fields: `id`, `title`, `pdf_url`, `thumbnail_url`, `edition_date`, `publisher_name`, `language`, `page_count`.
 
-Access: INTERNAL.
+TTS:
 
 ```http
-GET /metrics/
+POST /api/v1/articles/tts/
+Content-Type: application/json
 ```
 
-This route exists only when `ENABLE_PROMETHEUS_METRICS=True`. It should be protected by network controls such as Nginx allowlists/security groups and must not be used by the mobile app.
+Request:
 
-#### Analytics
-
-Access: ADMIN.
-
-```http
-GET /api/v1/analytics/dashboard/
-GET /api/v1/analytics/user-preferences/
-GET /admin/api/analytics/dashboard/
-GET /admin/api/analytics/content/
-GET /admin/api/analytics/ugc/
-GET /admin/api/analytics/search/
-GET /admin/api/analytics/notifications/
+```json
+{
+  "content": "Text to read",
+  "language": "te",
+  "object_type": "article",
+  "object_id": "uuid",
+  "force_regenerate": false
+}
 ```
 
-## 6. Common Field Contracts
+Rules:
 
-### Article Feed Item
+- `content` max 5000 characters.
+- `object_type`: optional `article` or `blog`.
 
-| Field | Type | Required | Nullable | Frontend Use |
-| --- | --- | --- | --- | --- |
-| `id` | UUID string | Yes | No | Stable item key. |
-| `title` | string | Yes | No | Card/detail title. |
-| `slug` | string | Yes | No | Article detail route. |
-| `summary` | string | Yes | No | Card preview. |
-| `thumbnail_url` | string | Yes | Can be empty | Image. |
-| `category` | object | Yes | Yes if no category | Chip/filter display. |
-| `author_name` | string | Yes | No | Byline. |
-| `source_name` | string | Yes | Can be empty | Source label. |
-| `language` | string | Yes | No | Language handling. |
-| `is_featured` | boolean | Yes | No | Featured badge. |
-| `is_breaking` | boolean | Yes | No | Breaking badge. |
-| `is_bookmarked` | boolean | Yes | No | Bookmark UI state. |
-| `share_url` | null | Yes | Yes | Currently always `null`; APK-first. |
-| `read_time_minutes` | integer | Yes | No | Reading time. |
-| `view_count` | integer | Yes | No | Popularity display. |
-| `published_at` | datetime | Yes | Yes | Time label. |
-| `state` | string | Yes | Can be empty | Local display. |
-| `district` | string | Yes | Can be empty | Local display. |
-| `village` | string | Yes | Can be empty | Local display. |
-| `subdistrict` | string | Yes | Can be empty | Local display. |
+Content error: `Content length must be <= 5000 characters.`
 
-### Video Item
+## 25. Language Architecture
 
-| Field | Type | Required | Nullable | Frontend Use |
-| --- | --- | --- | --- | --- |
-| `id` | string | Yes | No | Stable key. |
-| `title` | string | Yes | No | Video title. |
-| `youtube_video_id` | string | Yes | No | YouTube player ID. |
-| `youtube_url` | URI string | Yes | No | External/open URL. |
-| `thumbnail_url` | string | Yes | Can be empty | Video thumbnail. |
-| `channel_name` | string | No | Can be empty | Channel label. |
-| `published_at` | datetime | No | Yes | Published label. |
-| `is_live` | boolean | Yes | No | Live badge/player handling. |
-| `is_short` | boolean | No | No | Shorts UI. |
-| `duration_seconds` | integer | No | Yes | Duration badge. |
+There are two different language concepts.
 
-### Error Handling Rules
+### APK/UI Language
 
-| Status | Meaning | Frontend Action |
-| --- | --- | --- |
-| `200` | Success | Render `data`. |
-| `201` | Created | Render new resource or success UI. |
-| `204` | No content | Treat as success; body may be empty before renderer. |
-| `400` | Validation error | Show field-level error from `errors.details`. |
-| `401` | Missing/invalid token | Clear token or show login. |
-| `403` | Forbidden | Show permission message. |
-| `404` | Not found | Show empty/not-found state. |
-| `409` | Conflict | Show duplicate/state conflict if returned. |
-| `429` | Throttled | Back off and show retry message. |
-| `500` | Server error | Show generic retry UI. |
+This controls static Flutter strings:
 
-## 7. Frontend Implementation Flow
+- Buttons
+- Menus
+- Navigation labels
+- Error display text
+- Settings labels
 
-### App Start Flow
+This is owned by Flutter localization. Backend does not translate APK UI strings.
 
-1. Read stored access token, refresh token, language, and location from device storage.
-2. Optionally call `GET /api/v1/health/` for diagnostics.
-3. Start home with `GET /api/v1/articles/shorts-feed/`.
-4. In parallel, preload `GET /api/v1/categories/`, `GET /api/v1/articles/feed/`, `GET /api/v1/ads/`, and `GET /api/v1/quotes/random/`.
+### Content Language
 
-### Guest User Flow
+This controls backend content:
 
-Guest users can use:
+- Article language
+- Category display names
+- Poster language
+- Search language
+- Featured/recommendation language
 
-`/articles/feed/`, `/articles/{slug}/`, `/articles/featured/`, `/articles/live/`, `/articles/video-feed/`, `/articles/shorts-feed/`, `/articles/recommendations/`, `/feed/`, `/search/`, `/search/trending/`, `/search/zero-results/`, `/categories/`, `/posters/`, `/ads/`, `/ads/areas/`, `/ads/pricing/`, `/ads/bookings/`, `/polls/`, `/cms/{slug}/`, `/quotes/random/`, `/ugc/feed/`, `/ugc/send-otp/`, `/ugc/verify-otp/`.
+Backend behavior:
 
-Guest users cannot use bookmarks, profile updates, notifications, UGC submit/upload/report, or reporter dashboard. Poll voting is public; APK should send `X-Device-ID` for duplicate-vote protection.
+- `/api/v1/articles/feed/` returns all languages if `lang` is omitted.
+- `/api/v1/articles/feed/?lang=te` filters Telugu.
+- `/api/v1/feed/` defaults to authenticated user `preferred_language`, else `en`.
+- `/api/v1/articles/featured/` defaults to authenticated user `preferred_language`, else `en`.
+- `/api/v1/search/` defaults to authenticated user `preferred_language`, else `en`.
+- `/api/v1/posters/` filters by `lang` only when `lang` is sent.
+- `/api/v1/articles/shorts-feed/` currently returns Telugu shorts only from queryset.
 
-### Logged-in User Flow
+Frontend rule:
 
-1. Login/register.
-2. Store `access` and `refresh`.
-3. Call `GET /api/v1/auth/me/`.
-4. Store/update location via `POST /api/v1/user/location/`.
-5. Enable bookmarks, notifications, poll voting, UGC submit, and reporter screens.
+- Changing APK/UI language must not automatically change content language unless product wants that.
+- Store `uiLanguage` separately from `contentLanguage`.
+- Send `contentLanguage` as `lang` to content APIs.
+- Save backend `preferred_language` only when the user explicitly changes content preference or profile language.
 
-### Home Page Flow
+## 26. Pagination and Infinite Scroll
 
-Recommended calls:
+Backend pagination types:
 
-1. `GET /api/v1/articles/shorts-feed/?lang=<lang>&page_size=20`
-2. `GET /api/v1/articles/feed/?lang=<lang>&page_size=20`
-3. `GET /api/v1/articles/feed/?state=&district=&subdistrict=&village=&lang=`
-4. `GET /api/v1/ads/?zone=home`
-5. `GET /api/v1/posters/?lang=<lang>&page_size=10`
-6. `GET /api/v1/quotes/random/`
+- Standard cursor pagination: articles, bookmarks, notifications, posters, rewards, UGC.
+- Offset-based cursor wrapper: unified feed and locations internally encode offsets as base64 `o:<offset>`.
+- Some endpoints are non-paginated: categories, polls, live list, blogs, ads areas.
 
-### Local News Flow
-
-Use local scope with location params. `scope=local` is strict and returns an empty list when no matching local content exists.
+Flutter pagination flow:
 
 ```text
-GET /api/v1/feed/?scope=local&state=Telangana&district=Suryapet&subdistrict=&village=&lang=te
+Initial load
+  -> request without cursor
+  -> render data
+  -> store meta.next
+  -> when user reaches 80 percent scroll
+  -> call meta.next exactly, or extract cursor and call same endpoint
+  -> append items by id
+  -> stop when meta.next is null
 ```
 
-### Article Detail Flow
+Rules:
 
-1. User taps feed card.
-2. Open `GET /api/v1/articles/{slug}/`.
-3. Render title, content, thumbnail, source, category, published time, read time, `is_bookmarked`, and `tts_url` if present.
-4. Since `share_url` is currently `null`, app should use native share text/deep-link only after product defines a deep-link contract.
+- Prevent duplicate requests while one page is loading.
+- De-duplicate by `id`.
+- Pull-to-refresh clears list and cursor, then reloads first page.
+- If refresh fails, keep old list and show a non-blocking error.
 
-### Post News Flow
+## 27. Flutter Page Architecture
 
-1. Require login.
-2. Optionally verify mobile using UGC OTP APIs.
-3. Submit with `POST /api/v1/ugc/submit/`.
-4. Upload media with `POST /api/v1/ugc/upload-media/` if needed.
-5. Show status from reporter dashboard/submissions.
+### Master Page to API Mapping
 
-### Reporter Dashboard Flow
+| Page | Purpose | APIs | When Called | Auth |
+| --- | --- | --- | --- | --- |
+| SplashScreen | Bootstrap app | health, guest-device, auth/me if token | App launch | Mixed |
+| LoginScreen | Sign in | POST auth/login | Submit | No |
+| RegisterScreen | Create account | POST auth/register | Submit | No |
+| ForgotPasswordScreen | Request reset | password/reset/request | Submit email | No |
+| ResetPasswordTokenScreen | Verify token | password/reset/verify | Submit token | No |
+| ResetPasswordConfirmScreen | Set password | password/reset/confirm | Submit password | No |
+| HomeScreen | Main content | feed, categories, featured, ads, posters, polls | Page load/refresh | No |
+| ArticleListScreen | Latest/category/local | articles/feed | Page load/paginate | No |
+| ArticleDetailScreen | Full article | article detail, comments, reactions, bookmarks, TTS | Open article | Mixed |
+| SearchScreen | Search news | search, trending | Query | No |
+| VideoFeedScreen | Video list | articles/video-feed | Page load/paginate | No |
+| VideoPlayerScreen | Play selected video | selected video payload | Open video | No |
+| ShortsScreen | Vertical reels | articles/shorts-feed | Page load/paginate | No |
+| UGCFeedScreen | User news feed | ugc/feed | Page load/paginate | No |
+| UGCSubmitScreen | Upload user news | ugc OTP, submit, upload-media | Submit flow | Yes |
+| UGCReporterDashboard | My UGC status | reporter/dashboard, reporter/submissions | Open page | Yes |
+| LocationSelectionScreen | Pick location | locations/search/list, auth locations | Search/select | Mixed |
+| PostersScreen | Poster categories | posters | Page load/filter | No |
+| PosterDetailScreen | View/share poster | selected poster payload | Open poster | No |
+| AdsBookingScreen | Book advertisement | areas, pricing, bookings | Form flow | No |
+| NotificationsScreen | Inbox | inbox, unread-count, mark-read | Open page | Yes |
+| NotificationSettingsScreen | Push settings | preferences, subscriptions | Open/save | Yes |
+| BookmarksScreen | Saved articles | bookmarks | Open/paginate | Yes |
+| ProfileScreen | User profile | auth/me, rewards/wallet | Open | Yes |
+| SettingsScreen | App settings | auth/me patch, CMS pages | Open/save | Mixed |
+| RewardsScreen | Wallet and payouts | rewards APIs | Open | Yes |
+| CMSPageScreen | Static pages | cms/{slug} | Open page | No |
 
-1. `GET /api/v1/ugc/reporter/dashboard/`.
-2. `GET /api/v1/ugc/reporter/submissions/?status=pending`.
-3. Use status filters: `pending`, `approved`, `published`, `rejected`.
+### Complete Navigation Flow
 
-### Ads Booking Flow
+```text
+SplashScreen
+  -> guest bootstrap
+  -> token check
+  -> HomeScreen
 
-1. `GET /api/v1/ads/areas/`.
-2. `GET /api/v1/ads/pricing/?ad_type=local&area_id=<uuid>&duration_days=7`.
-3. `POST /api/v1/ads/bookings/`.
-4. Open `whatsapp_url`.
+HomeScreen
+  -> ArticleDetailScreen
+  -> VideoPlayerScreen
+  -> ShortsScreen
+  -> SearchScreen
+  -> CategoryScreen
+  -> UGCFeedScreen
+  -> PostersScreen
+  -> AdsBookingScreen
+  -> NotificationsScreen
+  -> ProfileScreen
 
-### Notifications Flow
+Protected action without login
+  -> LoginPromptBottomSheet
+  -> LoginScreen/RegisterScreen
+  -> return to original action after success
 
-After login:
+ArticleDetailScreen
+  -> comments sheet
+  -> login prompt for comment/bookmark if guest
+  -> video fullscreen if article has video
 
-1. `GET /api/v1/notifications/inbox/unread-count/`.
-2. `GET /api/v1/notifications/inbox/`.
-3. `POST /api/v1/notifications/inbox/{user_notification_id}/read/`.
+UGCSubmitScreen
+  -> if user mobile not verified: SendOTP -> VerifyOTP
+  -> Submit UGC metadata
+  -> Upload media files if selected
+  -> ReporterDashboard
+```
 
-## 8. Contract Warnings and Integration Notes
+## 28. Home Page UI/UX Direction
 
-1. Runtime error shape uses an object, not an array: `errors.code`, `errors.message`, `errors.details`.
-2. `share_url` is intentionally `null` for articles and posters because VARADHI is APK-first and has no public website/deep-link contract yet.
-3. `GET /api/v1/articles/recommendations/` is not cursor paginated. Use `limit`.
-4. `GET /api/v1/articles/video-feed/` may return live first-page items with some optional video fields omitted.
-5. Admin endpoints may be documented by OpenAPI as raw serializers in places, but runtime renderer still wraps successful DRF responses in `{data, meta, errors}`.
-6. `GET /api/v1/health/` is public and lightweight. `GET /api/v1/system/health/` and `/admin/api/system/*` are admin/internal.
-7. `/metrics/` is not part of `/api/v1`; it exists only when metrics are enabled and must not be consumed by the mobile app.
+Use Way2News as a reference for fast local-news scanning, but do not clone it.
 
-## 9. Documentation Generation Summary
+Recommended HomeScreen hierarchy:
 
-Files created:
+1. Header
+   - VARADHI logo.
+   - Current content location: district/village chip.
+   - Notification bell with unread badge for logged-in users.
+   - Search icon.
 
-- `fullprojectapidocument.md`
+2. Category chips
+   - Horizontal chips from `/api/v1/categories/`.
+   - Use `display_name`, `icon_url`, `color_hex`.
+   - First chip: "All".
 
-Total OpenAPI operations documented: 142.
+3. Breaking strip
+   - Use `/api/v1/articles/feed/?breaking=true&page_size=5`.
+   - Compact horizontal headline ticker.
 
-Public APIs count: 39.
+4. Featured carousel
+   - Use `/api/v1/articles/featured/`.
+   - Large image, title, category, time.
 
-Private APIs count: 26.
+5. Mixed feed
+   - Use `/api/v1/feed/?include=all`.
+   - Render article, UGC, and live cards by `type`.
 
-Admin/internal APIs count: 77.
+6. Videos section
+   - Use `/api/v1/articles/video-feed/?page_size=5`.
+   - Horizontal video cards with play icon.
 
-Frontend screens covered:
+7. Shorts section
+   - Use `/api/v1/articles/shorts-feed/?page_size=10`.
+   - 9:16 vertical thumbnails.
 
-Splash, onboarding, login, register, password reset, location selection, language selection, home shorts, main news, local news, article detail, search, categories, posters, UGC submit, UGC media upload, reporter dashboard, reporter submission list, profile, preferences, bookmarks, notifications, polls, ads display, ad booking, CMS pages, quotes, and admin/moderator screens.
+8. Posters section
+   - Use `/api/v1/posters/?lang=<contentLanguage>&page_size=10`.
+   - Swipable poster cards.
 
-OpenAPI status:
+9. Poll card
+   - Use `/api/v1/polls/`.
+   - Show first active poll.
 
-This document was generated from the existing `openapi-schema.yml` and code inspection. No backend business logic, serializers, or API contracts were changed.
+10. Ads
+   - Use `/api/v1/ads/?zone=feed`.
+   - Insert according to `display_frequency`.
 
-Notes for frontend developer:
+Bottom navigation:
 
-Always unwrap `response.data.data` for actual payload, read pagination from `response.data.meta`, and handle errors from `response.data.errors`. Treat all admin/internal APIs as unavailable to mobile users unless building a separate admin console.
+- Home
+- Videos
+- Shorts
+- UGC
+- Profile
+
+Loading state:
+
+- Header skeleton.
+- Category chip skeleton.
+- Feed card skeletons with fixed dimensions.
+- Do not shift layout when images load.
+
+Empty state:
+
+- "No news found for this location."
+- Button: change location.
+- Button: refresh.
+
+Error state:
+
+- Keep cached content if available.
+- Show snackbar with retry.
+- Full-page error only when no cached content exists.
+
+## 29. Screen Design Details
+
+### Article Card
+
+Display fields:
+
+- Image: `thumbnail_url` or first `media_items[].url`.
+- Category: `category.display_name`.
+- Title: `title`.
+- Summary: `summary`.
+- Time: `published_at`.
+- Location: `district`, `village`.
+- Source: `source_name`.
+- Badges: `is_breaking`, `is_featured`.
+- Counts: `like_count`, `comment_count`.
+- Bookmark: `is_bookmarked`.
+
+Actions:
+
+- Tap card: ArticleDetailScreen.
+- Tap bookmark: login required, then `/api/v1/bookmarks/toggle/`.
+- Tap like/dislike: reaction endpoint; guest allowed with `X-Device-ID`.
+- Tap share: use `share_url` if non-null, else build app/web share link if product has one.
+
+### UGC Card
+
+Display fields:
+
+- Image/video: `thumbnail_url`, `media_url`, `media_items`.
+- Title: `title`.
+- Description: `description`.
+- Location: `district`, `village`, `subdistrict`.
+- Trust badge: `trust_level`, `trust_score`.
+- Uploader: `uploader.display_name`.
+
+Actions:
+
+- Tap video/image: media viewer.
+- Report: login required, `/api/v1/ugc/report/`.
+
+### Video Card
+
+Display fields:
+
+- Thumbnail: `thumbnail_url`.
+- Play badge if `youtube_video_id`, `youtube_url`, or `video_url` exists.
+- Live badge if `is_live`.
+- Breaking badge if `is_breaking`.
+- Title and channel.
+
+Actions:
+
+- Tap: VideoPlayerScreen.
+
+### Poster Card
+
+Display fields:
+
+- `image_url` or first `images[].image_url`.
+- `title`.
+- `category`.
+- `festival_name` and `event_date` when present.
+
+Actions:
+
+- Open detail carousel.
+- Share/download image through Flutter.
+
+## 30. Error Handling Strategy
+
+| Status | Backend Shape | Flutter Handling |
+| --- | --- | --- |
+| 400 | Envelope with validation details | Show field errors on forms; snackbar for non-form actions |
+| 401 | Envelope with auth detail | Try refresh once; if refresh fails, clear tokens and login prompt |
+| 403 | Envelope with permission detail | Show "You do not have permission" |
+| 404 | Envelope with not found detail | Show not-found state or remove stale item |
+| 429 | Envelope/detail throttle | Show wait message; do not retry immediately |
+| 500 | `Internal server error. Our team has been notified.` | Show generic retry |
+| 502/503 | May be HTML from nginx or envelope from app | Show service unavailable and retry |
+| Timeout | No backend body | Show retry/offline banner |
+| No internet | No backend body | Use cache and show offline state |
+
+Central API client behavior:
+
+- Parse JSON envelope when `Content-Type` is JSON.
+- If response is HTML/plain text, map to network/server error.
+- Extract message from `errors.message`.
+- For forms, map `errors.details` keys to inputs.
+- For background analytics/ad events, fail silently with log only.
+
+## 31. Flutter API Client Architecture
+
+Recommended structure:
+
+```text
+lib/
+  core/
+    network/
+      api_client.dart
+      auth_interceptor.dart
+      api_envelope.dart
+      api_error.dart
+    storage/
+      secure_token_store.dart
+      device_id_store.dart
+      cache_store.dart
+    routing/
+      app_router.dart
+      deep_link_router.dart
+    localization/
+      ui_language_controller.dart
+    config/
+      app_config.dart
+  features/
+    auth/
+    home/
+    articles/
+    videos/
+    shorts/
+    ugc/
+    search/
+    locations/
+    ads/
+    posters/
+    polls/
+    notifications/
+    bookmarks/
+    profile/
+    rewards/
+    cms/
+```
+
+Repository rule:
+
+- UI widgets must not call HTTP client directly.
+- Repositories call APIs.
+- Controllers/blocs/providers call repositories.
+- Models parse `data`, never the full response blindly.
+
+Suggested base envelope:
+
+```dart
+class ApiEnvelope<T> {
+  final T? data;
+  final Map<String, dynamic> meta;
+  final ApiError? errors;
+}
+```
+
+Important models:
+
+- `User`
+- `AuthResponse`
+- `Category`
+- `Article`
+- `ArticleMedia`
+- `ArticleComment`
+- `NewsVideo`
+- `UGCSubmission`
+- `UGCMediaItem`
+- `AdBanner`
+- `Poster`
+- `Poll`
+- `NotificationInboxItem`
+- `LocationSearchResult`
+- `RewardWallet`
+
+## 32. Backend to Flutter Contract
+
+Backend owns:
+
+- API routes and response shape.
+- Authentication and token validity.
+- Permissions.
+- Business validation.
+- Content status and moderation.
+- Article/UGC ranking.
+- Media upload validation.
+- Notification targeting and delivery.
+- Pagination.
+- Search.
+- Location canonical data.
+
+Flutter owns:
+
+- UI rendering.
+- Navigation.
+- Local state.
+- Token storage.
+- Local cache.
+- Retry/offline UX.
+- Video player lifecycle.
+- Image caching.
+- Pull-to-refresh and infinite scroll.
+- Form validation before submit for better UX.
+
+Flutter must not independently implement:
+
+- Article ranking rules.
+- UGC moderation decisions.
+- UGC OTP bypass rules.
+- Notification targeting rules.
+- Reward coin calculation.
+- Ad pricing calculation.
+
+## 33. Final Flutter Screen List
+
+01. SplashScreen
+    - APIs: health, guest-device, auth/me
+    - Destination: HomeScreen or LoginScreen when explicitly required
+
+02. LoginScreen
+    - APIs: auth/login
+    - Destination: HomeScreen or original protected action
+
+03. RegisterScreen
+    - APIs: auth/register
+    - Destination: HomeScreen
+
+04. ForgotPasswordScreen
+    - APIs: password/reset/request
+    - Destination: ResetPasswordTokenScreen
+
+05. ResetPasswordTokenScreen
+    - APIs: password/reset/verify
+    - Destination: ResetPasswordConfirmScreen
+
+06. ResetPasswordConfirmScreen
+    - APIs: password/reset/confirm
+    - Destination: LoginScreen
+
+07. HomeScreen
+    - APIs: feed, categories, featured, ads, posters, polls, video-feed, shorts-feed
+    - Destination: content detail screens
+
+08. CategoryScreen
+    - APIs: articles/feed with category
+    - Destination: ArticleDetailScreen
+
+09. ArticleDetailScreen
+    - APIs: article detail, comments, reactions, bookmarks, TTS optional
+    - Destination: CommentsSheet, VideoPlayerScreen
+
+10. SearchScreen
+    - APIs: search, trending
+    - Destination: ArticleDetailScreen
+
+11. VideoFeedScreen
+    - APIs: articles/video-feed
+    - Destination: VideoPlayerScreen
+
+12. VideoPlayerScreen
+    - APIs: none required after selected payload
+    - Handles YouTube/direct video
+
+13. ShortsScreen
+    - APIs: articles/shorts-feed
+    - Full-screen vertical player
+
+14. UGCFeedScreen
+    - APIs: ugc/feed
+    - Destination: media viewer/report
+
+15. UGCSubmitScreen
+    - APIs: ugc/send-otp, ugc/verify-otp, ugc/submit, ugc/upload-media
+    - Destination: UGCReporterDashboard
+
+16. UGCReporterDashboard
+    - APIs: ugc/reporter/dashboard, ugc/reporter/submissions
+    - Destination: submission status list
+
+17. LocationSelectionScreen
+    - APIs: locations/search, states, districts, subdistricts, villages, location profile
+    - Destination: previous screen/HomeScreen
+
+18. PostersScreen
+    - APIs: posters
+    - Destination: PosterDetailScreen
+
+19. PosterDetailScreen
+    - APIs: none required after selected poster
+    - Handles image carousel/share/download
+
+20. AdsBookingScreen
+    - APIs: ads/areas, ads/pricing, ads/bookings
+    - Destination: booking success
+
+21. NotificationsScreen
+    - APIs: inbox, unread-count, mark-read
+    - Requires login
+
+22. NotificationSettingsScreen
+    - APIs: preferences, subscriptions
+    - Requires login
+
+23. BookmarksScreen
+    - APIs: bookmarks
+    - Requires login
+
+24. ProfileScreen
+    - APIs: auth/me, rewards/wallet
+    - Requires login for full profile
+
+25. SettingsScreen
+    - APIs: auth/me patch, CMS pages
+    - Mixed
+
+26. RewardsScreen
+    - APIs: rewards/wallet, transactions, payouts
+    - Requires login
+
+27. CMSPageScreen
+    - APIs: cms/{slug}
+    - Public
+
+## 34. Flutter Developer Implementation Checklist
+
+Before development:
+
+- [ ] Configure API base URL.
+- [ ] Generate and persist stable device_id.
+- [ ] Implement response envelope parser.
+- [ ] Implement secure token storage.
+- [ ] Implement auth interceptor with one refresh retry.
+- [ ] Implement guest FCM registration.
+- [ ] Implement Firebase token refresh handling.
+- [ ] Implement UI language and content language separately.
+- [ ] Implement location selection and canonical location profile.
+- [ ] Implement models for all major API payloads.
+- [ ] Implement repositories per feature.
+- [ ] Implement HomeScreen sections.
+- [ ] Implement article feed and detail.
+- [ ] Implement multi-image/media carousel for articles.
+- [ ] Implement direct video player.
+- [ ] Implement YouTube player.
+- [ ] Implement Shorts vertical PageView with player disposal.
+- [ ] Implement UGC OTP first-time flow.
+- [ ] Implement UGC multi-file media upload.
+- [ ] Implement comments, reactions, and reports.
+- [ ] Implement bookmarks.
+- [ ] Implement search with debounce.
+- [ ] Implement posters carousel and share/download.
+- [ ] Implement ads display, click, and event tracking.
+- [ ] Implement ads booking flow.
+- [ ] Implement notifications inbox for logged-in users.
+- [ ] Implement guest push receive without guest inbox.
+- [ ] Implement rewards wallet/payout screens.
+- [ ] Implement CMS static page rendering.
+- [ ] Implement loading skeletons.
+- [ ] Implement empty states.
+- [ ] Implement centralized error mapping.
+- [ ] Implement pagination and duplicate prevention.
+- [ ] Test slow network.
+- [ ] Test offline mode.
+- [ ] Test expired access token.
+- [ ] Test expired/rotated refresh token.
+- [ ] Test API validation errors.
+- [ ] Test Android app background/resume.
+- [ ] Test fullscreen video.
+- [ ] Test notification tap deep links.
+- [ ] Test image/video upload size failures.
+- [ ] Test app restart state restoration.

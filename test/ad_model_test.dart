@@ -156,15 +156,22 @@ void main() {
       expect(AdTypeResolver.resolveType('banner'), AdPresentationType.banner);
       expect(AdTypeResolver.resolveType('box'), AdPresentationType.box);
       expect(AdTypeResolver.resolveType('three_d'), AdPresentationType.threeD);
-      expect(AdTypeResolver.resolveType('interstitial'), AdPresentationType.interstitial);
-      expect(AdTypeResolver.resolveType('native'), AdPresentationType.nativeCard);
+      expect(AdTypeResolver.resolveType('interstitial'),
+          AdPresentationType.interstitial);
+      expect(
+          AdTypeResolver.resolveType('native'), AdPresentationType.nativeCard);
       expect(AdTypeResolver.resolveType('video'), AdPresentationType.videoCard);
       expect(AdTypeResolver.resolveType('poster'), AdPresentationType.poster);
-      expect(AdTypeResolver.resolveType('sponsored_card'), AdPresentationType.sponsoredCard);
-      expect(AdTypeResolver.resolveType('breaking_strip'), AdPresentationType.breakingStrip);
-      expect(AdTypeResolver.resolveType('local_listing'), AdPresentationType.localListing);
-      expect(AdTypeResolver.resolveType('full_screen'), AdPresentationType.fullScreen);
-      expect(AdTypeResolver.resolveType('bottom_sticky'), AdPresentationType.bottomSticky);
+      expect(AdTypeResolver.resolveType('sponsored_card'),
+          AdPresentationType.sponsoredCard);
+      expect(AdTypeResolver.resolveType('breaking_strip'),
+          AdPresentationType.breakingStrip);
+      expect(AdTypeResolver.resolveType('local_listing'),
+          AdPresentationType.localListing);
+      expect(AdTypeResolver.resolveType('full_screen'),
+          AdPresentationType.fullScreen);
+      expect(AdTypeResolver.resolveType('bottom_sticky'),
+          AdPresentationType.bottomSticky);
     });
 
     test('provides recommended fixed aspect ratios per ad type', () {
@@ -183,7 +190,7 @@ void main() {
       expect(AdTypeResolver.getFixedHeight('bottom_sticky'), 64.0);
     });
 
-    test('resolves video types to AdPresentationType.videoCard', () {
+    test('resolves explicit type independently of video URL', () {
       expect(AdTypeResolver.resolveType('video'), AdPresentationType.videoCard);
 
       final videoAd = AdBanner(
@@ -197,11 +204,14 @@ void main() {
         displayFrequency: 5,
         ctr: 0.0,
       );
-      expect(AdTypeResolver.resolve(videoAd), AdPresentationType.videoCard);
+      expect(AdTypeResolver.resolve(videoAd), AdPresentationType.nativeCard);
     });
 
-    test('gracefully resolves unrecognized types to AdPresentationType.unsupported', () {
-      expect(AdTypeResolver.resolveType('unknown_hologram'), AdPresentationType.unsupported);
+    test(
+        'gracefully resolves unrecognized types to AdPresentationType.unsupported',
+        () {
+      expect(AdTypeResolver.resolveType('unknown_hologram'),
+          AdPresentationType.unsupported);
       expect(AdTypeResolver.resolve(null), AdPresentationType.unsupported);
     });
   });

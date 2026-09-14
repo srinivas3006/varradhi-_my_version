@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../core/ads/ad_placement.dart';
 import 'package:dio/dio.dart';
 import '../core/network/api_response.dart';
 import '../core/network/dio_client.dart';
@@ -11,8 +12,7 @@ class _CachedAdEntry {
 
   _CachedAdEntry(this.ads, this.cachedAt);
 
-  bool isExpired(Duration ttl) =>
-      DateTime.now().difference(cachedAt) > ttl;
+  bool isExpired(Duration ttl) => DateTime.now().difference(cachedAt) > ttl;
 }
 
 /// Repository responsible for querying the backend ad catalog (`GET /api/v1/ads/`).
@@ -27,7 +27,8 @@ class AdRepository {
   AdRepository._internal({Dio? dio}) : _dio = dio ?? ApiClient.instance.dio;
 
   /// Visible for testing: inject custom dio instance.
-  factory AdRepository.test({required Dio dio}) => AdRepository._internal(dio: dio);
+  factory AdRepository.test({required Dio dio}) =>
+      AdRepository._internal(dio: dio);
 
   final Dio _dio;
 
@@ -67,18 +68,21 @@ class AdRepository {
     final effectiveState = state ?? AppState.instance.stateName;
     final effectiveDistrict = district ?? AppState.instance.district;
     final effectiveCity = city ?? AppState.instance.city;
-    final effectiveLang = lang ?? 'te';
+    final effectiveLang = lang ?? AppState.instance.contentLanguage;
+    final zone = AdPlacement.canonical(placementZone);
+    final effectiveSubdistrict = subdistrict ?? AppState.instance.subdistrict;
+    final effectiveVillage = village ?? AppState.instance.village;
 
     final queryParams = <String, dynamic>{
-      'placement_zone': placementZone,
-      'zone': placementZone,
+      'placement_zone': zone,
+      'zone': zone,
       if (scope != null && scope.isNotEmpty) 'scope': scope,
       if (areaId != null && areaId.isNotEmpty) 'area_id': areaId,
       if (effectiveState.isNotEmpty) 'state': effectiveState,
       if (effectiveDistrict.isNotEmpty) 'district': effectiveDistrict,
       if (effectiveCity.isNotEmpty) 'city': effectiveCity,
-      if (subdistrict != null && subdistrict.isNotEmpty) 'subdistrict': subdistrict,
-      if (village != null && village.isNotEmpty) 'village': village,
+      if (effectiveSubdistrict.isNotEmpty) 'subdistrict': effectiveSubdistrict,
+      if (effectiveVillage.isNotEmpty) 'village': effectiveVillage,
       'lang': effectiveLang,
     };
 
@@ -127,6 +131,7 @@ class AdRepository {
             return json
                 .whereType<Map<String, dynamic>>()
                 .map((i) => AdBanner.fromJson(i))
+                .where((ad) => ad.placementZone == queryParams['zone'])
                 .toList();
           }
           return <AdBanner>[];

@@ -87,24 +87,32 @@ void main() {
       expect(first!.id, 'ad_capped');
 
       // Record impression
-      manager.recordImpression(cappedAd, placementZone: 'feed', contextKey: 'exp1');
+      manager.recordImpression(cappedAd,
+          placementZone: 'feed', contextKey: 'exp1');
 
-      // 2nd time -> daily cap reached (limit 1)
+      // The backend still returned this ad; a session count is not a daily cap.
       final second = manager.selectAd([cappedAd]);
-      expect(second, isNull);
+      expect(second, isNotNull);
     });
 
-    test('canShowFeedAd respects minArticlesBeforeFirstAd and displayFrequency', () {
+    test('canShowFeedAd respects minArticlesBeforeFirstAd and displayFrequency',
+        () {
       // Never in first 2 items
-      expect(manager.canShowFeedAd(contentIndex: 0, displayFrequency: 4), isFalse);
-      expect(manager.canShowFeedAd(contentIndex: 1, displayFrequency: 4), isFalse);
+      expect(
+          manager.canShowFeedAd(contentIndex: 0, displayFrequency: 4), isFalse);
+      expect(
+          manager.canShowFeedAd(contentIndex: 1, displayFrequency: 4), isFalse);
 
       // Frequency 4: after min 2 items, slots at index 5, 9, 13
       // (contentIndex - 2 + 1) % 4 == 0 -> index 5: (5-2+1)=4 % 4 == 0 -> true
-      expect(manager.canShowFeedAd(contentIndex: 2, displayFrequency: 4), isFalse);
-      expect(manager.canShowFeedAd(contentIndex: 3, displayFrequency: 4), isFalse);
-      expect(manager.canShowFeedAd(contentIndex: 4, displayFrequency: 4), isFalse);
-      expect(manager.canShowFeedAd(contentIndex: 5, displayFrequency: 4), isTrue);
+      expect(
+          manager.canShowFeedAd(contentIndex: 2, displayFrequency: 4), isFalse);
+      expect(
+          manager.canShowFeedAd(contentIndex: 3, displayFrequency: 4), isTrue);
+      expect(
+          manager.canShowFeedAd(contentIndex: 4, displayFrequency: 4), isFalse);
+      expect(
+          manager.canShowFeedAd(contentIndex: 5, displayFrequency: 4), isFalse);
     });
 
     test('interstitial is blocked on cold launch before minSessionAge', () {
@@ -146,7 +154,8 @@ void main() {
       expect(manager.canShowInterstitial(), isTrue);
     });
 
-    test('interstitial is blocked during cooldown after previous interstitial', () {
+    test('interstitial is blocked during cooldown after previous interstitial',
+        () {
       manager.minSessionAgeForInterstitial = Duration.zero;
       manager.minInterstitialCooldown = const Duration(minutes: 5);
       manager.recordContentInteraction();
@@ -165,25 +174,32 @@ void main() {
       expect(manager.canShowInterstitial(), isTrue);
     });
 
-    test('recordImpression deduplicates emissions for identical exposure keys', () {
-      manager.recordImpression(adA, placementZone: 'feed', contextKey: 'slot_1');
+    test('recordImpression deduplicates emissions for identical exposure keys',
+        () {
+      manager.recordImpression(adA,
+          placementZone: 'feed', contextKey: 'slot_1');
       expect(AdEventQueue.instance.pendingCount, 1);
 
       // Second call with same key must be ignored
-      manager.recordImpression(adA, placementZone: 'feed', contextKey: 'slot_1');
+      manager.recordImpression(adA,
+          placementZone: 'feed', contextKey: 'slot_1');
       expect(AdEventQueue.instance.pendingCount, 1);
 
       // Different exposure key -> recorded
-      manager.recordImpression(adA, placementZone: 'feed', contextKey: 'slot_2');
+      manager.recordImpression(adA,
+          placementZone: 'feed', contextKey: 'slot_2');
       expect(AdEventQueue.instance.pendingCount, 2);
     });
 
-    test('recordViewability deduplicates emissions for identical exposure keys', () {
-      manager.recordViewability(adA, placementZone: 'feed', contextKey: 'slot_1');
+    test('recordViewability deduplicates emissions for identical exposure keys',
+        () {
+      manager.recordViewability(adA,
+          placementZone: 'feed', contextKey: 'slot_1');
       expect(AdEventQueue.instance.pendingCount, 1);
 
       // Repeated notification ignored
-      manager.recordViewability(adA, placementZone: 'feed', contextKey: 'slot_1');
+      manager.recordViewability(adA,
+          placementZone: 'feed', contextKey: 'slot_1');
       expect(AdEventQueue.instance.pendingCount, 1);
     });
 

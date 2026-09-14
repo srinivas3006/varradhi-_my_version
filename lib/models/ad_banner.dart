@@ -42,10 +42,12 @@ class AdBanner {
     this.area,
     this.areaId,
     required this.displayFrequency,
-    this.durationSeconds = 4,
+    this.durationSeconds = 0,
     this.dailyMaxImpressionsPerUser = 0,
     required this.ctr,
   });
+
+  int get displayDurationSeconds => durationSeconds;
 
   bool get isVideo =>
       adType.toLowerCase() == 'video' || videoUrl.trim().isNotEmpty;
@@ -87,9 +89,12 @@ class AdBanner {
       areaId: json['area_id']?.toString(),
       displayFrequency: _toInt(json['display_frequency'], 5),
       durationSeconds: _toInt(
-        json['duration_seconds'] ?? json['display_seconds'] ?? json['duration'],
-        4,
-      ).clamp(2, 30),
+        json['display_duration_seconds'] ??
+            json['duration_seconds'] ??
+            json['display_seconds'] ??
+            json['duration'],
+        0,
+      ).clamp(0, 2147483647),
       dailyMaxImpressionsPerUser:
           _toInt(json['daily_max_impressions_per_user'], 0),
       ctr: _toDouble(json['ctr'], 0.0),
@@ -103,13 +108,13 @@ class AdBanner {
       'image_url': imageUrl,
       'video_url': videoUrl,
       'destination_url': destinationUrl,
-      'ad_type': adType,
+      'ad_type': isThreeD ? 'three_d' : adType,
       'placement_zone': placementZone,
       'target_scope': targetScope,
       if (area != null) 'area': area,
       if (areaId != null) 'area_id': areaId,
       'display_frequency': displayFrequency,
-      'duration_seconds': durationSeconds,
+      'display_duration_seconds': durationSeconds,
       'daily_max_impressions_per_user': dailyMaxImpressionsPerUser,
       'ctr': ctr,
     };

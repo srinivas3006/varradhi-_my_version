@@ -14,20 +14,22 @@ class NewsArticleRepository {
   // ignore: unused_field
   final ApiClient _api;
   final Map<String, NewsArticle> _cache = {};
+  final Map<String, Future<NewsArticle>> _pending = {};
 
   /// Fetches article detail by slug, returning cached version if available.
   Future<NewsArticle> getDetail(String slug, {bool forceRefresh = false}) async {
-    if (!forceRefresh && _cache.containsKey(slug)) {
-      // Return instantly (<10ms) and revalidate in background
-      ApiService.instance.getArticleDetail(slug).then((fresh) {
-        _cache[slug] = fresh;
-      }).catchError((_) {});
-      return _cache[slug]!;
+    if (!forceRefresh && _cache.containsKey(slug)) return _cache[slug]!;
+    final pending = _pending[slug];
+    if (pending != null) return pending;
+    final request = ApiService.instance.getArticleDetail(slug);
+    _pending[slug] = request;
+    try {
+      final article = await request;
+      _cache[slug] = article;
+      return article;
+    } finally {
+      if (identical(_pending[slug], request)) _pending.remove(slug);
     }
-
-    final article = await ApiService.instance.getArticleDetail(slug);
-    _cache[slug] = article;
-    return article;
   }
 
   /// Alias for [getDetail].

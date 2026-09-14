@@ -28,6 +28,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   int _durationDays = 7;
 
   bool _isFetchingPrice = false;
+  int _quoteGeneration = 0;
   bool _isSubmitting = false;
   bool _isLoadingAreas = false;
 
@@ -74,14 +75,16 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     } catch (e) {
       if (mounted) setState(() => _isLoadingAreas = false);
     }
-    _fetchPricing();
+    if (mounted) _fetchPricing();
   }
 
   Future<void> _fetchPricing() async {
+    final generation = ++_quoteGeneration;
     if (_adType == 'local' &&
         (_selectedAreaId == null || _selectedAreaId!.isEmpty)) {
       setState(() {
         _quotedPrice = null;
+        _isFetchingPrice = false;
         _error = _areas.isEmpty && !_isLoadingAreas
             ? 'ప్రస్తుతం ప్రకటన ప్రాంతాలు అందుబాటులో లేవు.'
             : 'దయచేసి స్థానిక ప్రకటనల కోసం ఒక ప్రాంతాన్ని ఎంచుకోండి.';
@@ -91,6 +94,8 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
 
     setState(() {
       _isFetchingPrice = true;
+      _quotedPrice = null;
+      _currency = null;
       _error = null;
     });
 
@@ -107,7 +112,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
           'Backend pricing response is missing price or currency.',
         );
       }
-      if (mounted) {
+      if (mounted && generation == _quoteGeneration) {
         setState(() {
           _currency = backendCurrency.toString();
           _quotedPrice = backendPrice.toString();
@@ -115,7 +120,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && generation == _quoteGeneration) {
         setState(() {
           _quotedPrice = null;
           _isFetchingPrice = false;
@@ -127,6 +132,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   }
 
   Future<void> _submitBooking() async {
+    if (_isSubmitting || _isFetchingPrice) return;
     if (!_formKey.currentState!.validate()) return;
 
     if (_adType == 'local' &&

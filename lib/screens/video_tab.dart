@@ -34,14 +34,43 @@ class _VideoTabState extends State<VideoTab> {
   final ScrollController _scrollController = ScrollController();
   final List<VideoItem> _videos = [];
   bool _isLoading = true;
-  String? _nextCursor;
+  String? _shortsCursor;
+  String? _videoCursor;
+  bool _hasMoreShorts = true;
+  bool _hasMoreVideos = true;
+  bool _fetching = false;
+  late String _language;
+  String get _queryIdentity => [
+        AppState.instance.contentLanguage,
+        AppState.instance.stateName,
+        AppState.instance.district,
+        AppState.instance.city,
+        AppState.instance.subdistrict,
+        AppState.instance.village
+      ].join('|');
+
+  void _onPreferencesChanged() {
+    final language = _queryIdentity;
+    if (language == _language) return;
+    _language = language;
+    _videos.clear();
+    _bottomAd = null;
+    _bottomAdRequested = false;
+    _refresh();
+    if (widget.isActive) _loadBottomAd();
+  }
+
+  int _generation = 0;
   bool _hasMore = true;
   AdBanner? _bottomAd;
   bool _bottomAdRequested = false;
+  bool _bottomAdDismissed = false;
 
   @override
   void initState() {
     super.initState();
+    _language = _queryIdentity;
+    AppState.instance.addListener(_onPreferencesChanged);
     _scrollController.addListener(_onScroll);
     _loadVideos();
     if (widget.isActive) {
@@ -51,6 +80,7 @@ class _VideoTabState extends State<VideoTab> {
 
   @override
   void dispose() {
+    AppState.instance.removeListener(_onPreferencesChanged);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
@@ -68,13 +98,14 @@ class _VideoTabState extends State<VideoTab> {
   }
 
   Future<void> _loadBottomAd() async {
-    if (_bottomAdRequested || _bottomAd != null) return;
+    if (_bottomAdDismissed || _bottomAdRequested || _bottomAd != null) return;
     _bottomAdRequested = true;
+    final identity = _queryIdentity;
     final ad = await _selectFirstAvailableAd(
-      zones: const ['video_bottom', 'bottom_sticky'],
+      zones: const ['feed'],
       preferType: 'bottom_sticky',
     );
-    if (!mounted || ad == null) return;
+    if (!mounted || identity != _queryIdentity || ad == null) return;
     setState(() => _bottomAd = ad);
   }
 
@@ -84,74 +115,87 @@ class _VideoTabState extends State<VideoTab> {
   }) async {
     for (final zone in zones) {
       final ads = await AdManager.instance.getAdsForZone(zone);
-      final selected =
-          AdManager.instance.selectAd(ads, preferType: preferType) ??
-              AdManager.instance.selectAd(ads, preferType: 'banner') ??
-              AdManager.instance.selectAd(ads);
+      final selected = AdManager.instance.selectAd(
+        ads.where((ad) => ad.isBottomSticky).toList(),
+      );
       if (selected != null) return selected;
     }
     return null;
   }
 
   Future<void> _refresh() async {
+    ++_generation;
+    _fetching = false;
     VideoRepository.instance.clearCache();
     setState(() {
-      _isLoading = true;
-      _videos.clear();
-      _nextCursor = null;
+      _isLoading = _videos.isEmpty;
+      _shortsCursor = null;
+      _videoCursor = null;
+      _hasMoreShorts = true;
+      _hasMoreVideos = true;
       _hasMore = true;
     });
-    await _loadVideos();
+    await _loadVideos(refresh: true);
   }
 
-  Future<void> _loadVideos() async {
-    if (!_hasMore && _videos.isNotEmpty) return;
-
+  Future<void> _loadVideos({bool refresh = false}) async {
+    if (_fetching || !_hasMore) return;
+    final generation = _generation;
+    _fetching = true;
+    final fetched = <VideoItem>[];
+    String? failure;
+    bool succeeded = false;
     try {
-      final List<VideoItem> fetched = [];
-      String? nextCur;
-
-      // 1. Fetch YouTube Shorts feed via VideoRepository
-      try {
-        final shortsResponse = await VideoRepository.instance.getShortsFeed(
-          cursor: _nextCursor,
-        );
-        if (shortsResponse.data != null && shortsResponse.data!.isNotEmpty) {
-          fetched.addAll(shortsResponse.data!);
-          nextCur = shortsResponse.nextCursor;
+      // Each collection owns its cursor; they are never interchangeable.
+      if (_hasMoreShorts) {
+        try {
+          final response = await VideoRepository.instance.getShortsFeed(
+            cursor: _shortsCursor,
+          );
+          if (!mounted || generation != _generation) return;
+          if (response.hasErrors) throw Exception(response.errorMessage);
+          fetched.addAll(response.data ?? []);
+          _shortsCursor = response.nextCursor;
+          _hasMoreShorts = _shortsCursor != null;
+          succeeded = true;
+        } catch (e) {
+          failure = e.toString();
         }
-      } catch (e) {
-        debugPrint('[VideoTab] Error fetching shorts feed: $e');
       }
-
-      // 2. Also fetch regular video feed and merge
-      try {
-        final videoResponse = await VideoRepository.instance.getVideoFeed(
-          cursor: nextCur ?? _nextCursor,
-        );
-        if (videoResponse.data != null && videoResponse.data!.isNotEmpty) {
-          for (final item in videoResponse.data!) {
-            if (!fetched.any((v) => v.id == item.id)) {
-              fetched.add(item);
-            }
-          }
-          nextCur ??= videoResponse.nextCursor;
+      if (!mounted || generation != _generation) return;
+      if (_hasMoreVideos) {
+        try {
+          final response = await VideoRepository.instance.getVideoFeed(
+            cursor: _videoCursor,
+          );
+          if (!mounted || generation != _generation) return;
+          if (response.hasErrors) throw Exception(response.errorMessage);
+          fetched.addAll(response.data ?? []);
+          _videoCursor = response.nextCursor;
+          _hasMoreVideos = _videoCursor != null;
+          succeeded = true;
+        } catch (e) {
+          failure = e.toString();
         }
-      } catch (e) {
-        debugPrint('[VideoTab] Error fetching video feed: $e');
       }
-
-      if (!mounted) return;
-
+      if (!mounted || generation != _generation) return;
       setState(() {
-        _videos.addAll(fetched);
-        _nextCursor = nextCur;
-        _hasMore = nextCur != null;
-        _isLoading = false;
+        if (refresh && succeeded) _videos.clear();
+        final seen = _videos.map((video) => video.id).toSet();
+        _videos.addAll(fetched.where((video) => seen.add(video.id)));
+        _hasMore = _hasMoreShorts || _hasMoreVideos;
       });
-    } catch (_) {
-      if (mounted) {
-        setState(() => _isLoading = false);
+      if (failure != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(failure)),
+        );
+      }
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _fetching = false;
+          _isLoading = false;
+        });
       }
     }
   }
@@ -262,7 +306,8 @@ class _VideoTabState extends State<VideoTab> {
             onRefresh: _refresh,
             child: CustomScrollView(
               controller: _scrollController,
-              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+              physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics()),
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader(context)),
                 SliverToBoxAdapter(
@@ -294,7 +339,9 @@ class _VideoTabState extends State<VideoTab> {
                     if (index >= bulletinVideos.length) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 22),
-                        child: Center(child: CircularProgressIndicator(color: Color(0xFFC80022))),
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                color: Color(0xFFC80022))),
                       );
                     }
                     final video = bulletinVideos[index];
@@ -318,9 +365,13 @@ class _VideoTabState extends State<VideoTab> {
                 child: BottomStickyAdBanner(
                   key: ValueKey('video_bottom_${_bottomAd!.id}'),
                   ad: _bottomAd!,
-                  placementZone: 'video_bottom',
+                  placementZone: 'feed',
                   onDismiss: () {
-                    if (mounted) setState(() => _bottomAd = null);
+                    if (mounted)
+                      setState(() {
+                        _bottomAdDismissed = true;
+                        _bottomAd = null;
+                      });
                   },
                 ),
               ),
@@ -490,7 +541,11 @@ class _VideoTabState extends State<VideoTab> {
                 color: const Color(0xFFC80022),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(leading, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+              child: Text(leading,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900)),
             ),
             const SizedBox(width: 8),
           ] else if (isBulletin) ...[
@@ -505,29 +560,39 @@ class _VideoTabState extends State<VideoTab> {
             ),
           ],
           Expanded(
-            child: Text(title, style: const TextStyle(color: Color(0xFF161616), fontSize: 17.5, fontWeight: FontWeight.w900)),
+            child: Text(title,
+                style: const TextStyle(
+                    color: Color(0xFF161616),
+                    fontSize: 17.5,
+                    fontWeight: FontWeight.w900)),
           ),
           if (trailing != null)
             InkWell(
               onTap: onTrailingTap,
               borderRadius: BorderRadius.circular(16),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: showDistrictIcon ? const Color(0xFFEEF2F8) : Colors.transparent,
+                  color: showDistrictIcon
+                      ? const Color(0xFFEEF2F8)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (showDistrictIcon) ...[
-                      const Icon(Icons.location_on_rounded, size: 14, color: Color(0xFF4B5563)),
+                      const Icon(Icons.location_on_rounded,
+                          size: 14, color: Color(0xFF4B5563)),
                       const SizedBox(width: 3),
                     ],
                     Text(
                       trailing,
                       style: TextStyle(
-                        color: showDistrictIcon ? const Color(0xFF374151) : const Color(0xFF6B7280),
+                        color: showDistrictIcon
+                            ? const Color(0xFF374151)
+                            : const Color(0xFF6B7280),
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                       ),
@@ -541,7 +606,6 @@ class _VideoTabState extends State<VideoTab> {
     );
   }
 }
-
 
 class _VideoListCard extends StatelessWidget {
   final VideoItem video;
@@ -578,10 +642,13 @@ class _VideoListCard extends StatelessWidget {
                         imageUrl: video.thumbnailUrl,
                         fit: BoxFit.cover,
                         memCacheWidth: 700,
-                        placeholder: (_, __) => Container(color: const Color(0xFFE9ECEF)),
+                        placeholder: (_, __) =>
+                            Container(color: const Color(0xFFE9ECEF)),
                         errorWidget: (_, __, ___) => Container(
                           color: const Color(0xFFE9ECEF),
-                          child: const Center(child: Icon(Icons.videocam_outlined, color: Color(0xFF9E9E9E), size: 44)),
+                          child: const Center(
+                              child: Icon(Icons.videocam_outlined,
+                                  color: Color(0xFF9E9E9E), size: 44)),
                         ),
                       ),
                     ),
@@ -606,12 +673,17 @@ class _VideoListCard extends StatelessWidget {
                         left: 10,
                         top: 10,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
                             color: const Color(0xFFC80022),
                             borderRadius: BorderRadius.circular(5),
                           ),
-                          child: const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+                          child: const Text('LIVE',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900)),
                         ),
                       ),
                     // Central Solid Red Play Button (matching YouTube video screen reference!)
@@ -631,7 +703,8 @@ class _VideoListCard extends StatelessWidget {
                               ),
                             ],
                           ),
-                          child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: featured ? 32 : 26),
+                          child: Icon(Icons.play_arrow_rounded,
+                              color: Colors.white, size: featured ? 32 : 26),
                         ),
                       ),
                     ),
@@ -640,12 +713,17 @@ class _VideoListCard extends StatelessWidget {
                         right: 10,
                         bottom: 10,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.75),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text(video.duration, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                          child: Text(video.duration,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700)),
                         ),
                       ),
                   ],
@@ -656,7 +734,9 @@ class _VideoListCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        video.title.isNotEmpty ? video.title : (featured ? 'tv9 live' : 'Video bulletin'),
+                        video.title.isNotEmpty
+                            ? video.title
+                            : (featured ? 'tv9 live' : 'Video bulletin'),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -670,22 +750,35 @@ class _VideoListCard extends StatelessWidget {
                       if (featured)
                         Row(
                           children: [
-                            const Icon(Icons.sensors_rounded, size: 14, color: Color(0xFF6B7280)),
+                            const Icon(Icons.sensors_rounded,
+                                size: 14, color: Color(0xFF6B7280)),
                             const SizedBox(width: 4),
                             Text(
-                              video.viewsCount > 0 ? video.views : (video.views.isNotEmpty ? video.views : '2'),
-                              style: const TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w700),
+                              video.viewsCount > 0
+                                  ? video.views
+                                  : (video.views.isNotEmpty
+                                      ? video.views
+                                      : '2'),
+                              style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700),
                             ),
                             if (video.channel.isNotEmpty) ...[
                               const SizedBox(width: 8),
-                              Text('•', style: TextStyle(color: Colors.grey.shade400)),
+                              Text('•',
+                                  style:
+                                      TextStyle(color: Colors.grey.shade400)),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   video.channel,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12.5, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(
+                                      color: Color(0xFF6B7280),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500),
                                 ),
                               ),
                             ],
@@ -694,22 +787,31 @@ class _VideoListCard extends StatelessWidget {
                       else
                         Row(
                           children: [
-                            const Icon(Icons.remove_red_eye_outlined, size: 14, color: Color(0xFF6B7280)),
+                            const Icon(Icons.remove_red_eye_outlined,
+                                size: 14, color: Color(0xFF6B7280)),
                             const SizedBox(width: 4),
                             Text(
                               '${video.views} వీక్షణలు',
-                              style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12.5, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                  color: Color(0xFF6B7280),
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600),
                             ),
                             if (video.channel.isNotEmpty) ...[
                               const SizedBox(width: 8),
-                              Text('•', style: TextStyle(color: Colors.grey.shade400)),
+                              Text('•',
+                                  style:
+                                      TextStyle(color: Colors.grey.shade400)),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   video.channel,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12.5, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(
+                                      color: Color(0xFF6B7280),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500),
                                 ),
                               ),
                             ],

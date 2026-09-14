@@ -8,6 +8,7 @@ import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../utils/share_service.dart';
 import 'ad_viewability_detector.dart';
+import 'video_ad_card.dart';
 
 /// Full-screen sponsored ad card for Spotlight mode.
 ///
@@ -20,14 +21,18 @@ class SponsoredSpotlightAdCard extends StatefulWidget {
   final AdBanner ad;
   final VoidCallback onClose;
   final int durationSeconds;
+  final bool active;
+  final String? exposureKey;
   final String placementZone;
 
   const SponsoredSpotlightAdCard({
     super.key,
     required this.ad,
     required this.onClose,
-    this.durationSeconds = 4,
-    this.placementZone = 'spotlight',
+    this.durationSeconds = 0,
+    this.active = true,
+    this.exposureKey,
+    this.placementZone = 'feed',
   });
 
   @override
@@ -35,7 +40,8 @@ class SponsoredSpotlightAdCard extends StatefulWidget {
       _SponsoredSpotlightAdCardState();
 }
 
-class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard> {
+class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
+    with WidgetsBindingObserver {
   late int _secondsRemaining;
   Timer? _timer;
   bool _isClosing = false;
@@ -43,23 +49,47 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard> {
   @override
   void initState() {
     super.initState();
-    _secondsRemaining = widget.durationSeconds;
+    WidgetsBinding.instance.addObserver(this);
+    _secondsRemaining = (widget.ad.isInterstitial || widget.ad.isFullScreen)
+        ? widget.durationSeconds
+        : 0;
     _startCountdown();
   }
 
   void _startCountdown() {
+    _timer?.cancel();
+    if (!widget.active ||
+        _secondsRemaining <= 0 ||
+        (WidgetsBinding.instance.lifecycleState != null &&
+            WidgetsBinding.instance.lifecycleState !=
+                AppLifecycleState.resumed)) return;
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
       if (_secondsRemaining <= 1) {
         t.cancel();
         setState(() => _secondsRemaining = 0);
         AdManager.instance
-            .recordSkip(widget.ad, placementZone: widget.placementZone);
+            .recordHide(widget.ad, placementZone: widget.placementZone);
         _handleClose(isManualDismiss: false);
       } else {
         setState(() => _secondsRemaining--);
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SponsoredSpotlightAdCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) _startCountdown();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startCountdown();
+    } else {
+      _timer?.cancel();
+    }
   }
 
   void _handleClose({bool isManualDismiss = true}) {
@@ -98,6 +128,7 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
   }
@@ -110,6 +141,8 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard> {
     return AdViewabilityDetector(
       ad: widget.ad,
       placementZone: widget.placementZone,
+      active: widget.active,
+      exposureKey: widget.exposureKey ?? widget.ad.id,
       child: Container(
         width: double.infinity,
         height: double.infinity,
@@ -122,30 +155,38 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard> {
             GestureDetector(
               onTap: _handleAdTap,
               child: Center(
-                child: CachedNetworkImage(
-                  imageUrl: widget.ad.imageUrl,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white70),
-                  ),
-                  errorWidget: (context, url, error) => Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.campaign_rounded,
-                          size: 64, color: Colors.white54),
-                      const SizedBox(height: 12),
-                      Text(
-                        widget.ad.title,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                child: widget.ad.videoUrl.isNotEmpty
+                    ? AdActivityScope(
+                        active: widget.active,
+                        child: VideoAdCard(
+                            ad: widget.ad,
+                            placementZone: widget.placementZone,
+                            exposureKey: widget.exposureKey ?? widget.ad.id))
+                    : CachedNetworkImage(
+                        imageUrl: widget.ad.imageUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => const Center(
+                          child:
+                              CircularProgressIndicator(color: Colors.white70),
+                        ),
+                        errorWidget: (context, url, error) => Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.campaign_rounded,
+                                size: 64, color: Colors.white54),
+                            const SizedBox(height: 12),
+                            Text(
+                              widget.ad.title,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
               ),
             ),
 

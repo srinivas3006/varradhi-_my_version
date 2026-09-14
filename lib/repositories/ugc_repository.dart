@@ -64,48 +64,7 @@ class UgcRepository {
 
   /// Transforms backend UnifiedFeedItem into domain NewsArticle.
   NewsArticle _mapUnifiedToArticle(UnifiedFeedItem u) {
-    final title = u.title.isNotEmpty
-        ? u.title
-        : (u.summary.isNotEmpty ? u.summary : 'Citizen Report');
-
-    final primaryImage =
-        u.thumbnailUrl.isNotEmpty ? u.thumbnailUrl : u.mediaUrl;
-    final mediaType =
-        u.metadata['media_type']?.toString().trim().toLowerCase() ?? '';
-    final isVideo = mediaType == 'video' ||
-        u.mediaUrl.toLowerCase().endsWith('.mp4') ||
-        u.mediaUrl.contains('youtube.com') ||
-        u.mediaUrl.contains('youtu.be');
-    final images = [
-      if (u.thumbnailUrl.isNotEmpty) u.thumbnailUrl,
-      if (!isVideo && u.mediaUrl.isNotEmpty) u.mediaUrl,
-    ];
-
-    return NewsArticle(
-      id: u.id,
-      title: title,
-      slug: u.id,
-      summary: u.summary,
-      body: u.summary,
-      imageUrl: primaryImage,
-      imageUrls: images,
-      source: u.district.isNotEmpty ? u.district : 'Citizen Reporter',
-      category: 'UGC',
-      publishedAt: u.createdAt,
-      likes: 0,
-      comments: 0,
-      shares: 0,
-      viewCount: 0,
-      readTimeMinutes: 1,
-      state: u.state.isNotEmpty ? u.state : null,
-      district: u.district.isNotEmpty ? u.district : null,
-      subdistrict: u.subdistrict.isNotEmpty ? u.subdistrict : null,
-      village: u.village.isNotEmpty ? u.village : null,
-      coverageLevel: 'local',
-      contentKind: 'ugc',
-      mediaType: isVideo ? 'video' : 'image',
-      videoUrl: isVideo ? u.mediaUrl : '',
-    );
+    return u.toArticle();
   }
 
   /// Submits citizen post data.

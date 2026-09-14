@@ -48,11 +48,12 @@ class ParallaxPageFlip extends StatefulWidget {
   State<ParallaxPageFlip> createState() => _ParallaxPageFlipState();
 }
 
-class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProviderStateMixin {
+class _ParallaxPageFlipState extends State<ParallaxPageFlip>
+    with TickerProviderStateMixin {
   late int _index;
   late AnimationController _dragCtrl;
   late AnimationController _matchCutCtrl;
-  
+
   double _dragStartY = 0;
   double _height = 0;
   int _direction = 0; // -1 next, 1 prev, 0 idle
@@ -62,7 +63,7 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
     super.initState();
     widget.controller?._attach(this);
     _index = widget.initialIndex;
-    
+
     _dragCtrl = AnimationController(vsync: this, duration: widget.flingDuration)
       ..addListener(() => setState(() {}))
       ..addStatusListener((status) {
@@ -77,29 +78,33 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
         }
       });
 
-    _matchCutCtrl = AnimationController(vsync: this, duration: widget.matchCutDuration)
-      ..addListener(() => setState(() {}))
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          // Transition fully complete
-          setState(() {
-            if (_direction == -1 && _index < widget.itemCount - 1) {
-              _index++;
-            } else if (_direction == 1 && _index > 0) {
-              _index--;
+    _matchCutCtrl =
+        AnimationController(vsync: this, duration: widget.matchCutDuration)
+          ..addListener(() => setState(() {}))
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) {
+              // Transition fully complete
+              setState(() {
+                if (_direction == -1 && _index < widget.itemCount - 1) {
+                  _index++;
+                } else if (_direction == 1 && _index > 0) {
+                  _index--;
+                }
+                _direction = 0;
+              });
+              _dragCtrl.value = 0;
+              _matchCutCtrl.value = 0;
+              widget.onPageChanged?.call(_index);
             }
-            _direction = 0;
           });
-          _dragCtrl.value = 0;
-          _matchCutCtrl.value = 0;
-          widget.onPageChanged?.call(_index);
-        }
-      });
   }
 
   @override
   void didUpdateWidget(ParallaxPageFlip oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_index >= widget.itemCount && widget.itemCount > 0) {
+      _index = widget.itemCount - 1;
+    }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller?._detach();
       widget.controller?._attach(this);
@@ -115,7 +120,9 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
   }
 
   void next() {
-    if (_index < widget.itemCount - 1 && !_dragCtrl.isAnimating && !_matchCutCtrl.isAnimating) {
+    if (_index < widget.itemCount - 1 &&
+        !_dragCtrl.isAnimating &&
+        !_matchCutCtrl.isAnimating) {
       _direction = -1;
       _dragCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
     }
@@ -134,7 +141,8 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    if (_height == 0 || _dragCtrl.isAnimating || _matchCutCtrl.isAnimating) return;
+    if (_height == 0 || _dragCtrl.isAnimating || _matchCutCtrl.isAnimating)
+      return;
     final dy = d.globalPosition.dy - _dragStartY;
 
     if (_direction == 0) {
@@ -153,10 +161,11 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
 
   void _onDragEnd(DragEndDetails d) {
     if (_direction == 0 || _matchCutCtrl.isAnimating) return;
-    
+
     final velocity = d.velocity.pixelsPerSecond.dy;
-    final flungForward = (_direction == -1 && velocity < -widget.flingVelocity) ||
-        (_direction == 1 && velocity > widget.flingVelocity);
+    final flungForward =
+        (_direction == -1 && velocity < -widget.flingVelocity) ||
+            (_direction == 1 && velocity > widget.flingVelocity);
     final pastThreshold = _dragCtrl.value > widget.commitThreshold;
 
     if (flungForward || pastThreshold) {
@@ -173,15 +182,16 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip> with TickerProvider
         _height = constraints.maxHeight;
         final dragProgress = _dragCtrl.value;
         final matchCutProgress = _matchCutCtrl.value;
-        final dragDelta = _direction != 0 ? dragProgress * _height * _direction : 0.0;
-        
+        final dragDelta =
+            _direction != 0 ? dragProgress * _height * _direction : 0.0;
+
         Widget stack;
-        
+
         final currentWidget = widget.itemBuilder(
-          context, 
+          context,
           _index,
           true, // isCurrent
-          dragDelta, 
+          dragDelta,
           dragProgress,
           matchCutProgress,
         );

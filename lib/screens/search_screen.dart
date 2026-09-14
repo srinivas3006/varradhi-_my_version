@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../state/app_state.dart';
 import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../models/news_article.dart';
@@ -18,22 +20,30 @@ class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   List<NewsArticle> _results = [];
-  final List<String> _recent = ['ఇస్రో ఉపగ్రహం', 'సెన్సెక్స్', 'మెట్రో ఫేజ్ 2'];
+  List<String> _recent = [];
+  List<String> _trending = [];
+  int _queryGeneration = 0;
+  static const _recentKey = 'recent_searches';
 
-  List<String> _trending = [
-    'క్రికెట్ సిరీస్',
-    'ఏఐ చిప్‌సెట్',
-    'బాక్సాఫీస్',
-    'వర్షపాతం హెచ్చరిక',
-    'సెన్సెక్స్ రికార్డ్',
-  ];
+  Future<void> _loadRecent() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted && _queryGeneration == 0) {
+      setState(() => _recent = prefs.getStringList(_recentKey) ?? []);
+    }
+  }
+
+  Future<void> _saveRecent() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_recentKey, List<String>.from(_recent));
+  }
 
   @override
   void initState() {
     super.initState();
     _loadTrending();
+    _loadRecent();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+      if (mounted) _focusNode.requestFocus();
     });
   }
 
@@ -44,7 +54,7 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() => _trending = terms);
       }
     } catch (_) {
-      // Keep curated defaults
+      // Trending is optional; do not present invented server suggestions.
     }
   }
 
@@ -53,24 +63,36 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onQueryChanged(String query) {
     _debounce?.cancel();
+    ++_queryGeneration;
     if (query.trim().length < 2) {
-      setState(() => _results = []);
+      setState(() { _results = []; _isLoading = false; });
       return;
     }
     _debounce = Timer(const Duration(milliseconds: 300), () => _runSearch(query));
   }
 
   void _runSearch(String query) async {
+    _debounce?.cancel();
+    final generation = ++_queryGeneration;
     final trimmed = query.trim();
     if (trimmed.length < 2) {
-      setState(() => _results = []);
+      setState(() { _results = []; _isLoading = false; });
       return;
     }
     setState(() => _isLoading = true);
 
-    final response = await ApiService.instance.searchArticles(trimmed);
+    final response = await ApiService.instance.searchArticles(
+      trimmed, lang: AppState.instance.contentLanguage,
+    );
 
-    if (!mounted) return;
+    if (!mounted || generation != _queryGeneration) return;
+    if (response.hasErrors) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(response.errorMessage ?? tr('no_results'))),
+      );
+      return;
+    }
 
     setState(() {
       _results = response.data ?? [];
@@ -80,6 +102,7 @@ class _SearchScreenState extends State<SearchScreen> {
         if (_recent.length > 6) _recent.removeLast();
       }
     });
+    await _saveRecent();
   }
 
   @override
@@ -141,7 +164,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 title: Text(q, style: const TextStyle(fontSize: 13.5)),
                 trailing: IconButton(
                   icon: const Icon(Icons.close, size: 18, color: AppColors.textMuted),
-                  onPressed: () => setState(() => _recent.remove(q)),
+                  onPressed: () {
+                    setState(() => _recent.remove(q));
+                    _saveRecent();
+                  },
                 ),
                 onTap: () {
                   _controller.text = q;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
+import '../core/errors/app_exception.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -30,21 +31,51 @@ class CategoryScreen extends StatefulWidget {
 class _CategoryScreenState extends State<CategoryScreen> {
   final List<NewsArticle> _articles = [];
   bool _isLoading = true;
+  bool _refreshing = false;
+  int _generation = 0;
   bool _isLoadingMore = false;
   String? _nextCursor;
   bool _hasMore = true;
   String? _error;
+  late String _queryIdentity;
+  String get _currentQueryIdentity => [
+    AppState.instance.contentLanguage, AppState.instance.stateName,
+    AppState.instance.district, AppState.instance.city,
+    AppState.instance.subdistrict, AppState.instance.village,
+  ].join('|');
+
+  void _onPreferencesChanged() {
+    final identity = _currentQueryIdentity;
+    if (identity == _queryIdentity) return;
+    _queryIdentity = identity;
+    _articles.clear();
+    _nextCursor = null;
+    _hasMore = true;
+    _fetchArticles();
+  }
+
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_onPreferencesChanged);
+    super.dispose();
+  }
+
   String get _feedLang => AppState.instance.contentLanguage;
 
   @override
   void initState() {
     super.initState();
+    _queryIdentity = _currentQueryIdentity;
+    AppState.instance.addListener(_onPreferencesChanged);
     _fetchArticles();
   }
 
   Future<void> _fetchArticles() async {
+    final generation = ++_generation;
+    _refreshing = true;
     setState(() {
-      _isLoading = true;
+      _isLoading = _articles.isEmpty;
+      _isLoadingMore = false;
       _error = null;
     });
 
@@ -61,7 +92,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
         pageSize: 20,
       );
 
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
+      if (response.hasErrors) throw ApiException(response.errorMessage ?? 'Unable to load articles.');
       setState(() {
         _articles.clear();
         _articles.addAll(response.data ?? []);
@@ -70,16 +102,19 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
-        _error = 'వార్తలను లోడ్ చేయడంలో విఫలమైంది.';
+        _error = e.toString();
         _isLoading = false;
       });
+    } finally {
+      if (generation == _generation) _refreshing = false;
     }
   }
 
   Future<void> _loadMore() async {
-    if (_isLoadingMore || !_hasMore) return;
+    if (_refreshing || _isLoadingMore || !_hasMore) return;
+    final generation = _generation;
     setState(() => _isLoadingMore = true);
 
     try {
@@ -96,21 +131,23 @@ class _CategoryScreenState extends State<CategoryScreen> {
         pageSize: 20,
       );
 
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
+      if (response.hasErrors) throw ApiException(response.errorMessage ?? 'Unable to load articles.');
       final newArticles = response.data ?? [];
       setState(() {
-        _articles.addAll(newArticles);
+        final seen = _articles.map((article) => article.id).toSet();
+        _articles.addAll(newArticles.where((article) => seen.add(article.id)));
         _nextCursor = response.nextCursor;
         _hasMore = response.nextCursor != null;
       });
     } catch (_) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('మరిన్ని కథనాలను లోడ్ చేయడం సాధ్యం కాలేదు. దయచేసి మళ్లీ ప్రయత్నించండి.')),
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoadingMore = false);
+      if (mounted && generation == _generation) setState(() => _isLoadingMore = false);
     }
   }
 

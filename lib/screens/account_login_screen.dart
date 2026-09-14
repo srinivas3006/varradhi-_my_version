@@ -27,6 +27,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
   String? _error;
 
   Future<void> _submit() async {
+    if (_submitting) return;
     final email = _usernameController.text.trim();
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) {
@@ -257,11 +258,15 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
               const SizedBox(height: 16),
               Center(
                 child: TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const AccountSignupScreen()),
-                  ),
+                  onPressed: () async {
+                    final registered = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AccountSignupScreen()),
+                    );
+                    if (!mounted || registered != true) return;
+                    widget.onLoginSuccess?.call();
+                    if (mounted) Navigator.of(context).pop(true);
+                  },
                   child: const Text.rich(
                     TextSpan(
                       text: 'కొత్త వారా? ',

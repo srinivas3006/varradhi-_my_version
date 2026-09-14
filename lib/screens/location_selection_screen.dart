@@ -1,776 +1,561 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
-import '../services/location_service.dart';
-import '../state/app_state.dart';
-import '../theme/app_theme.dart';
-import 'home_screen.dart';
+import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
 
-/// Screen 17: LocationSelectionScreen
-/// - APIs: locations/search, states, districts, subdistricts, villages, location profile
-/// - Destination: previous screen / HomeScreen
-class LocationSelectionScreen extends StatefulWidget {
+import '../core/widgets/section_header.dart';
+import '../core/widgets/state_views.dart';
+import '../models/location_model.dart';
+import '../core/utils/location_detector.dart';
+import '../providers/location_provider.dart';
+import '../repositories/location_repository.dart';
+import '../state/app_state.dart';
+
+class LocationSelectionScreen extends StatelessWidget {
   const LocationSelectionScreen({super.key});
 
   @override
-  State<LocationSelectionScreen> createState() =>
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => LocationProvider(repository: LocationRepository()),
+      child: const _LocationSelectionScreen(),
+    );
+  }
+}
+
+class _LocationSelectionScreen extends StatefulWidget {
+  const _LocationSelectionScreen({super.key});
+
+  @override
+  State<_LocationSelectionScreen> createState() =>
       _LocationSelectionScreenState();
 }
 
-class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
-  final _searchController = TextEditingController();
-  Timer? _debounce;
-  int _searchGeneration = 0;
-  int _districtGeneration = 0;
-  int _subdistrictGeneration = 0;
-  int _villageGeneration = 0;
-  bool _isSearching = false;
-  List<dynamic> _searchResults = [];
-
-  bool _isLoadingGps = false;
-  bool _isLoadingHierarchy = true;
-  String? _hierarchyError;
-  List<dynamic> _states = [];
-  List<dynamic> _districts = [];
-  List<dynamic> _subdistricts = [];
-  List<dynamic> _villages = [];
-
-  String? _selectedState;
-  String? _selectedDistrict;
-  String? _selectedSubdistrict;
+class _LocationSelectionScreenState extends State<_LocationSelectionScreen> {
+  final TextEditingController _controller = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadInitialLocations();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<LocationProvider>().load();
+    });
   }
 
-  String _locationName(dynamic item) {
-    if (item is! Map) return '';
-    return (item['name_en'] ?? item['name'] ?? '').toString().trim();
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  dynamic _findByName(List<dynamic> items, String name) {
-    final expected = name.trim().toLowerCase();
-    for (final item in items) {
-      if (_locationName(item).toLowerCase() == expected) return item;
-    }
-    return null;
-  }
-
-  Future<void> _loadInitialLocations() async {
-    if (mounted) {
-      setState(() {
-        _isLoadingHierarchy = true;
-        _hierarchyError = null;
-      });
-    }
-    final states = await ApiService.instance.getStates();
+  Future<void> _apply(Future<bool> Function() action) async {
+    final ok = await action();
     if (!mounted) return;
-    if (states.isEmpty) {
-      setState(() {
-        _states = [];
-        _districts = [];
-        _isLoadingHierarchy = false;
-        _hierarchyError =
-            'ప్రాంతాలను లోడ్ చేయలేకపోయాం. నెట్‌వర్క్‌ను తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.';
-      });
-      return;
-    }
-
-    final savedState = AppState.instance.stateName;
-    final selected = _findByName(states, savedState) ?? states.first;
-    final stateName = _locationName(selected);
-    setState(() {
-      _states = states;
-      _selectedState = stateName;
-    });
-    await _loadDistricts(stateName);
-  }
-
-  Future<void> _loadDistricts(String state) async {
-    final generation = ++_districtGeneration;
-    _subdistrictGeneration++;
-    _villageGeneration++;
-    if (mounted) {
-      setState(() {
-        _isLoadingHierarchy = true;
-        _hierarchyError = null;
-        _selectedDistrict = null;
-        _selectedSubdistrict = null;
-        _districts = [];
-        _subdistricts = [];
-        _villages = [];
-      });
-    }
-    final districts = await ApiService.instance.getDistricts(state);
-    if (!mounted ||
-        generation != _districtGeneration ||
-        state != _selectedState) {
-      return;
-    }
-    setState(() {
-      _districts = districts;
-      _isLoadingHierarchy = false;
-      if (districts.isEmpty) {
-        _hierarchyError = '$stateలో జిల్లాలు అందుబాటులో లేవు.';
-      }
-    });
-  }
-
-  Future<void> _loadSubdistricts(String district) async {
-    final generation = ++_subdistrictGeneration;
-    _villageGeneration++;
-    final subs = await ApiService.instance.getSubdistricts(
-      district,
-      state: _selectedState ?? 'Telangana',
-    );
-    if (mounted &&
-        generation == _subdistrictGeneration &&
-        district == _selectedDistrict) {
-      setState(() {
-        _subdistricts = subs;
-        _villages = [];
-        _selectedSubdistrict = null;
-      });
-    }
-  }
-
-  Future<void> _loadVillages(String subdistrict) async {
-    final generation = ++_villageGeneration;
-    final villages = await ApiService.instance.getVillages(
-      subdistrict,
-      state: _selectedState ?? 'Telangana',
-      district: _selectedDistrict,
-    );
-    if (mounted &&
-        generation == _villageGeneration &&
-        subdistrict == _selectedSubdistrict) {
-      setState(() {
-        _villages = villages;
-      });
-    }
-  }
-
-  String? _selectedDistrictId() {
-    for (var d in _districts) {
-      final dName = (d['name_en'] ?? d['name'] ?? '').toString().toLowerCase();
-      if (dName == (_selectedDistrict ?? '').toLowerCase()) {
-        return d['id']?.toString();
-      }
-    }
-    return null;
-  }
-
-  void _onSearchChanged(String q) {
-    _debounce?.cancel();
-    final generation = ++_searchGeneration;
-    if (q.trim().length < 2) {
-      setState(() {
-        _searchResults = [];
-        _isSearching = false;
-      });
-      return;
-    }
-
-    setState(() => _isSearching = true);
-    _debounce = Timer(const Duration(milliseconds: 300), () async {
-      final results = await ApiService.instance.searchLocations(q.trim());
-      if (mounted && generation == _searchGeneration) {
-        setState(() {
-          _searchResults = results;
-          _isSearching = false;
-        });
-      }
-    });
-  }
-
-  Future<void> _detectGps() async {
-    final consent = await LocationService.showPrivacyDisclosure(context);
-    if (!consent) return;
-
-    setState(() => _isLoadingGps = true);
-    try {
-      final loc = await LocationService.detectLocation();
-      final match = await ApiService.instance.resolveCanonicalLocation(loc);
-      if (!mounted) return;
-      final confirmed = await LocationService.showCanonicalConfirmation(
-        context,
-        match,
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ప్రాంతం నవీకరించబడింది (Location updated)')),
       );
-      if (!confirmed || !mounted) return;
-      await ApiService.instance.applyCanonicalLocation(match);
-      if (mounted) {
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop(true);
-        } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
-          );
-        }
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        Navigator.pushReplacementNamed(context, '/main');
       }
-    } on LocationException catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message)),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'మీ ప్రాంతాన్ని గుర్తించలేకపోయాం. దయచేసి మీరే ఎంచుకోండి.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoadingGps = false);
-    }
-  }
-
-  Future<void> _saveAndExit({
-    required String state,
-    required String district,
-    String? subdistrict,
-    String? village,
-    double? lat,
-    double? lon,
-    String? stateId,
-    String? districtId,
-    String? subdistrictId,
-    String? villageId,
-  }) async {
-    final states =
-        _states.isNotEmpty ? _states : await ApiService.instance.getStates();
-    final stateItem = _findByName(states, state);
-    stateId ??= stateItem is Map ? stateItem['id']?.toString() : null;
-
-    if (district.isNotEmpty && districtId == null) {
-      final districts = _selectedState == state && _districts.isNotEmpty
-          ? _districts
-          : await ApiService.instance.getDistricts(state);
-      final districtItem = _findByName(districts, district);
-      districtId = districtItem is Map ? districtItem['id']?.toString() : null;
-    }
-
-    if (district.isNotEmpty &&
-        subdistrict?.isNotEmpty == true &&
-        subdistrictId == null) {
-      final subdistricts = await ApiService.instance.getSubdistricts(
-        district,
-        state: state,
-      );
-      final subdistrictItem = _findByName(subdistricts, subdistrict!);
-      subdistrictId =
-          subdistrictItem is Map ? subdistrictItem['id']?.toString() : null;
-    }
-
-    if (district.isNotEmpty &&
-        subdistrict?.isNotEmpty == true &&
-        village?.isNotEmpty == true &&
-        villageId == null) {
-      final villages = await ApiService.instance.getVillages(
-        subdistrict!,
-        state: state,
-        district: district,
-      );
-      final villageItem = _findByName(villages, village!);
-      villageId = villageItem is Map ? villageItem['id']?.toString() : null;
-    }
-
-    final app = AppState.instance;
-    app.setLocation(
-      state,
-      district,
-      city: village?.isNotEmpty == true
-          ? village
-          : (subdistrict?.isNotEmpty == true ? subdistrict : district),
-      subdistrict: subdistrict ?? '',
-      village: village ?? '',
-      latitude: lat,
-      longitude: lon,
-      stateId: stateId,
-      districtId: districtId,
-      subdistrictId: subdistrictId,
-      villageId: villageId,
-    );
-
-    // Prepare canonical patch payload as required by appcode.md
-    final patchData = <String, dynamic>{};
-    if (villageId != null && villageId.isNotEmpty) {
-      patchData['village_id'] = villageId;
-    }
-    if (subdistrictId != null && subdistrictId.isNotEmpty) {
-      patchData['subdistrict_id'] = subdistrictId;
-    }
-    if (districtId != null && districtId.isNotEmpty) {
-      patchData['district_id'] = districtId;
-    }
-    if (stateId != null && stateId.isNotEmpty) {
-      patchData['state_id'] = stateId;
-    }
-
-    if (patchData.isNotEmpty) {
-      try {
-        await ApiService.instance.updateLocationProfile(patchData);
-      } catch (_) {
-        // The local selection remains usable when optional profile sync fails.
-      }
-    }
-
-    if (app.isLoggedIn && lat != null && lon != null) {
-      await ApiService.instance.updateUserLocation({
-        'lat': lat,
-        'lon': lon,
-        'city': village?.isNotEmpty == true
-            ? village
-            : (subdistrict?.isNotEmpty == true ? subdistrict : district),
-        'district': district,
-        'state': state,
-        'subdistrict': subdistrict ?? '',
-        'village': village ?? '',
-        'country': 'India',
-        'location_source': 'manual',
-      });
-    }
-
-    if (!mounted) return;
-
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop(true);
     } else {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ప్రాంతం నవీకరించబడలేదు (Update failed)')),
       );
     }
+  }
+
+  Future<void> _detect(LocationProvider provider) async {
+    await provider.detectLocation();
+    if (!mounted) return;
+
+    if (provider.detectFailure != null) {
+      _showDetectFailure(provider.detectFailure!);
+      return;
+    }
+    final place = provider.detectedPlace;
+    if (place == null || provider.detectMatches.isEmpty) return;
+
+    final chosen = await showModalBottomSheet<LocationSearchResult>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => _ConfirmDetected(
+        place: place,
+        matches: provider.detectMatches,
+      ),
+    );
+    if (!mounted || chosen == null) return;
+    await _apply(() => provider.apply(chosen));
+  }
+
+  void _showDetectFailure(LocationDetectFailure failure) {
+    String message = 'లొకేషన్ గుర్తించలేకపోయాము. దయచేసి దిగువన ఎంచుకోండి.';
+    String? actionLabel;
+
+    switch (failure) {
+      case LocationDetectFailure.serviceDisabled:
+        message = 'లొకేషన్ సేవలు నిలిపివేయబడ్డాయి (Location disabled). దయచేసి ఆన్ చేయండి.';
+        break;
+      case LocationDetectFailure.permissionDeniedForever:
+        message = 'లొకేషన్ అనుమతి నిరాకరించబడింది. సెట్టింగ్స్‌లో అనుమతించండి.';
+        actionLabel = 'సెట్టింగ్స్ తెరవండి';
+        break;
+      case LocationDetectFailure.permissionDenied:
+      case LocationDetectFailure.noPlaceFound:
+      case LocationDetectFailure.timeout:
+      case LocationDetectFailure.unknown:
+        break;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 5),
+        action: actionLabel == null
+            ? null
+            : SnackBarAction(
+                label: actionLabel,
+                onPressed: Geolocator.openAppSettings,
+              ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final provider = context.watch<LocationProvider>();
+    final currentLoc = AppState.instance.district.isNotEmpty
+        ? AppState.instance.district
+        : 'Unknown';
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
-        title: const Text('మీ ప్రాంతాన్ని ఎంచుకోండి',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-        elevation: 0,
-        actions: [
-          if (!Navigator.of(context).canPop())
-            TextButton(
-              onPressed: () {
-                AppState.instance.completeOnboarding('Telugu');
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const HomeScreen()),
-                );
-              },
-              child: const Text(
-                'దాటవేయి',
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-        ],
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('జిల్లాను ఎంచుకోండి', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text('Choose District', style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+          ],
+        ),
       ),
       body: SafeArea(
         child: Column(
           children: [
-            // Search Box
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: FilledButton.icon(
+                  onPressed: provider.isDetecting ? null : () => _detect(provider),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: provider.isDetecting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.my_location_rounded, size: 18),
+                  label: Text(
+                    provider.isDetecting
+                        ? 'లొకేషన్ వెతుకుతోంది...'
+                        : 'నా ప్రస్తుత ప్రాంతాన్ని ఉపయోగించండి',
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: TextField(
-                controller: _searchController,
-                onChanged: _onSearchChanged,
+                controller: _controller,
+                onChanged: provider.onQueryChanged,
                 decoration: InputDecoration(
-                  hintText: 'నగరం, మండలం లేదా గ్రామం కోసం వెతకండి...',
-                  prefixIcon:
-                      const Icon(Icons.search, color: AppColors.primary),
+                  hintText: 'గ్రామం లేదా మండలం పేరుతో వెతకండి...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: provider.isSearching
+                      ? const Padding(
+                          padding: EdgeInsets.all(14),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : (_controller.text.isEmpty
+                          ? null
+                          : IconButton(
+                              onPressed: () {
+                                _controller.clear();
+                                provider.onQueryChanged('');
+                              },
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                            )),
                   filled: true,
-                  fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
+                  fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
                 ),
               ),
             ),
-
-            // GPS Auto-detect Button
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: InkWell(
-                onTap: _isLoadingGps ? null : _detectGps,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: AppColors.primary.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      _isLoadingGps
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: AppColors.primary),
-                            )
-                          : const Icon(Icons.my_location_rounded,
-                              color: AppColors.primary, size: 20),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          'నా ప్రస్తుత ప్రాంతాన్ని గుర్తించండి (GPS)',
-                          style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            // Search Results or Hierarchical Picker
             Expanded(
-              child: _searchController.text.trim().length >= 2
-                  ? _buildSearchResults()
-                  : _buildHierarchicalPicker(isDark),
+              child: provider.isSearchMode
+                  ? _SearchResults(
+                      provider: provider,
+                      onSelect: (result) => _apply(() => provider.apply(result)),
+                    )
+                  : _Drilldown(
+                      provider: provider,
+                      onApplyNode: (node, level) =>
+                          _apply(() => provider.applyNode(node, level)),
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildSearchResults() {
-    if (_isSearching) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_searchResults.isEmpty) {
-      return const Center(
-          child: Text('మీ వెతుకులాటికి సరిపోలే ప్రాంతాలు కనిపించలేదు.'));
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.provider, required this.onSelect});
+
+  final LocationProvider provider;
+  final ValueChanged<LocationSearchResult> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    if (provider.results.isEmpty && !provider.isSearching) {
+      return const EmptyStateView(
+        icon: Icons.travel_explore_outlined,
+        title: 'ఫలితాలు లేవు',
+        message: 'దయచేసి వేరే పేరుతో వెతకండి',
+      );
     }
 
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _searchResults.length,
+      itemCount: provider.results.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
-        final loc = _searchResults[index] as Map<String, dynamic>;
-        final title = loc['name_en'] ?? loc['name'] ?? 'Location';
-        final sub = loc['district'] ?? loc['state'] ?? '';
-
+        final result = provider.results[index];
         return ListTile(
-          leading:
-              const Icon(Icons.location_on_outlined, color: AppColors.primary),
-          title:
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: sub.isNotEmpty ? Text(sub) : null,
-          onTap: () {
-            final type = loc['type']?.toString().toLowerCase();
-            final id = loc['id']?.toString();
-            String? stateId;
-            String? districtId;
-            String? subdistrictId;
-            String? villageId;
-
-            if (type == 'village') {
-              villageId = id;
-            } else if (type == 'subdistrict') {
-              subdistrictId = id;
-            } else if (type == 'district') {
-              districtId = id;
-            } else if (type == 'state') {
-              stateId = id;
-            }
-
-            final stateName =
-                (type == 'state' ? title : loc['state'])?.toString() ??
-                    'Telangana';
-            final districtName =
-                (type == 'state' ? '' : loc['district'] ?? title).toString();
-
-            _saveAndExit(
-              state: stateName,
-              district: districtName,
-              subdistrict:
-                  loc['subdistrict'] ?? (type == 'subdistrict' ? title : null),
-              village: loc['village'] ?? (type == 'village' ? title : null),
-              stateId: stateId,
-              districtId: districtId,
-              subdistrictId: subdistrictId,
-              villageId: villageId,
-            );
-          },
+          contentPadding: EdgeInsets.zero,
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              _iconFor(result.type),
+              size: 19,
+              color: Theme.of(context).primaryColor,
+            ),
+          ),
+          title: Text(result.nameEn, style: const TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: Text(
+            [result.type.label, result.breadcrumb]
+                .where((value) => value.isNotEmpty)
+                .join(' • '),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => onSelect(result),
         );
       },
     );
   }
 
-  Widget _buildHierarchicalPicker(bool isDark) {
+  IconData _iconFor(LocationLevel level) {
+    switch (level) {
+      case LocationLevel.state:
+        return Icons.map_outlined;
+      case LocationLevel.district:
+        return Icons.location_city_outlined;
+      case LocationLevel.subdistrict:
+        return Icons.hub_outlined;
+      case LocationLevel.village:
+        return Icons.holiday_village_outlined;
+      case LocationLevel.unknown:
+        return Icons.place_outlined;
+    }
+  }
+}
+
+class _Drilldown extends StatelessWidget {
+  const _Drilldown({required this.provider, required this.onApplyNode});
+
+  final LocationProvider provider;
+  final void Function(LocationNode node, LocationLevel level) onApplyNode;
+
+  @override
+  Widget build(BuildContext context) {
+    if (provider.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (provider.hasError && provider.states.isEmpty) {
+      return ErrorStateView(error: provider.error ?? 'Error', onRetry: provider.load);
+    }
+
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       children: [
-        const Text(
-          'రాష్ట్రం',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.8,
-            color: AppColors.textMuted,
-          ),
-        ),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          initialValue: _selectedState,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.map_outlined),
-            labelText: 'రాష్ట్రాన్ని ఎంచుకోండి',
-          ),
-          items: _states
-              .map(_locationName)
-              .where((name) => name.isNotEmpty)
-              .map(
-                (name) => DropdownMenuItem<String>(
-                  value: name,
-                  child: Text(name, overflow: TextOverflow.ellipsis),
-                ),
-              )
-              .toList(),
-          onChanged: _isLoadingHierarchy
-              ? null
-              : (state) {
-                  if (state == null || state == _selectedState) return;
-                  setState(() => _selectedState = state);
-                  _loadDistricts(state);
-                },
-        ),
-        if (_selectedState?.isNotEmpty == true) ...[
+        if (provider.selectedState != null) _Breadcrumbs(provider: provider),
+        if (provider.selectedState == null) ...[
+          const SectionHeader(title: 'రాష్ట్రాన్ని ఎంచుకోండి'),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _isLoadingHierarchy
-                ? null
-                : () {
-                    final selected = _findByName(_states, _selectedState!);
-                    _saveAndExit(
-                      state: _selectedState!,
-                      district: '',
-                      stateId:
-                          selected is Map ? selected['id']?.toString() : null,
-                    );
-                  },
-            icon: const Icon(Icons.check_circle_outline_rounded),
-            label: Text('$_selectedState ప్రాంతాన్ని ఎంచుకోండి'),
+          _NodeGrid(
+            nodes: provider.states,
+            onTap: provider.selectState,
           ),
-        ],
-        if (_isLoadingHierarchy) ...[
+        ] else if (provider.selectedDistrict == null) ...[
           const SizedBox(height: 12),
-          const LinearProgressIndicator(),
-        ],
-        if (_hierarchyError != null) ...[
+          SectionHeader(
+            title: '${provider.selectedState!.nameEn} లో జిల్లాలు',
+            trailingText: 'ఈ రాష్ట్రం ఎంచుకోండి',
+            onTrailingTap: () => onApplyNode(provider.selectedState!, LocationLevel.state),
+          ),
+          const SizedBox(height: 8),
+          _NodeList(
+            nodes: provider.districts,
+            onTap: provider.selectDistrict,
+            onUse: (node) => onApplyNode(node, LocationLevel.district),
+          ),
+        ] else if (provider.selectedSubdistrict == null) ...[
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _hierarchyError!,
-                  style: const TextStyle(color: AppColors.error),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: _loadInitialLocations,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('మళ్లీ ప్రయత్నించండి'),
-              ),
-            ],
+          SectionHeader(
+            title: '${provider.selectedDistrict!.nameEn} లో మండలాలు',
+            trailingText: 'ఈ జిల్లా ఎంచుకోండి',
+            onTrailingTap: () => onApplyNode(provider.selectedDistrict!, LocationLevel.district),
           ),
-        ],
-        const SizedBox(height: 20),
-
-        // District Section Header
-        const Text(
-          'జిల్లాలు',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.8,
-            color: AppColors.textMuted,
+          const SizedBox(height: 8),
+          _NodeList(
+            nodes: provider.subdistricts,
+            onTap: provider.selectSubdistrict,
+            onUse: (node) => onApplyNode(node, LocationLevel.subdistrict),
           ),
-        ),
-        const SizedBox(height: 10),
-
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _districts.map((d) {
-            final name = d['name_en'] ?? d['name'] ?? 'District';
-            final isSelected = _selectedDistrict == name;
-
-            return FilterChip(
-              selected: isSelected,
-              label: Text(name),
-              selectedColor: AppColors.primary,
-              labelStyle: TextStyle(
-                color: isSelected
-                    ? Colors.white
-                    : (isDark ? Colors.white70 : Colors.black87),
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              ),
-              onSelected: (_) {
-                setState(() {
-                  _selectedDistrict = name;
-                  _selectedSubdistrict = null;
-                  _villages = [];
-                });
-                _loadSubdistricts(name);
-              },
-            );
-          }).toList(),
-        ),
-
-        if (_selectedDistrict != null) ...[
+        ] else ...[
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () {
-              _saveAndExit(
-                state: _selectedState ?? 'Telangana',
-                district: _selectedDistrict!,
-                districtId: _selectedDistrictId(),
-              );
-            },
-            icon: const Icon(Icons.check_circle_outline_rounded),
-            label: Text('$_selectedDistrict జిల్లాను ఎంచుకోండి'),
+          SectionHeader(
+            title: '${provider.selectedSubdistrict!.nameEn} లో గ్రామాలు',
+            trailingText: 'ఈ మండలం ఎంచుకోండి',
+            onTrailingTap: () => onApplyNode(provider.selectedSubdistrict!, LocationLevel.subdistrict),
           ),
-        ],
-
-        if (_subdistricts.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          const Text(
-            'మండలాలు',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-              color: AppColors.textMuted,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _subdistricts.map((s) {
-              final name = s['name_en'] ?? s['name'] ?? 'Mandal';
-              final isSelected = _selectedSubdistrict == name;
-              return FilterChip(
-                selected: isSelected,
-                label: Text(name),
-                selectedColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: isSelected
-                      ? Colors.white
-                      : (isDark ? Colors.white70 : Colors.black87),
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                ),
-                onSelected: (_) {
-                  setState(() => _selectedSubdistrict = name);
-                  _loadVillages(name);
-                },
-              );
-            }).toList(),
-          ),
-          if (_selectedSubdistrict != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                final selected = _subdistricts.cast<dynamic>().firstWhere(
-                      (s) =>
-                          ((s['name_en'] ?? s['name'] ?? '').toString()) ==
-                          _selectedSubdistrict,
-                      orElse: () => <String, dynamic>{},
-                    );
-                _saveAndExit(
-                  state: _selectedState ?? 'Telangana',
-                  district: _selectedDistrict ?? 'Hyderabad',
-                  subdistrict: _selectedSubdistrict,
-                  subdistrictId:
-                      selected is Map ? selected['id']?.toString() : null,
-                  districtId: _selectedDistrictId(),
-                );
-              },
-              icon: const Icon(Icons.check_circle_outline_rounded),
-              label: Text('$_selectedSubdistrict మండలాన్ని ఎంచుకోండి'),
-            ),
-          ],
-        ],
-
-        if (_villages.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          const Text(
-            'గ్రామాలు',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-              color: AppColors.textMuted,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _villages.map((v) {
-              final name = v['name_en'] ?? v['name'] ?? 'Village';
-              return ActionChip(
-                label: Text(name),
-                onPressed: () {
-                  final selectedSubdistrict = _subdistricts
-                      .cast<dynamic>()
-                      .firstWhere(
-                        (s) =>
-                            ((s['name_en'] ?? s['name'] ?? '').toString()) ==
-                            _selectedSubdistrict,
-                        orElse: () => <String, dynamic>{},
-                      );
-                  _saveAndExit(
-                    state: _selectedState ?? 'Telangana',
-                    district: _selectedDistrict ?? 'Hyderabad',
-                    subdistrict: _selectedSubdistrict,
-                    village: name,
-                    villageId: v['id']?.toString(),
-                    subdistrictId: selectedSubdistrict is Map
-                        ? selectedSubdistrict['id']?.toString()
-                        : null,
-                    districtId: _selectedDistrictId(),
-                  );
-                },
-              );
-            }).toList(),
+          const SizedBox(height: 8),
+          _NodeList(
+            nodes: provider.villages,
+            onTap: (node) => onApplyNode(node, LocationLevel.village),
+            onUse: (node) => onApplyNode(node, LocationLevel.village),
           ),
         ],
       ],
     );
   }
+}
+
+class _Breadcrumbs extends StatelessWidget {
+  const _Breadcrumbs({required this.provider});
+
+  final LocationProvider provider;
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    _debounce?.cancel();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final crumbs = <String>[
+      if (provider.selectedState != null) provider.selectedState!.nameEn,
+      if (provider.selectedDistrict != null) provider.selectedDistrict!.nameEn,
+      if (provider.selectedSubdistrict != null) provider.selectedSubdistrict!.nameEn,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: provider.clearDrilldown,
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.restart_alt_rounded),
+            tooltip: 'మొదటి నుండి ప్రారంభించండి (Start Over)',
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              crumbs.join('  ›  '),
+              style: TextStyle(fontSize: 14, color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NodeGrid extends StatelessWidget {
+  const _NodeGrid({required this.nodes, required this.onTap});
+
+  final List<LocationNode> nodes;
+  final ValueChanged<LocationNode> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final node in nodes)
+          Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(24),
+            child: InkWell(
+              onTap: () => onTap(node),
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Text(node.nameEn, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _NodeList extends StatelessWidget {
+  const _NodeList({
+    required this.nodes,
+    required this.onTap,
+    required this.onUse,
+  });
+
+  final List<LocationNode> nodes;
+  final ValueChanged<LocationNode> onTap;
+  final ValueChanged<LocationNode> onUse;
+
+  @override
+  Widget build(BuildContext context) {
+    if (nodes.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Text('ఏమీ కనుగొనబడలేదు', style: TextStyle(fontSize: 14, color: Colors.grey)),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (final node in nodes)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(node.nameEn, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            subtitle: node.nameTe.isNotEmpty
+                ? Text(node.nameTe, style: const TextStyle(fontSize: 13, color: Colors.grey))
+                : null,
+            trailing: TextButton(
+              onPressed: () => onUse(node),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: const Text('ఎంచుకోండి'),
+            ),
+            onTap: () => onTap(node),
+          ),
+      ],
+    );
+  }
+}
+
+class _ConfirmDetected extends StatelessWidget {
+  const _ConfirmDetected({required this.place, required this.matches});
+
+  final DetectedPlace place;
+  final List<LocationSearchResult> matches;
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      maxChildSize: 0.9,
+      minChildSize: 0.4,
+      expand: false,
+      builder: (context, controller) => ListView(
+        controller: controller,
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              Icon(Icons.my_location_rounded, size: 20, color: Theme.of(context).primaryColor),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('ఇదే మీ ప్రాంతమా?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            place.fullTrail.isEmpty ? 'Unknown area' : place.fullTrail,
+            style: const TextStyle(fontSize: 15, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            matches.length == 1
+                ? 'దిగువ మీ ప్రాంతాన్ని నిర్ధారించండి.'
+                : 'సరిపోయే ప్రాంతాన్ని ఎంచుకోండి.',
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          for (final match in matches)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: ListTile(
+                  onTap: () => Navigator.of(context).pop(match),
+                  leading: Icon(Icons.place_rounded, size: 20, color: Theme.of(context).primaryColor),
+                  title: Text(match.nameEn, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  subtitle: Text(
+                    [match.subdistrict, match.district, match.state]
+                        .where((v) => v.isNotEmpty)
+                        .join(', '),
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  trailing: Text(
+                    match.type.name.toUpperCase(),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('స్వయంగా ఎంచుకుంటాను'),
+          ),
+        ],
+      ),
+    );
   }
 }

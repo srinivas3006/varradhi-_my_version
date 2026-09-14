@@ -9,6 +9,7 @@ import 'comments_screen.dart';
 import 'account_login_screen.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/share_service.dart';
 
 class BookmarksScreen extends StatefulWidget {
   const BookmarksScreen({super.key});
@@ -21,6 +22,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   bool _isLoading = true;
   List<NewsArticle> _bookmarks = [];
   String? _error;
+  int _generation = 0;
+  final Set<String> _removing = {};
 
   @override
   void initState() {
@@ -33,23 +36,30 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   }
 
   Future<void> _fetchBookmarks() async {
-    if (!AppState.instance.isLoggedIn) return;
+    if (!mounted || !AppState.instance.isLoggedIn) return;
+    final generation = ++_generation;
 
     setState(() {
-      _isLoading = true;
+      _isLoading = _bookmarks.isEmpty;
       _error = null;
     });
 
     try {
       final bookmarks = await ApiService.instance.getBookmarks();
-      if (mounted) {
+      if (mounted && generation == _generation) {
+        for (final article in bookmarks) {
+          if (!_removing.contains(article.id) &&
+              !AppState.instance.isBookmarked(article.id)) {
+            AppState.instance.toggleBookmark(article.id);
+          }
+        }
         setState(() {
-          _bookmarks = bookmarks;
+          _bookmarks = bookmarks.where((a) => !_removing.contains(a.id)).toList();
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
         setState(() {
           _error = tr('saved_load_failed');
           _isLoading = false;
@@ -142,7 +152,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
 
-    if (_error != null) {
+    if (_error != null && _bookmarks.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -219,27 +229,37 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 MaterialPageRoute(
                   builder: (_) => NewsDetailScreen(article: article, slug: article.slug),
                 ),
-              ).then((_) => _fetchBookmarks());
+              ).then((_) { if (mounted) _fetchBookmarks(); });
             },
             onLike: () {},
             onBookmark: () async {
+              if (!_removing.add(article.id)) return;
               HapticFeedback.lightImpact();
-              final messenger = ScaffoldMessenger.of(context);
-              final success = await ApiService.instance.toggleBookmark(article.id);
-              if (!success) {
-                if (mounted) {
-                  AppState.instance.toggleBookmark(article.id); // revert
-                  messenger.showSnackBar(
-                    SnackBar(content: Text(tr('bookmark_update_failed'))),
-                  );
+              final oldIndex = _bookmarks.indexWhere((a) => a.id == article.id);
+              final wasSaved = AppState.instance.isBookmarked(article.id);
+              if (wasSaved) AppState.instance.toggleBookmark(article.id);
+              setState(() => _bookmarks.removeWhere((a) => a.id == article.id));
+              try {
+                final success = await ApiService.instance.toggleBookmark(article.id);
+                if (!success) throw Exception('Bookmark update failed');
+              } catch (_) {
+                if (wasSaved && !AppState.instance.isBookmarked(article.id)) {
+                  AppState.instance.toggleBookmark(article.id);
                 }
-              } else if (!AppState.instance.isBookmarked(article.id)) {
+                if (!mounted) return;
                 setState(() {
-                  _bookmarks.removeWhere((a) => a.id == article.id);
+                  if (!_bookmarks.any((a) => a.id == article.id)) {
+                    _bookmarks.insert(oldIndex.clamp(0, _bookmarks.length), article);
+                  }
                 });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(tr('bookmark_update_failed'))),
+                );
+              } finally {
+                _removing.remove(article.id);
               }
             },
-            onShare: () {},
+            onShare: () => ShareService.shareArticle(article),
             onComment: () {
               Navigator.push(
                 context,

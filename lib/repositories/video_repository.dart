@@ -12,7 +12,8 @@ import '../state/app_state.dart';
 /// - Caching of video lists to prevent redundant network hits on tab switch
 /// - Safe error handling
 class VideoRepository {
-  VideoRepository({ApiClient? apiClient}) : _api = apiClient ?? ApiClient.instance;
+  VideoRepository({ApiClient? apiClient})
+      : _api = apiClient ?? ApiClient.instance;
 
   static final VideoRepository instance = VideoRepository();
 
@@ -38,7 +39,10 @@ class VideoRepository {
         lang: effectiveLang,
       );
 
+      if (response.hasErrors)
+        throw ApiException(response.errorMessage ?? 'Unable to load videos.');
       final raw = response.data ?? [];
+      if (cursor == null) _seenIdsPerKey[key] = <String>{};
       final seen = _seenIdsPerKey.putIfAbsent(key, () => <String>{});
       final deduplicated = <VideoItem>[];
 
@@ -78,7 +82,9 @@ class VideoRepository {
     String? scope,
   }) async {
     final effectiveLang = lang ?? AppState.instance.contentLanguage;
-    final key = 'videos:$effectiveLang:${scope ?? "all"}';
+    final key = 'videos:$effectiveLang:${scope ?? "all"}:'
+        '${AppState.instance.stateName}:${AppState.instance.district}:'
+        '${AppState.instance.city}:${AppState.instance.subdistrict}:${AppState.instance.village}';
 
     try {
       final response = await ApiService.instance.getVideoFeed(
@@ -86,9 +92,17 @@ class VideoRepository {
         pageSize: pageSize,
         lang: effectiveLang,
         scope: scope,
+        state: AppState.instance.stateName,
+        district: AppState.instance.district,
+        city: AppState.instance.city,
+        subdistrict: AppState.instance.subdistrict,
+        village: AppState.instance.village,
       );
 
+      if (response.hasErrors)
+        throw ApiException(response.errorMessage ?? 'Unable to load videos.');
       final raw = response.data ?? [];
+      if (cursor == null) _seenIdsPerKey[key] = <String>{};
       final seen = _seenIdsPerKey.putIfAbsent(key, () => <String>{});
       final deduplicated = <VideoItem>[];
 

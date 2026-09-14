@@ -18,7 +18,6 @@ import '../services/ad_delivery_service.dart';
 import '../services/ad_manager.dart';
 import '../repositories/ad_repository.dart';
 import '../services/notification_service.dart';
-import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/feed/daily_greeting_widget.dart';
 import '../models/category.dart';
 import '../models/poll.dart';
@@ -63,6 +62,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   int _sectionGeneration = 0;
   int _feedGeneration = 0;
   String get _feedLocationKey => [
+        AppState.instance.contentLanguage,
+        AppState.instance.city,
         AppState.instance.stateName,
         AppState.instance.district,
         AppState.instance.subdistrict,
@@ -72,9 +73,35 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   final PageController _breakingNewsController = PageController();
   int _currentBreakingIndex = 0;
 
+  late String _preferencesIdentity;
+
+  void _onPreferencesChanged() {
+    final identity = _feedLocationKey;
+    if (identity == _preferencesIdentity) return;
+    _preferencesIdentity = identity;
+    ++_sectionGeneration;
+    _articles = [];
+    _recommendedArticles = [];
+    _featuredArticles = [];
+    _villageSection = [];
+    _mandalSection = [];
+    _districtUgc = [];
+    _stateUgc = [];
+    _feedAds = [];
+    _posters = [];
+    _poll = null;
+    _liveNewsList = [];
+    _nextCursor = null;
+    _hasMore = true;
+    _feedStatus = FeedStatus.loading;
+    _refresh();
+  }
+
   @override
   void initState() {
     super.initState();
+    _preferencesIdentity = _feedLocationKey;
+    AppState.instance.addListener(_onPreferencesChanged);
     _articles = [];
     // 1. Critical primary feed requests for first paint.
     _loadMore();
@@ -99,16 +126,20 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   @override
   void dispose() {
+    AppState.instance.removeListener(_onPreferencesChanged);
     _breakingNewsController.dispose();
     super.dispose();
   }
 
   Future<void> _loadLiveNews() async {
+    final queryIdentity = _feedLocationKey;
     try {
       final list = await ApiService.instance.getLiveNews();
-      if (mounted) setState(() => _liveNewsList = list);
+      if (mounted && queryIdentity == _feedLocationKey)
+        setState(() => _liveNewsList = list);
     } catch (_) {
-      if (mounted) setState(() => _liveNewsList = []);
+      if (mounted && queryIdentity == _feedLocationKey)
+        setState(() => _liveNewsList = []);
     }
   }
 
@@ -401,6 +432,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   Future<void> _loadFeatured() async {
+    final queryIdentity = _feedLocationKey;
     try {
       final breakingRes = await ApiService.instance.getNewsFeed(
         scope: 'main',
@@ -418,7 +450,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       final featured = await ApiService.instance.getFeaturedArticles(
         lang: _feedLang,
       );
-      if (mounted) {
+      if (mounted && queryIdentity == _feedLocationKey) {
         setState(() => _featuredArticles = featured);
       }
     } catch (e) {
@@ -427,9 +459,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   Future<void> _loadRecommendations() async {
+    final queryIdentity = _feedLocationKey;
     try {
       final recs = await ApiService.instance.getRecommendations(limit: 15);
-      if (mounted) {
+      if (mounted && queryIdentity == _feedLocationKey) {
         setState(() => _recommendedArticles = recs);
       }
     } catch (e) {
@@ -445,36 +478,45 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   Future<void> _loadPoll() async {
+    final queryIdentity = _feedLocationKey;
     try {
       final polls = await ApiService.instance.getPolls();
-      if (mounted && polls.isNotEmpty) setState(() => _poll = polls.first);
+      if (mounted && queryIdentity == _feedLocationKey && polls.isNotEmpty)
+        setState(() => _poll = polls.first);
     } catch (_) {}
   }
 
   Future<void> _loadPosters() async {
+    final queryIdentity = _feedLocationKey;
     try {
       final posters = await ApiService.instance.getPosters();
-      if (mounted) setState(() => _posters = posters);
+      if (mounted && queryIdentity == _feedLocationKey)
+        setState(() => _posters = posters);
     } catch (_) {}
   }
 
   Future<void> _loadFeedAds({bool forceRefresh = false}) async {
+    final queryIdentity = _feedLocationKey;
     try {
       final response = await AdRepository.instance.getAds(
         placementZone: 'feed',
+        scope: 'main',
         forceRefresh: forceRefresh,
       );
-      if (mounted && response.data != null) {
+      if (mounted &&
+          queryIdentity == _feedLocationKey &&
+          response.data != null) {
         setState(() => _feedAds = response.data!);
       }
     } catch (_) {}
   }
 
   Future<void> _loadDailyQuote({bool forceRefresh = false}) async {
+    final queryIdentity = _feedLocationKey;
     try {
       final q =
           await ApiService.instance.getRandomQuote(forceRefresh: forceRefresh);
-      if (mounted && q != null) {
+      if (mounted && queryIdentity == _feedLocationKey && q != null) {
         setState(() => _dailyQuote = q);
       }
     } catch (_) {}
@@ -1822,6 +1864,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                 .buildFeedPresentation<NewsArticle>(
                                 contentItems: recommended,
                                 adsPool: _feedAds,
+                                contentKey: (article) =>
+                                    '${article.contentKind}:${article.id}',
                               )
                             : <FeedPresentationItem<NewsArticle>>[];
 
@@ -1840,14 +1884,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     ),
                                     _buildLiveSection(),
                                     _buildSpotlightHeroBanner(),
-                                    if (_articles.isNotEmpty)
-                                      const Padding(
-                                        padding:
-                                            EdgeInsets.fromLTRB(16, 4, 16, 12),
-                                        child: BannerAdSlot(
-                                          placementZone: 'home_banner',
-                                        ),
-                                      ),
                                     RepaintBoundary(
                                       child: _buildBreakingNewsSection(
                                           breakingNews),
@@ -1975,7 +2011,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         key: ValueKey(item.stableKey),
                                         ad: item.ad!,
                                         placementZone: 'feed',
-                                        exposureKey: item.stableKey,
+                                        exposureKey:
+                                            'home_${_feedLocationKey}_${_feedGeneration}_${item.stableKey}',
                                       );
                                     }
 

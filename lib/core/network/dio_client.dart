@@ -67,6 +67,12 @@ class ApiClient {
             options.headers['X-Device-ID'] = deviceId;
           }
 
+          final sessionId = AppState.instance.sessionId;
+          if (sessionId != null && sessionId.isNotEmpty) {
+            options.headers['X-Session-ID'] = sessionId;
+          } else {
+            options.headers.remove('X-Session-ID');
+          }
           return handler.next(options);
         },
         onError: (DioException e, handler) async {
@@ -85,19 +91,22 @@ class ApiClient {
             if (newAccessToken != null) {
               try {
                 final retryOptions = e.requestOptions;
-                retryOptions.headers['Authorization'] = 'Bearer $newAccessToken';
+                retryOptions.headers['Authorization'] =
+                    'Bearer $newAccessToken';
                 final response = await dio.fetch(retryOptions);
                 return handler.resolve(response);
               } catch (_) {
                 // fall through to the standard error mapping below
               }
             } else {
-              debugPrint('Token refresh failed for ${e.requestOptions.path}. Logging out.');
+              debugPrint(
+                  'Token refresh failed for ${e.requestOptions.path}. Logging out.');
               await AppState.instance.logout();
             }
           } else if (e.response?.statusCode == 401 && !isAuthEndpoint) {
             if (AppState.instance.isLoggedIn) {
-              debugPrint('401 Unauthorized encountered with no refresh token. Logging out.');
+              debugPrint(
+                  '401 Unauthorized encountered with no refresh token. Logging out.');
               await AppState.instance.logout();
             }
           }
@@ -137,7 +146,8 @@ class ApiClient {
           ),
         );
         rawDio.httpClientAdapter = dio.httpClientAdapter;
-        final response = await rawDio.post('/api/v1/auth/token/refresh/', data: {
+        final response =
+            await rawDio.post('/api/v1/auth/token/refresh/', data: {
           'refresh': refreshToken,
           'device_id': AppState.instance.deviceId,
         });
@@ -159,7 +169,8 @@ class ApiClient {
 
   // --- Canonical In-flight Request Deduplication ---
 
-  String _generateDeduplicationKey(String method, String path, Map<String, dynamic>? queryParams) {
+  String _generateDeduplicationKey(
+      String method, String path, Map<String, dynamic>? queryParams) {
     if (queryParams == null || queryParams.isEmpty) {
       return '$method:$path';
     }
@@ -315,9 +326,11 @@ class ApiClient {
 
         if (data is Map<String, dynamic>) {
           if (data['errors'] is Map) {
-            message = data['errors']['message']?.toString() ?? data['errors']['detail']?.toString();
+            message = data['errors']['message']?.toString() ??
+                data['errors']['detail']?.toString();
             details = data['errors'];
-          } else if (data['errors'] is List && (data['errors'] as List).isNotEmpty) {
+          } else if (data['errors'] is List &&
+              (data['errors'] as List).isNotEmpty) {
             message = (data['errors'] as List).first.toString();
             details = data['errors'];
           } else if (data['message'] != null) {
@@ -328,11 +341,18 @@ class ApiClient {
         }
 
         if (code == 401) {
-          return UnauthorizedException(message ?? 'సెషన్ గడువు ముగిసింది. దయచేసి మళ్లీ లాగిన్ అవ్వండి.', code, details);
+          return UnauthorizedException(
+              message ?? 'సెషన్ గడువు ముగిసింది. దయచేసి మళ్లీ లాగిన్ అవ్వండి.',
+              code,
+              details);
         } else if (code == 403) {
-          return ForbiddenException(message ?? 'ఈ విభాగాన్ని యాక్సెస్ చేయడానికి మీకు అనుమతి లేదు.', code, details);
+          return ForbiddenException(
+              message ?? 'ఈ విభాగాన్ని యాక్సెస్ చేయడానికి మీకు అనుమతి లేదు.',
+              code,
+              details);
         } else if (code == 404) {
-          return NotFoundException(message ?? 'అభ్యర్థించిన కంటెంట్ కనుగొనబడలేదు.', code, details);
+          return NotFoundException(
+              message ?? 'అభ్యర్థించిన కంటెంట్ కనుగొనబడలేదు.', code, details);
         } else if (code == 422 || (code == 400 && details is Map)) {
           return ValidationException(
             message ?? 'చెల్లని అభ్యర్థన సమాచారం.',
@@ -341,10 +361,15 @@ class ApiClient {
             data,
           );
         } else if (code != null && code >= 500) {
-          return ServerException(message ?? 'సర్వర్ లోపం సంభవించింది. దయచేసి కాసేపటి తర్వాత ప్రయత్నించండి.', code, details);
+          return ServerException(
+              message ??
+                  'సర్వర్ లోపం సంభవించింది. దయచేసి కాసేపటి తర్వాత ప్రయత్నించండి.',
+              code,
+              details);
         }
 
-        return ApiException(message ?? 'నెట్‌వర్క్ అభ్యర్థన విఫలమైంది.', code, details);
+        return ApiException(
+            message ?? 'నెట్‌వర్క్ అభ్యర్థన విఫలమైంది.', code, details);
 
       case DioExceptionType.cancel:
         return ApiException('అభ్యర్థన రద్దు చేయబడింది.');

@@ -168,11 +168,6 @@ class NewsArticle {
           parsedMediaItems.add(MediaItem.fromJson(item));
         }
       }
-      parsedMediaItems.sort((a, b) {
-        if (a.isPrimary && !b.isPrimary) return -1;
-        if (!a.isPrimary && b.isPrimary) return 1;
-        return a.sortOrder.compareTo(b.sortOrder);
-      });
     }
 
     return NewsArticle(
@@ -184,7 +179,7 @@ class NewsArticle {
       imageUrl: normalizedImgUrl,
       source: json['source_name']?.toString() ??
           json['source']?.toString() ??
-          'VARADHI Desk',
+          'Vaaradhi',
       category: parsedCategory,
       publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
       likes: _toInt(json['likes_count'] ?? json['likes']),
@@ -236,7 +231,28 @@ class NewsArticle {
         ?.toString()
         .trim()
         .toLowerCase();
-    return value == 'ugc' ? 'ugc' : 'article';
+    return const {'article', 'ugc', 'live'}.contains(value)
+        ? value!
+        : 'article';
+  }
+
+  /// One parent record owns this ordered media list; it is never a feed list.
+  List<MediaItem> get orderedMedia {
+    if (mediaItems.isNotEmpty) return mediaItems;
+    final result = <MediaItem>[];
+    for (final url in imageUrls ?? <String>[]) {
+      if (url.isNotEmpty && !result.any((item) => item.url == url)) {
+        result.add(MediaItem(mediaType: 'image', url: url, thumbnailUrl: url));
+      }
+    }
+    if (videoUrl.isNotEmpty) {
+      result.add(
+          MediaItem(mediaType: 'video', url: videoUrl, thumbnailUrl: imageUrl));
+    } else if (result.isEmpty && imageUrl.isNotEmpty) {
+      result.add(
+          MediaItem(mediaType: 'image', url: imageUrl, thumbnailUrl: imageUrl));
+    }
+    return result;
   }
 
   bool get isUgc => contentKind == 'ugc';
@@ -287,6 +303,7 @@ class NewsArticle {
       'is_liked_by_user': isLiked,
       'is_bookmarked_by_user': isBookmarked,
       'feed_item_type': contentKind,
+      'media_items': mediaItems.map((item) => item.toJson()).toList(),
     };
   }
 }
@@ -311,11 +328,27 @@ String _resolveVideoUrl(Map<dynamic, dynamic> json) {
   final topLevel = fromMap(json);
   if (topLevel.isNotEmpty) return topLevel;
 
-  final nested = json['article'];
-  if (nested is Map) {
-    return fromMap(nested);
+  for (final key in ['metadata', 'article']) {
+    final nested = json[key];
+    if (nested is Map) {
+      final value = fromMap(nested);
+      if (value.isNotEmpty) return value;
+    }
   }
-
+  final media = json['media_items'];
+  if (media is List) {
+    for (final raw in media.whereType<Map>()) {
+      final item = MediaItem.fromJson(Map<String, dynamic>.from(raw));
+      if (item.isVideo && item.url.isNotEmpty) return item.url;
+    }
+  }
+  final mediaUrl = json['media_url']?.toString() ?? '';
+  final candidate = MediaItem(
+      mediaType: json['media_type']?.toString().toLowerCase() ?? '',
+      url: mediaUrl,
+      thumbnailUrl: '');
+  if (mediaUrl.isNotEmpty && (candidate.isVideo || json['type'] == 'live'))
+    return mediaUrl;
   return '';
 }
 
@@ -421,14 +454,21 @@ class MediaItem {
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
-    final mType = json['media_type']?.toString().toLowerCase() ?? 'image';
+    final mType =
+        (json['media_type'] ?? json['type'])?.toString().toLowerCase() ??
+            'image';
     final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
       json['youtube_video_id']?.toString() ?? json['youtube_url']?.toString(),
     );
     final youtubeUrl = youtubeVideoId == null
         ? ''
         : 'https://www.youtube.com/watch?v=$youtubeVideoId';
-    final rawUrl = json['url']?.toString();
+    final rawUrl = (json['url'] ??
+            json['media_url'] ??
+            json['file_url'] ??
+            json['video_url'] ??
+            json['image_url'])
+        ?.toString();
     final urlStr = rawUrl == null || rawUrl.trim().isEmpty
         ? youtubeUrl
         : UrlNormalizer.normalize(rawUrl);
@@ -437,7 +477,9 @@ class MediaItem {
         : 'https://i.ytimg.com/vi/$youtubeVideoId/hqdefault.jpg';
     final thumbStr = UrlNormalizer.normalize(
       json['thumbnail_url']?.toString(),
-      fallback: youtubeThumb.isNotEmpty ? youtubeThumb : urlStr,
+      fallback: youtubeThumb.isNotEmpty
+          ? youtubeThumb
+          : (mType == 'video' ? '' : urlStr),
     );
     final order = _toInt(json['sort_order'], 0);
     return MediaItem(
@@ -449,9 +491,19 @@ class MediaItem {
     );
   }
 
-  bool get isVideo =>
-      mediaType == 'video' ||
-      url.endsWith('.mp4') ||
-      url.contains('youtube.com') ||
-      url.contains('youtu.be');
+  Map<String, dynamic> toJson() => {
+        'media_type': mediaType,
+        'url': url,
+        'thumbnail_url': thumbnailUrl,
+        'sort_order': sortOrder,
+        'is_primary': isPrimary,
+      };
+
+  bool get isVideo {
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
+    return mediaType == 'video' ||
+        const ['.mp4', '.m3u8', '.mov', '.webm', '.mkv', '.m4v']
+            .any(path.endsWith) ||
+        MediaResolver.extractYoutubeVideoId(url) != null;
+  }
 }

@@ -124,6 +124,7 @@ class FeedState<T> {
     FeedStatus? status,
     List<T>? items,
     String? nextCursor,
+    bool clearCursor = false,
     bool? hasMore,
     String? errorMessage,
     String? refreshErrorMessage,
@@ -133,7 +134,7 @@ class FeedState<T> {
     return FeedState<T>(
       status: status ?? this.status,
       items: items ?? this.items,
-      nextCursor: nextCursor ?? this.nextCursor,
+      nextCursor: clearCursor ? null : (nextCursor ?? this.nextCursor),
       hasMore: hasMore ?? this.hasMore,
       errorMessage: errorMessage ?? this.errorMessage,
       refreshErrorMessage: clearRefreshError ? null : (refreshErrorMessage ?? this.refreshErrorMessage),

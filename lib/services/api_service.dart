@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../repositories/ad_repository.dart';
+import '../core/ads/ad_placement.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -64,25 +66,27 @@ class ApiService {
       try {
         await registerGuestDevice(fcmToken: token);
       } catch (e) {
-        debugPrint('[ApiService] Pre-login guest registration attempt failed: $e');
+        debugPrint(
+            '[ApiService] Pre-login guest registration attempt failed: $e');
       }
     }
 
     Map<String, dynamic> buildPayload() => {
-      'email': email,
-      'password': password,
-      'device_id': AppState.instance.deviceId,
-      'device_name': 'Mobile Device',
-      'device_type': 'android',
-      'app_version': '1.0.0',
-      if (token != null && token.isNotEmpty) 'fcm_token': token,
-      if (AppState.instance.installationSecret != null &&
-          AppState.instance.installationSecret!.isNotEmpty)
-        'installation_secret': AppState.instance.installationSecret,
-    };
+          'email': email,
+          'password': password,
+          'device_id': AppState.instance.deviceId,
+          'device_name': 'Mobile Device',
+          'device_type': 'android',
+          'app_version': '1.0.0',
+          if (token != null && token.isNotEmpty) 'fcm_token': token,
+          if (AppState.instance.installationSecret != null &&
+              AppState.instance.installationSecret!.isNotEmpty)
+            'installation_secret': AppState.instance.installationSecret,
+        };
 
     try {
-      final response = await _dio.post('/api/v1/auth/login/', data: buildPayload());
+      final response =
+          await _dio.post('/api/v1/auth/login/', data: buildPayload());
       final data = response.data['data'] as Map<String, dynamic>;
       if (data['installation_secret'] != null) {
         await AppState.instance
@@ -1235,35 +1239,15 @@ class ApiService {
     String? lang,
     String? areaId,
   }) async {
-    try {
-      final placementZone = zone ?? 'feed';
-      final effectiveState = state ?? AppState.instance.stateName;
-      final effectiveDistrict = district ?? AppState.instance.district;
-      final effectiveCity = city ?? AppState.instance.city;
-      final effectiveLang = lang ?? 'te';
-
-      final response = await _dio.get('/api/v1/ads/', queryParameters: {
-        'placement_zone': placementZone,
-        'zone': placementZone,
-        if (scope != null && scope.isNotEmpty) 'scope': scope,
-        if (effectiveState.isNotEmpty) 'state': effectiveState,
-        if (effectiveDistrict.isNotEmpty) 'district': effectiveDistrict,
-        if (effectiveCity.isNotEmpty) 'city': effectiveCity,
-        'lang': effectiveLang,
-        if (areaId != null) 'area_id': areaId,
-      });
-      return ApiResponse<List<AdBanner>>.fromJson(response.data, (json) {
-        if (json is List) {
-          return json.map((i) => AdBanner.fromJson(i)).toList();
-        }
-        return <AdBanner>[];
-      });
-    } catch (e) {
-      return ApiResponse.error(
-        message: e is AppException ? e.message : e.toString(),
-        fallbackData: <AdBanner>[],
-      );
-    }
+    return AdRepository.instance.getAds(
+      placementZone: zone ?? 'feed',
+      scope: scope,
+      state: state,
+      district: district,
+      city: city,
+      lang: lang,
+      areaId: areaId,
+    );
   }
 
   Future<void> trackAdEvent(String adId, String eventType,
@@ -1272,7 +1256,7 @@ class ApiService {
       await _dio.post('/api/v1/ads/event/', data: {
         'ad_id': adId,
         'event_type': eventType,
-        'placement_zone': placementZone,
+        'placement_zone': AdPlacement.canonical(placementZone),
       });
     } catch (e) {
       // Silently fail for analytics tracking
@@ -1357,19 +1341,33 @@ class ApiService {
 
   // --- Bookmarks ---
   Future<List<NewsArticle>> getBookmarks() async {
-    try {
-      final response = await _dio.get('/api/v1/bookmarks/');
-      final List data = response.data['data'] as List? ?? [];
-      return data.map((i) {
-        final map = i as Map<String, dynamic>;
-        final nestedArticle = map['article'];
-        final articleJson =
-            nestedArticle is Map<String, dynamic> ? nestedArticle : map;
-        return NewsArticle.fromJson(articleJson);
-      }).toList();
-    } catch (_) {
-      return [];
-    }
+    final articles = <NewsArticle>[];
+    final seen = <String>{};
+    final visited = <String>{};
+    String? cursor;
+    do {
+      final response = await _dio.get('/api/v1/bookmarks/', queryParameters: {
+        'page_size': 20,
+        if (cursor != null) 'cursor': cursor,
+      });
+      final parsed =
+          ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
+        return (json as List? ?? []).map((item) {
+          final map = Map<String, dynamic>.from(item as Map);
+          final nested = map['article'];
+          return NewsArticle.fromJson(
+              nested is Map<String, dynamic> ? nested : map);
+        }).toList();
+      });
+      if (parsed.hasErrors) {
+        throw ApiException(
+            parsed.errorMessage ?? 'Unable to load saved articles.');
+      }
+      articles
+          .addAll((parsed.data ?? []).where((article) => seen.add(article.id)));
+      cursor = parsed.nextCursor;
+    } while (cursor != null && cursor.isNotEmpty && visited.add(cursor));
+    return articles;
   }
 
   Future<void> addBookmark(String articleId) async {
@@ -1470,6 +1468,10 @@ class ApiService {
                 ? (map['trust_score'] as num).toInt()
                 : 50,
             metadata: {
+              if (map['metadata'] is Map)
+                ...Map<String, dynamic>.from(map['metadata']),
+              'media_items': map['media_items'] ?? map['media'],
+              'image_urls': map['image_urls'],
               'media_type': map['media_type'],
               'trust_level': map['trust_level'],
             },

@@ -10,6 +10,7 @@ import '../../core/media/network_video_playback_controller.dart';
 import '../../core/media/video_player_widget.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
+import '../../spotlight/spotlight_media_coordinator.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/share_service.dart';
 import 'ad_viewability_detector.dart';
@@ -39,16 +40,83 @@ class VideoAdCard extends StatefulWidget {
   State<VideoAdCard> createState() => _VideoAdCardState();
 }
 
-class _VideoAdCardState extends State<VideoAdCard> {
+class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
   NetworkVideoPlaybackController? _playbackController;
   bool _isInitialized = false;
   bool _isDisposed = false;
   bool _isVisible = false;
+  bool _active = true;
+  bool _foreground = true;
+  bool _registered = false;
+  final Key _visibilityKey = UniqueKey();
+  late final String _playbackId = 'ad:${_visibilityKey.toString()}';
 
   @override
   void initState() {
     super.initState();
-    _initPlayer();
+    WidgetsBinding.instance.addObserver(this);
+    _foreground = WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    SpotlightMediaCoordinator.instance.addListener(_onMediaChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _active = AdActivityScope.isActive(context);
+    _syncPlayback();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _syncPlayback();
+  }
+
+  void _onMediaChanged() {
+    if (_registered &&
+        SpotlightMediaCoordinator.instance.activeVideoArticleId !=
+            _playbackId) {
+      _pause();
+    }
+  }
+
+  void _pause() {
+    _playbackController?.pause();
+    if (_registered) {
+      _registered = false;
+      AdManager.instance.unregisterActiveVideo();
+      SpotlightMediaCoordinator.instance.notifyVideoStopped(_playbackId);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant VideoAdCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.ad.videoUrl != widget.ad.videoUrl ||
+        oldWidget.ad.id != widget.ad.id) {
+      _pause();
+      _playbackController?.dispose();
+      _playbackController = null;
+      _isInitialized = false;
+      _syncPlayback();
+    }
+  }
+
+  void _syncPlayback() {
+    final shouldPlay = _isVisible && _active && _foreground && !_isDisposed;
+    if (shouldPlay && _playbackController == null) _initPlayer();
+    if (_playbackController == null || !_isInitialized) return;
+    if (shouldPlay) {
+      _playbackController!.play();
+      if (!_registered) {
+        _registered = true;
+        AdManager.instance.registerActiveVideo();
+        SpotlightMediaCoordinator.instance.notifyVideoStarted(_playbackId);
+      }
+    } else {
+      _pause();
+    }
   }
 
   void _initPlayer() {
@@ -67,15 +135,15 @@ class _VideoAdCardState extends State<VideoAdCard> {
         loop: true,
       );
 
-      _playbackController!.initialize().then((_) {
-        if (!_isDisposed && mounted) {
+      final controller = _playbackController!;
+      controller.initialize().then((_) {
+        if (!_isDisposed &&
+            mounted &&
+            identical(controller, _playbackController)) {
           setState(() {
             _isInitialized = true;
           });
-          if (_isVisible) {
-            _playbackController!.play();
-            AdManager.instance.registerActiveVideo();
-          }
+          _syncPlayback();
         }
       }).catchError((_) {
         // Fallback to poster on failure
@@ -85,9 +153,12 @@ class _VideoAdCardState extends State<VideoAdCard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SpotlightMediaCoordinator.instance.removeListener(_onMediaChanged);
+    _pause();
     _isDisposed = true;
     if (_playbackController != null) {
-      if (_playbackController!.value.isPlaying) {
+      if (_registered) {
         AdManager.instance.unregisterActiveVideo();
       }
       _playbackController!.dispose();
@@ -105,21 +176,14 @@ class _VideoAdCardState extends State<VideoAdCard> {
         _isVisible = nowVisible;
       });
 
-      if (_playbackController != null && _isInitialized) {
-        if (nowVisible) {
-          _playbackController!.play();
-          AdManager.instance.registerActiveVideo();
-        } else {
-          _playbackController!.pause();
-          AdManager.instance.unregisterActiveVideo();
-        }
-      }
+      _syncPlayback();
     }
   }
 
   Future<void> _handleTap() async {
     HapticFeedback.selectionClick();
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
 
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
@@ -153,7 +217,7 @@ class _VideoAdCardState extends State<VideoAdCard> {
       placementZone: widget.placementZone,
       exposureKey: widget.exposureKey,
       child: VisibilityDetector(
-        key: Key('video_ad_visibility_${widget.ad.id}_${widget.exposureKey ?? "0"}'),
+        key: _visibilityKey,
         onVisibilityChanged: _onVisibilityChanged,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -181,8 +245,8 @@ class _VideoAdCardState extends State<VideoAdCard> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Media Frame (Video Player or Poster)
-                SizedBox(
-                  height: 210,
+                AspectRatio(
+                  aspectRatio: 16 / 9,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -275,18 +339,21 @@ class _VideoAdCardState extends State<VideoAdCard> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (_isInitialized && _playbackController != null) ...[
+                            if (_isInitialized &&
+                                _playbackController != null) ...[
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(20),
                                 child: BackdropFilter(
-                                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                  filter:
+                                      ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                                   child: InkWell(
                                     onTap: _toggleMute,
                                     borderRadius: BorderRadius.circular(20),
                                     child: Container(
                                       padding: const EdgeInsets.all(7),
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.6),
+                                        color:
+                                            Colors.black.withValues(alpha: 0.6),
                                         shape: BoxShape.circle,
                                         border: Border.all(
                                             color: Colors.white24, width: 0.8),
@@ -314,7 +381,8 @@ class _VideoAdCardState extends State<VideoAdCard> {
                                   child: Container(
                                     padding: const EdgeInsets.all(7),
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.6),
+                                      color:
+                                          Colors.black.withValues(alpha: 0.6),
                                       shape: BoxShape.circle,
                                       border: Border.all(
                                           color: Colors.white24, width: 0.8),
@@ -374,7 +442,8 @@ class _VideoAdCardState extends State<VideoAdCard> {
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 10),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),

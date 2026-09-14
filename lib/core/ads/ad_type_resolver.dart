@@ -51,9 +51,6 @@ class AdTypeResolver {
     if (adOrType == null) return AdPresentationType.unsupported;
 
     if (adOrType is AdBanner) {
-      if (adOrType.isVideo) {
-        return AdPresentationType.videoCard;
-      }
       return resolveType(adOrType.adType);
     }
 

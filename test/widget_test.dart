@@ -30,12 +30,14 @@ class WidgetTestMockAdapter implements HttpClientAdapter {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const MethodChannel secureStorageChannel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+  const MethodChannel secureStorageChannel =
+      MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
   final Map<String, String> mockSecureStorage = {};
 
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, (MethodCall methodCall) async {
+        .setMockMethodCallHandler(secureStorageChannel,
+            (MethodCall methodCall) async {
       if (methodCall.method == 'read') {
         return mockSecureStorage[methodCall.arguments?['key']];
       } else if (methodCall.method == 'write') {
@@ -61,13 +63,19 @@ void main() {
     ApiClient.instance.dio.httpClientAdapter = WidgetTestMockAdapter();
   });
 
-  testWidgets('App smoke test - boots and renders MaterialApp', (WidgetTester tester) async {
+  testWidgets('App smoke test - boots and renders MaterialApp',
+      (WidgetTester tester) async {
     await tester.pumpWidget(const Way2NewsCloneApp());
     expect(find.byType(MaterialApp), findsOneWidget);
     // Complete splash screen delay and transition
     await tester.pump(const Duration(milliseconds: 1800));
     await tester.pump(const Duration(milliseconds: 600));
-    // Complete spotlight overlay timer (4s)
+    // Drain startup requests and navigation before unmounting.
     await tester.pump(const Duration(seconds: 5));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
   });
 }

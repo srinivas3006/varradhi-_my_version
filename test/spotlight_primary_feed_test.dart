@@ -28,7 +28,7 @@ class SpotlightMockAdapter implements HttpClientAdapter {
   ) async {
     return ResponseBody.fromString(
       jsonEncode({
-        'data': articles,
+        'data': options.path.contains('/articles/feed/') ? articles : [],
         'next_cursor': null,
         'has_more': false,
         'meta': {'total': articles.length},

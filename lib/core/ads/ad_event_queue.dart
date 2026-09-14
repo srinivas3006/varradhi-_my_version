@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'ad_placement.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../network/dio_client.dart';
@@ -47,6 +48,7 @@ class AdEventQueue {
   final List<AdEvent> _queue = [];
 
   bool _isProcessing = false;
+  int _generation = 0;
   Timer? _retryTimer;
 
   /// Number of pending events in queue (exposed for testability).
@@ -54,6 +56,7 @@ class AdEventQueue {
 
   /// Visible for testing: clear all pending queue events and cancel retry timer.
   void reset() {
+    ++_generation;
     _retryTimer?.cancel();
     _retryTimer = null;
     _queue.clear();
@@ -70,7 +73,7 @@ class AdEventQueue {
     if (trimmedAdId.isEmpty) return;
 
     final trimmedType = eventType.trim().toLowerCase();
-    final trimmedZone = placementZone.trim();
+    final trimmedZone = AdPlacement.canonical(placementZone);
 
     // Bounded queue: evict oldest if capacity is reached under offline conditions
     if (_queue.length >= maxQueueSize) {
@@ -103,9 +106,10 @@ class AdEventQueue {
   Future<void> _processQueue() async {
     if (_isProcessing || _queue.isEmpty) return;
     _isProcessing = true;
+    final generation = _generation;
 
     try {
-      while (_queue.isNotEmpty) {
+      while (_queue.isNotEmpty && generation == _generation) {
         final currentEvent = _queue.first;
 
         try {
@@ -121,12 +125,14 @@ class AdEventQueue {
             ),
           );
 
+          if (generation != _generation) return;
           // Success - remove from queue
           _queue.removeAt(0);
           debugPrint('[AdEventQueue] Sent: $currentEvent');
         } catch (e) {
           debugPrint('[AdEventQueue] Error sending $currentEvent: $e');
 
+          if (generation != _generation) return;
           currentEvent.retryCount++;
           if (currentEvent.retryCount >= maxRetries) {
             // Exceeded max retries, drop to prevent queue blockage
@@ -144,7 +150,7 @@ class AdEventQueue {
         }
       }
     } finally {
-      _isProcessing = false;
+      if (generation == _generation) _isProcessing = false;
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
+import '../state/app_state.dart';
+import '../widgets/article_media_carousel.dart';
 import '../localization/app_translations.dart';
 import '../repositories/ugc_repository.dart';
 import '../theme/app_theme.dart';
@@ -16,6 +17,21 @@ class UgcFeedScreen extends StatefulWidget {
 class _UgcFeedScreenState extends State<UgcFeedScreen> {
   final List<NewsArticle> _reports = [];
   bool _isLoading = false;
+  int _generation = 0;
+  late String _locationKey;
+  String get _currentLocationKey => [
+        AppState.instance.stateName,
+        AppState.instance.district,
+        AppState.instance.subdistrict,
+        AppState.instance.village,
+        AppState.instance.city
+      ].join('|');
+  void _onLocationChanged() {
+    if (_locationKey == _currentLocationKey) return;
+    _locationKey = _currentLocationKey;
+    _refresh();
+  }
+
   String? _errorMessage;
   String? _cursor;
   bool _hasMore = true;
@@ -24,9 +40,12 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
   @override
   void initState() {
     super.initState();
+    _locationKey = _currentLocationKey;
+    AppState.instance.addListener(_onLocationChanged);
     _loadMore();
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 200) {
         _loadMore();
       }
     });
@@ -34,23 +53,34 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
 
   Future<void> _loadMore() async {
     if (_isLoading || !_hasMore) return;
+    final generation = _generation;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      final response = await UgcRepository.instance.getUgcFeed(cursor: _cursor, pageSize: 20);
+      final response = await UgcRepository.instance.getUgcFeed(
+          cursor: _cursor,
+          pageSize: 20,
+          state: AppState.instance.stateName,
+          district: AppState.instance.district,
+          subdistrict: AppState.instance.subdistrict,
+          village: AppState.instance.village);
 
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
+      if (response.hasErrors) throw Exception(response.errorMessage);
       setState(() {
-        _reports.addAll(response.data ?? []);
+        final ids = _reports.map((item) => item.id).toSet();
+        _reports
+            .addAll((response.data ?? []).where((item) => ids.add(item.id)));
         _isLoading = false;
         _cursor = response.nextCursor;
-        _hasMore = response.nextCursor != null && response.nextCursor!.isNotEmpty;
+        _hasMore =
+            response.nextCursor != null && response.nextCursor!.isNotEmpty;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
         setState(() {
           _isLoading = false;
           if (_reports.isEmpty) {
@@ -62,6 +92,8 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
   }
 
   Future<void> _refresh() async {
+    ++_generation;
+    _isLoading = false;
     setState(() {
       _reports.clear();
       _cursor = null;
@@ -72,6 +104,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
 
   @override
   void dispose() {
+    AppState.instance.removeListener(_onLocationChanged);
     _scrollController.dispose();
     super.dispose();
   }
@@ -95,15 +128,20 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+                      SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.25),
                       Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
-                              _errorMessage != null ? Icons.error_outline_rounded : Icons.dynamic_feed_rounded,
+                              _errorMessage != null
+                                  ? Icons.error_outline_rounded
+                                  : Icons.dynamic_feed_rounded,
                               size: 56,
-                              color: _errorMessage != null ? AppColors.error : AppColors.textMuted.withValues(alpha: 0.4),
+                              color: _errorMessage != null
+                                  ? AppColors.error
+                                  : AppColors.textMuted.withValues(alpha: 0.4),
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -119,7 +157,8 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                             const SizedBox(height: 6),
                             Text(
                               _errorMessage ?? tr('pull_to_refresh'),
-                              style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+                              style: const TextStyle(
+                                  fontSize: 13, color: AppColors.textMuted),
                             ),
                             if (_errorMessage != null) ...[
                               const SizedBox(height: 16),
@@ -128,7 +167,8 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
                                 ),
                                 child: Text(tr('retry')),
                               ),
@@ -179,7 +219,8 @@ class _UgcReportCard extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => NewsDetailScreen(article: report, slug: report.slug),
+            builder: (_) =>
+                NewsDetailScreen(article: report, slug: report.slug),
           ),
         );
       },
@@ -243,27 +284,14 @@ class _UgcReportCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (report.imageUrl.isNotEmpty) ...[
+            if (report.orderedMedia.isNotEmpty) ...[
               const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: CachedNetworkImage(
-                  imageUrl: report.imageUrl,
-                  width: double.infinity,
+                child: SizedBox(
                   height: 200,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(
-                    height: 200,
-                    color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                    child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    height: 140,
-                    color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                    child: Center(
-                      child: Icon(Icons.broken_image_rounded, size: 36, color: mutedColor),
-                    ),
-                  ),
+                  width: double.infinity,
+                  child: ArticleMediaCarousel(article: report),
                 ),
               ),
             ],
@@ -271,9 +299,15 @@ class _UgcReportCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _ActionItem(icon: Icons.thumb_up_alt_outlined, count: report.likes.toString()),
-                _ActionItem(icon: Icons.comment_outlined, count: report.comments.toString()),
-                _ActionItem(icon: Icons.share_outlined, count: report.shares.toString()),
+                _ActionItem(
+                    icon: Icons.thumb_up_alt_outlined,
+                    count: report.likes.toString()),
+                _ActionItem(
+                    icon: Icons.comment_outlined,
+                    count: report.comments.toString()),
+                _ActionItem(
+                    icon: Icons.share_outlined,
+                    count: report.shares.toString()),
               ],
             ),
           ],
@@ -295,7 +329,8 @@ class _ActionItem extends StatelessWidget {
       children: [
         Icon(icon, size: 20, color: AppColors.textMuted),
         const SizedBox(width: 4),
-        Text(count, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        Text(count,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
       ],
     );
   }

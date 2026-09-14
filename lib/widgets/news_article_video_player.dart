@@ -18,6 +18,7 @@ import '../spotlight/spotlight_media_coordinator.dart';
 /// the YouTube or direct MP4 video in-place ("like a YouTube thing").
 class NewsArticleVideoPlayer extends StatefulWidget {
   final NewsArticle article;
+  final MediaItem? media;
   final bool isCurrent;
   final double? height;
   final BoxFit fit;
@@ -27,6 +28,7 @@ class NewsArticleVideoPlayer extends StatefulWidget {
   const NewsArticleVideoPlayer({
     super.key,
     required this.article,
+    this.media,
     this.isCurrent = true,
     this.height,
     this.fit = BoxFit.cover,
@@ -38,7 +40,8 @@ class NewsArticleVideoPlayer extends StatefulWidget {
   State<NewsArticleVideoPlayer> createState() => _NewsArticleVideoPlayerState();
 }
 
-class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
+class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
+    with WidgetsBindingObserver {
   bool _isPlaying = false;
   MediaSource? _mediaSource;
   VideoPlaybackController? _playbackController;
@@ -46,13 +49,15 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _resolveMediaSource();
     SpotlightMediaCoordinator.instance.addListener(_onMediaCoordinatorChanged);
   }
 
   void _onMediaCoordinatorChanged() {
     if (_isPlaying &&
-        SpotlightMediaCoordinator.instance.activeVideoArticleId != widget.article.id) {
+        SpotlightMediaCoordinator.instance.activeVideoArticleId !=
+            widget.article.id) {
       _stopPlayback();
     }
   }
@@ -60,18 +65,20 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   void _resolveMediaSource() {
     final previewUrl = widget.article.imageUrl.isNotEmpty
         ? widget.article.imageUrl
-        : (widget.article.imageUrls != null && widget.article.imageUrls!.isNotEmpty
+        : (widget.article.imageUrls != null &&
+                widget.article.imageUrls!.isNotEmpty
             ? widget.article.imageUrls!.first
             : '');
 
     _mediaSource = MediaResolver.resolve(
-      videoUrl: widget.article.videoUrl,
-      thumbnailUrl: previewUrl,
-      isVideoFlag: widget.article.isVideo,
+      videoUrl: (widget.media?.url ?? widget.article.videoUrl),
+      thumbnailUrl: widget.media?.thumbnailUrl ?? previewUrl,
+      isVideoFlag: widget.media?.isVideo ?? widget.article.isVideo,
     );
   }
 
   void _startPlayback() async {
+    if (!widget.isCurrent) return;
     HapticFeedback.mediumImpact();
     if (_mediaSource == null || !_mediaSource!.isPlayable) return;
 
@@ -87,7 +94,10 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
 
     try {
       await ctrl.initialize();
-      if (mounted && _isPlaying) {
+      if (mounted &&
+          _isPlaying &&
+          widget.isCurrent &&
+          identical(ctrl, _playbackController)) {
         ctrl.play();
         setState(() {});
       }
@@ -97,13 +107,18 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   }
 
   void _stopPlayback() {
-    SpotlightMediaCoordinator.instance.notifyVideoStopped(widget.article.id);
-    setState(() {
-      _isPlaying = false;
-    });
-    _playbackController?.pause();
-    _playbackController?.dispose();
+    final controller = _playbackController;
     _playbackController = null;
+    _isPlaying = false;
+    SpotlightMediaCoordinator.instance.notifyVideoStopped(widget.article.id);
+    controller?.pause();
+    controller?.dispose();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _isPlaying) _stopPlayback();
   }
 
   @override
@@ -115,7 +130,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
       _stopPlayback();
     }
 
-    if (oldWidget.article.videoUrl != widget.article.videoUrl) {
+    if ((oldWidget.media?.url ?? oldWidget.article.videoUrl) !=
+        (widget.media?.url ?? widget.article.videoUrl)) {
       _stopPlayback();
       _resolveMediaSource();
     }
@@ -123,7 +139,9 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
 
   @override
   void dispose() {
-    SpotlightMediaCoordinator.instance.removeListener(_onMediaCoordinatorChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    SpotlightMediaCoordinator.instance
+        .removeListener(_onMediaCoordinatorChanged);
     SpotlightMediaCoordinator.instance.notifyVideoStopped(widget.article.id);
     _playbackController?.dispose();
     super.dispose();
@@ -136,7 +154,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
       context,
       MaterialPageRoute(
         builder: (_) => VideoPlayerScreen(
-          videoUrl: widget.article.videoUrl,
+          videoUrl: (widget.media?.url ?? widget.article.videoUrl),
           title: widget.article.title,
         ),
       ),
@@ -146,11 +164,13 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     final article = widget.article;
-    final previewUrl = article.imageUrl.isNotEmpty
-        ? article.imageUrl
-        : (article.imageUrls != null && article.imageUrls!.isNotEmpty
-            ? article.imageUrls!.first
-            : '');
+    final previewUrl = widget.media != null
+        ? widget.media!.thumbnailUrl
+        : article.imageUrl.isNotEmpty
+            ? article.imageUrl
+            : (article.imageUrls != null && article.imageUrls!.isNotEmpty
+                ? article.imageUrls!.first
+                : '');
 
     return Container(
       height: widget.height,
@@ -183,7 +203,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
                           color: Colors.black.withValues(alpha: 0.65),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 20),
+                        child: const Icon(Icons.fullscreen_rounded,
+                            color: Colors.white, size: 20),
                       ),
                     ),
                   GestureDetector(
@@ -194,7 +215,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
                         color: Colors.black.withValues(alpha: 0.65),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                      child: const Icon(Icons.close_rounded,
+                          color: Colors.white, size: 20),
                     ),
                   ),
                 ],
@@ -231,7 +253,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
               placeholder: (context, url) => Container(color: AppColors.chipBg),
               errorWidget: (context, url, error) => Container(
                 color: AppColors.chipBg,
-                child: const Icon(Icons.image_not_supported_outlined, color: AppColors.textMuted),
+                child: const Icon(Icons.image_not_supported_outlined,
+                    color: AppColors.textMuted),
               ),
             )
           else
@@ -261,7 +284,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
                 borderRadius: BorderRadius.circular(18),
                 splashColor: Colors.white24,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF0000), // Iconic YouTube red
                     borderRadius: BorderRadius.circular(16),
@@ -317,7 +341,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.play_circle_fill, color: Colors.redAccent, size: 12),
+                    const Icon(Icons.play_circle_fill,
+                        color: Colors.redAccent, size: 12),
                     const SizedBox(width: 4),
                     Text(
                       widget.article.formattedVideoDuration,

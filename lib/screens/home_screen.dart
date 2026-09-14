@@ -12,6 +12,7 @@ import 'profile_tab.dart';
 import 'video_tab.dart';
 import '../services/notification_service.dart';
 import '../services/ad_manager.dart';
+import '../state/app_state.dart';
 
 import 'spotlight_screen.dart';
 import '../core/navigation/notification_navigation_gate.dart';
@@ -35,10 +36,34 @@ class _HomeScreenState extends State<HomeScreen> {
   late final Set<int> _activatedIndices;
   DateTime? _lastBackPressTime;
   AdBanner? _homeBottomAd;
+  bool _stickyDismissed = false;
+  late String _adIdentity;
+  String get _currentAdIdentity => [
+        AppState.instance.contentLanguage,
+        AppState.instance.stateName,
+        AppState.instance.district,
+        AppState.instance.city,
+        AppState.instance.subdistrict,
+        AppState.instance.village
+      ].join('|');
+  void _onAdContextChanged() {
+    if (_adIdentity == _currentAdIdentity) return;
+    _adIdentity = _currentAdIdentity;
+    setState(() => _homeBottomAd = null);
+    if (!_stickyDismissed) _loadHomeBottomAd();
+  }
+
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_onAdContextChanged);
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
+    _adIdentity = _currentAdIdentity;
+    AppState.instance.addListener(_onAdContextChanged);
     _navIndex = widget.initialTabIndex;
     _activatedIndices = {widget.initialTabIndex};
     final hadPendingNotification =
@@ -61,11 +86,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadHomeBottomAd() async {
+    if (_stickyDismissed) return;
+    final identity = _adIdentity;
     final ad = await _selectFirstAvailableAd(
-      zones: const ['home_bottom', 'bottom_sticky'],
+      zones: const ['feed'],
       preferType: 'bottom_sticky',
     );
-    if (!mounted || ad == null) return;
+    if (!mounted || _stickyDismissed || identity != _adIdentity || ad == null)
+      return;
     setState(() => _homeBottomAd = ad);
   }
 
@@ -74,11 +102,10 @@ class _HomeScreenState extends State<HomeScreen> {
     required String preferType,
   }) async {
     for (final zone in zones) {
-      final ads = await AdManager.instance.getAdsForZone(zone);
-      final selected =
-          AdManager.instance.selectAd(ads, preferType: preferType) ??
-              AdManager.instance.selectAd(ads, preferType: 'banner') ??
-              AdManager.instance.selectAd(ads);
+      final ads = await AdManager.instance.getAdsForZone(zone, scope: 'main');
+      final selected = AdManager.instance.selectAd(
+        ads.where((ad) => ad.isBottomSticky).toList(),
+      );
       if (selected != null) return selected;
     }
     return null;
@@ -89,7 +116,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 1. If currently on a secondary tab, switch to Tab 0 (NewsFeedTab)
     if (_navIndex != 0) {
-      setState(() => _navIndex = 0);
+      setState(() {
+        _activatedIndices.add(0);
+        _navIndex = 0;
+      });
       return;
     }
 
@@ -119,7 +149,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Secondary tabs are lazily mounted only when first activated, eliminating
     // UI thread starvation and duplicate network calls on cold launch.
     final tabs = [
-      const NewsFeedTab(),
+      _activatedIndices.contains(0)
+          ? const NewsFeedTab()
+          : const SizedBox.shrink(),
       _activatedIndices.contains(1)
           ? const LocalNewsTab()
           : const SizedBox.shrink(),
@@ -155,9 +187,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: BottomStickyAdBanner(
                     key: ValueKey('home_bottom_${_homeBottomAd!.id}'),
                     ad: _homeBottomAd!,
-                    placementZone: 'home_bottom',
+                    placementZone: 'feed',
                     onDismiss: () {
-                      if (mounted) setState(() => _homeBottomAd = null);
+                      if (mounted)
+                        setState(() {
+                          _stickyDismissed = true;
+                          _homeBottomAd = null;
+                        });
                     },
                   ),
                 ),

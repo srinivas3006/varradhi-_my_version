@@ -9,7 +9,8 @@ void requireAuth(BuildContext context, VoidCallback onSuccess) {
   }
 
   Navigator.of(context).pushNamed<bool>('/login').then((loggedIn) {
-    if (loggedIn == true && context.mounted) {
+    if (context.mounted &&
+        (loggedIn == true || AppState.instance.isLoggedIn)) {
       onSuccess();
     }
   });

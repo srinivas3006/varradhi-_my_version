@@ -89,19 +89,20 @@ void main() {
       );
 
       // Verify first paint only contains village (tier 1) and NO mandal/district
-      final hasVillage = firstPaintBlocks.any((b) =>
-          b is HyperLocalBlock && b.tier == HyperlocalTier.village);
-      final hasMandal = firstPaintBlocks.any((b) =>
-          b is HyperLocalBlock && b.tier == HyperlocalTier.mandal);
-      final hasDistrict = firstPaintBlocks.any((b) =>
-          b is HyperLocalBlock && b.tier == HyperlocalTier.district);
+      final hasVillage = firstPaintBlocks
+          .any((b) => b is HyperLocalBlock && b.tier == HyperlocalTier.village);
+      final hasMandal = firstPaintBlocks
+          .any((b) => b is HyperLocalBlock && b.tier == HyperlocalTier.mandal);
+      final hasDistrict = firstPaintBlocks.any(
+          (b) => b is HyperLocalBlock && b.tier == HyperlocalTier.district);
 
       expect(hasVillage, isTrue);
       expect(hasMandal, isFalse);
       expect(hasDistrict, isFalse);
     });
 
-    test('2. Hydrated state attaches secondary tiers and community widgets', () {
+    test('2. Hydrated state attaches secondary tiers and community widgets',
+        () {
       const engine = FeedEngine();
 
       final breaking = [createDummyArticle('b1', 'Breaking 1')];
@@ -144,22 +145,27 @@ void main() {
       );
 
       expect(
-        hydratedBlocks.any((b) => b is HyperLocalBlock && b.tier == HyperlocalTier.village),
+        hydratedBlocks.any(
+            (b) => b is HyperLocalBlock && b.tier == HyperlocalTier.village),
         isTrue,
       );
       expect(
-        hydratedBlocks.any((b) => b is HyperLocalBlock && b.tier == HyperlocalTier.mandal),
+        hydratedBlocks.any(
+            (b) => b is HyperLocalBlock && b.tier == HyperlocalTier.mandal),
         isTrue,
       );
       expect(
-        hydratedBlocks.any((b) => b is HyperLocalBlock && b.tier == HyperlocalTier.district),
+        hydratedBlocks.any(
+            (b) => b is HyperLocalBlock && b.tier == HyperlocalTier.district),
         isTrue,
       );
       expect(hydratedBlocks.any((b) => b is PollBlock), isTrue);
       expect(hydratedBlocks.any((b) => b is DailyGreetingBlock), isTrue);
     });
 
-    test('3. Deterministic Ad Placement with exact intervals and zero duplicates', () {
+    test(
+        '3. Deterministic Ad Placement with exact intervals and zero duplicates',
+        () {
       const engine = FeedEngine(
         config: FeedEngineConfig(
           minArticlesBeforeFirstAd: 2,
@@ -185,19 +191,17 @@ void main() {
       );
 
       final adBlocks = blocks.whereType<AdBlock>().toList();
-      // With 10 articles:
-      // art 0, art 1 -> count = 2 (meets minArticlesBeforeFirstAd: 2, (2-2)%3 == 0) -> AD 1
-      // art 2, art 3, art 4 -> count = 5 (meets (5-2)%3 == 0) -> AD 2
-      // art 5, art 6, art 7 -> count = 8 (meets (8-2)%3 == 0) -> AD 3
-      // art 8, art 9 -> count = 10 -> no ad
-      expect(adBlocks.length, equals(3));
+      // Each backend ad requests five parent cards, regardless of legacy config.
+      expect(adBlocks.length, equals(2));
+      expect(adBlocks.map((block) => block.ad.id), ['ad-1', 'ad-2']);
 
       // Assert unique exposureKeys
       final exposureKeys = adBlocks.map((a) => a.exposureKey).toSet();
       expect(exposureKeys.length, equals(adBlocks.length));
     });
 
-    testWidgets('4. FeedBlockRenderer renders FeedBlock elements cleanly', (tester) async {
+    testWidgets('4. FeedBlockRenderer renders FeedBlock elements cleanly',
+        (tester) async {
       final callbacks = FeedRendererCallbacks(
         onSelectCategory: (_) {},
         onArticleTap: (_) {},

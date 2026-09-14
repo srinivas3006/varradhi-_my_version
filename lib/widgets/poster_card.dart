@@ -6,18 +6,20 @@ import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 
-/// Full-screen, non-overlapping Poster / Advertisement card with a 5-second countdown
-/// and an 'X' close button to immediately dismiss.
+/// One standalone poster with internal media paging and the existing close control.
+/// A countdown is optional and only starts when explicitly configured.
 class PosterCard extends StatefulWidget {
   final String mediaUrl;
+  final List<String> imageUrls;
   final VoidCallback? onClose;
   final int durationSeconds;
 
   const PosterCard({
     super.key,
     required this.mediaUrl,
+    this.imageUrls = const [],
     this.onClose,
-    this.durationSeconds = 5,
+    this.durationSeconds = 0,
   });
 
   @override
@@ -32,7 +34,7 @@ class _PosterCardState extends State<PosterCard> {
   void initState() {
     super.initState();
     _secondsLeft = widget.durationSeconds;
-    _startTimer();
+    if (_secondsLeft > 0) _startTimer();
   }
 
   void _startTimer() {
@@ -68,7 +70,8 @@ class _PosterCardState extends State<PosterCard> {
     return Container(
       width: double.infinity,
       height: double.infinity,
-      color: Colors.black, // Fully opaque background prevents article text bleed-through
+      color: Colors
+          .black, // Fully opaque background prevents article text bleed-through
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -96,14 +99,20 @@ class _PosterCardState extends State<PosterCard> {
               top: false,
               bottom: false,
               child: Center(
-                child: CachedNetworkImage(
-                  imageUrl: widget.mediaUrl,
-                  fit: BoxFit.contain,
-                  placeholder: (context, url) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white70),
-                  ),
-                  errorWidget: (context, url, error) => const Center(
-                    child: Icon(Icons.broken_image_rounded, size: 64, color: Colors.white38),
+                child: PageView.builder(
+                  itemCount:
+                      widget.imageUrls.isEmpty ? 1 : widget.imageUrls.length,
+                  itemBuilder: (_, index) => CachedNetworkImage(
+                    imageUrl: widget.imageUrls.isEmpty
+                        ? widget.mediaUrl
+                        : widget.imageUrls[index],
+                    fit: BoxFit.contain,
+                    placeholder: (_, __) => const Center(
+                        child:
+                            CircularProgressIndicator(color: Colors.white70)),
+                    errorWidget: (_, __, ___) => const Center(
+                        child: Icon(Icons.broken_image_rounded,
+                            size: 64, color: Colors.white38)),
                   ),
                 ),
               ),
@@ -124,7 +133,8 @@ class _PosterCardState extends State<PosterCard> {
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(20),
@@ -133,7 +143,8 @@ class _PosterCardState extends State<PosterCard> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.campaign_rounded, size: 14, color: Colors.amberAccent),
+                          Icon(Icons.campaign_rounded,
+                              size: 14, color: Colors.amberAccent),
                           SizedBox(width: 6),
                           Text(
                             'Sponsored',
@@ -156,7 +167,8 @@ class _PosterCardState extends State<PosterCard> {
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Container(
-                      padding: const EdgeInsets.only(left: 12, right: 4, top: 4, bottom: 4),
+                      padding: const EdgeInsets.only(
+                          left: 12, right: 4, top: 4, bottom: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(24),

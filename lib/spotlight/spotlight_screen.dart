@@ -6,9 +6,9 @@ import '../core/navigation/auth_guard.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
+import '../widgets/ads/unified_ad_widget.dart';
 import '../services/ad_delivery_service.dart';
 import '../widgets/parallax_page_flip.dart';
-import '../widgets/spotlight/spotlight_carousel_card.dart';
 import '../widgets/spotlight/spotlight_news_card.dart';
 import '../widgets/spotlight/spotlight_promo_card.dart';
 import '../widgets/spotlight/spotlight_shimmer_card.dart';
@@ -157,15 +157,6 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
     // Dwell logic: only consider meaningful read if user forward-swipes and stays >= 2 seconds
     if (!isSwipingBack && index < _controller.state.feed.length) {
-      final currentType = _controller.state.feed[index].type;
-      if (currentType != SpotlightType.ad &&
-          currentType != SpotlightType.shimmer) {
-        _dwellTimer = Timer(const Duration(milliseconds: 2100), () {
-          if (!mounted) return;
-          _controller.evaluateAndInjectAdAfter(index);
-        });
-      }
-
       // After user actively reads past the first 2 stories, gently prompt for location
       if (index >= 2 &&
           !AppState.instance.locationPrompted &&
@@ -221,6 +212,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
     switch (item.type) {
       case SpotlightType.standard:
+      case SpotlightType.ugc:
         if (item.article == null) return const SizedBox();
         child = SpotlightNewsCard(
           article: item.article!,
@@ -236,12 +228,15 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
       case SpotlightType.carousel:
         if (item.article == null) return const SizedBox();
-        child = SpotlightCarouselCard(
-          item: item,
-          onTap: _controller.toggleOverlay,
-          onShare: () => _shareArticle(item.article!),
-          onClose: _closeSpotlight,
-        );
+        child = SpotlightNewsCard(
+            article: item.article!,
+            isCurrent: isCurrent,
+            dragDelta: dragDelta,
+            dragProgress: dragProgress,
+            matchCutProgress: matchCutProgress,
+            onTap: _controller.toggleOverlay,
+            onShare: () => _shareArticle(item.article!),
+            onClose: _closeSpotlight);
         break;
 
       case SpotlightType.promo:
@@ -252,18 +247,33 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
       case SpotlightType.ad:
         if (item.adBanner == null) return const SizedBox();
-        child = SponsoredSpotlightAdCard(
-          ad: item.adBanner!,
-          onClose: () => _controller.removeAdAt(index),
-          durationSeconds: item.adBanner!.durationSeconds,
-          placementZone: 'spotlight',
-        );
+        child = item.adBanner!.isInterstitial || item.adBanner!.isFullScreen
+            ? SponsoredSpotlightAdCard(
+                key: ValueKey(item.id),
+                ad: item.adBanner!,
+                active: isCurrent,
+                exposureKey:
+                    'spotlight_${_controller.state.generation}_${item.id}',
+                onClose: () => _controller.removeAdAt(index),
+                durationSeconds: item.adBanner!.displayDurationSeconds,
+                placementZone: 'feed')
+            : Center(
+                child: UnifiedAdWidget(
+                    key: ValueKey(item.id),
+                    ad: item.adBanner!,
+                    placementZone: 'feed',
+                    exposureKey:
+                        'spotlight_${_controller.state.generation}_${item.id}',
+                    active: isCurrent));
         break;
 
       case SpotlightType.poster:
         child = PosterCard(
+          key: ValueKey('poster_${item.id}'),
           mediaUrl: item.mediaUrl ?? '',
-          onClose: () => _controller.removeAdAt(index),
+          imageUrls: item.imageUrls ?? [],
+          durationSeconds: 0,
+          onClose: _flipController.next,
         );
         break;
 
@@ -366,7 +376,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               ),
               const SizedBox(height: 24),
               Text(
-                isLocal ? tr('no_local_stories') : tr('no_stories_available'),
+                _controller.state.errorMessage != null
+                    ? tr('retry')
+                    : isLocal
+                        ? tr('no_local_stories')
+                        : tr('no_stories_available'),
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -375,9 +389,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               ),
               const SizedBox(height: 10),
               Text(
-                isLocal
-                    ? '${AppState.instance.displayLocation} కోసం ప్రస్తుతం స్థానిక వార్తలు అందుబాటులో లేవు. వేరే జిల్లా లేదా మండలాన్ని ఎంచుకోండి.'
-                    : 'తాజా బ్రేకింగ్ న్యూస్ మరియు అప్‌డేట్‌ల కోసం మళ్లీ చూడండి.',
+                _controller.state.errorMessage ??
+                    (isLocal
+                        ? '${AppState.instance.displayLocation} కోసం ప్రస్తుతం స్థానిక వార్తలు అందుబాటులో లేవు. వేరే జిల్లా లేదా మండలాన్ని ఎంచుకోండి.'
+                        : 'తాజా బ్రేకింగ్ న్యూస్ మరియు అప్‌డేట్‌ల కోసం మళ్లీ చూడండి.'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: AppColors.textMuted,
@@ -727,23 +742,24 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   behavior: HitTestBehavior.opaque,
                   child: state.isLoading && state.feed.isEmpty
                       ? const SpotlightShimmerCard()
-                      : (state.isLocalNews &&
-                              !AppState.instance.hasValidLocation)
-                          ? _buildLocationFallback()
-                          : state.feed.isEmpty
-                              ? _buildEmptyFeedState(state.isLocalNews)
-                              : ParallaxPageFlip(
-                                  key: ValueKey(
-                                      'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
-                                  controller: _flipController,
-                                  initialIndex: initialIndex < state.feed.length
-                                      ? initialIndex
-                                      : 0,
-                                  itemCount: state.feed.length,
-                                  onPageChanged: _handlePageChanged,
-                                  onTap: _controller.toggleOverlay,
-                                  itemBuilder: _buildItem,
-                                ),
+                      : state.feed.isEmpty
+                          ? state.isLocalNews &&
+                                  !AppState.instance.hasValidLocation &&
+                                  state.errorMessage == null
+                              ? _buildLocationFallback()
+                              : _buildEmptyFeedState(state.isLocalNews)
+                          : ParallaxPageFlip(
+                              key: ValueKey(
+                                  'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                              controller: _flipController,
+                              initialIndex: initialIndex < state.feed.length
+                                  ? initialIndex
+                                  : 0,
+                              itemCount: state.feed.length,
+                              onPageChanged: _handlePageChanged,
+                              onTap: _controller.toggleOverlay,
+                              itemBuilder: _buildItem,
+                            ),
                 ),
 
                 // 2. Top Frosted Glass Overlay (Profile, [ ప్రధాన వార్తలు | స్థానికం ], + Button)

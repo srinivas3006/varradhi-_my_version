@@ -27,6 +27,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
   String? _error;
 
   Future<void> _submit() async {
+    if (_submitting) return;
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -66,12 +67,14 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         'device_id': AppState.instance.deviceId,
         'device_name': 'Mobile Device',
         'device_type': ApiService.deviceType,
-        'fcm_token': AppState.instance.fcmToken ?? 'device-fcm-token',
+        if (AppState.instance.fcmToken != null)
+          'fcm_token': AppState.instance.fcmToken,
       });
 
       // Auto-login from returned access & refresh tokens
       final token = data['access'] ?? data['token'];
-      if (token != null) {
+      if (token == null) throw Exception('No access token returned');
+      {
         await AppState.instance.setAuthToken(
           token,
           refresh: data['refresh'] as String?,
@@ -87,6 +90,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         );
         await AppState.instance.refreshRolesFromServer();
 
+        try {
         // Handoff device token to registered user (Backend Flow 2)
         if (AppState.instance.fcmToken != null) {
           await ApiService.instance.handoffDeviceToken(
@@ -97,15 +101,21 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         }
 
         await ApiService.instance.syncUserLocation();
+        } catch (_) {
+          // Account creation has succeeded; optional device sync must not
+          // invite the reader to submit the registration a second time.
+        }
       }
 
       if (!mounted) return;
 
-      // Navigate to HomeScreen
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-        (route) => false,
-      );
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
     } catch (e) {
       if (mounted) {
         String errorMsg = 'రిజిస్ట్రేషన్ విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';

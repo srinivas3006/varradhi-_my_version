@@ -1,6 +1,7 @@
 import 'dart:ui' as dart_ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../core/ads/ad_insertion.dart';
 import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
 import '../core/network/api_response.dart';
@@ -53,16 +54,39 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   bool _stateHasMore = false;
   bool _isLoadingMoreState = false;
 
+  String? _globalCursor;
+  bool _globalHasMore = false;
+  bool _isLoadingMoreGlobal = false;
   String? _globalError;
   int _loadGeneration = 0;
   String get _feedLang => AppState.instance.contentLanguage;
 
+  late String _preferencesIdentity;
+
+  void _onPreferencesChanged() {
+    final identity = _currentLocationKey;
+    if (identity == _preferencesIdentity) return;
+    _preferencesIdentity = identity;
+    _location = AppState.instance.displayLocation;
+    _localAds = [];
+    _loadAllSections(clearExisting: true);
+    _loadAds();
+  }
+
   @override
   void initState() {
     super.initState();
+    _preferencesIdentity = _currentLocationKey;
+    AppState.instance.addListener(_onPreferencesChanged);
     _location = AppState.instance.displayLocation;
     _loadAds();
     _loadAllSections();
+  }
+
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_onPreferencesChanged);
+    super.dispose();
   }
 
   Future<void> _loadAds() async {
@@ -82,10 +106,23 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {}
   }
 
+  bool _sectionsRefreshing = false;
+
   Future<void> _loadAllSections({bool clearExisting = false}) async {
     final generation = ++_loadGeneration;
+    _sectionsRefreshing = true;
     setState(() {
-      _isLoadingInitial = true;
+      _isLoadingMoreVillage = false;
+      _isLoadingMoreMandal = false;
+      _isLoadingMoreDistrict = false;
+      _isLoadingMoreState = false;
+      _isLoadingMoreGlobal = false;
+      _isLoadingInitial = clearExisting ||
+          _villageArticles.isEmpty &&
+              _mandalArticles.isEmpty &&
+              _districtArticles.isEmpty &&
+              _stateArticles.isEmpty &&
+              _globalArticles.isEmpty;
       _globalError = null;
       if (clearExisting) {
         _villageArticles = [];
@@ -97,6 +134,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _mandalCursor = null;
         _districtCursor = null;
         _stateCursor = null;
+        _globalCursor = null;
+        _globalHasMore = false;
+        _isLoadingMoreGlobal = false;
         _villageHasMore = false;
         _mandalHasMore = false;
         _districtHasMore = false;
@@ -198,6 +238,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         lang: _feedLang,
         state: state.isNotEmpty ? state : null,
         district: '',
+        city: '',
         subdistrict: '',
         village: '',
         pageSize: 10,
@@ -222,6 +263,16 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _settleFeed(districtUgcFuture),
         _settleFeed(stateFuture),
         _settleFeed(stateUgcFuture),
+        _settleFeed(ApiService.instance.getNewsFeed(
+            scope: 'main',
+            lang: _feedLang,
+            state: '',
+            district: '',
+            city: '',
+            subdistrict: '',
+            village: '',
+            pageSize: 10,
+            forceRefresh: true)),
       ]);
 
       if (!mounted || generation != _loadGeneration) return;
@@ -234,6 +285,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       final districtUgcRes = results[5];
       final stateRes = results[6];
       final stateUgcRes = results[7];
+      final globalRes = results[8];
       final hasSuccessfulResponse = results.any(
         (response) => response != null && !response.hasErrors,
       );
@@ -285,7 +337,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         [...mergedVillage, ...mergedMandal, ...mergedDistrict],
       );
       final mergedGlobal = _deduplicateAgainst(
-        _articlesFrom(stateRes)
+        _articlesFrom(globalRes)
             .where((article) => _isCoverage(article, 'global')),
         [...mergedVillage, ...mergedMandal, ...mergedDistrict, ...mergedState],
       );
@@ -306,10 +358,13 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
         _stateArticles = mergedState;
         _globalArticles = mergedGlobal;
+        _globalCursor = globalRes?.nextCursor;
+        _globalHasMore = _globalCursor != null;
         _stateCursor = stateRes?.nextCursor;
         _stateHasMore = _stateCursor != null && _stateCursor!.isNotEmpty;
 
         _isLoadingInitial = false;
+        _sectionsRefreshing = false;
         _globalError = hasSuccessfulResponse
             ? null
             : 'Unable to load news for this location. Please try again.';
@@ -318,6 +373,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       if (mounted && generation == _loadGeneration) {
         setState(() {
           _isLoadingInitial = false;
+          _sectionsRefreshing = false;
           _globalError =
               'వార్తలు లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
         });
@@ -328,10 +384,14 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   // --- Per-Section Pagination ---
 
   Future<void> _loadMoreVillage() async {
-    if (_isLoadingMoreVillage || !_villageHasMore || _villageCursor == null) {
+    if (_sectionsRefreshing ||
+        _isLoadingMoreVillage ||
+        !_villageHasMore ||
+        _villageCursor == null) {
       return;
     }
     final locationKey = _currentLocationKey;
+    final generation = _loadGeneration;
     setState(() => _isLoadingMoreVillage = true);
 
     try {
@@ -348,7 +408,10 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         pageSize: 10,
       );
 
-      if (!mounted || locationKey != _currentLocationKey) return;
+      if (!mounted ||
+          generation != _loadGeneration ||
+          locationKey != _currentLocationKey) return;
+      if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) => _isVillageArticle(
           article,
@@ -359,7 +422,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         ),
       );
       final existingIds = _villageArticles.map((a) => a.id).toSet();
-      final fresh = newItems.where((a) => !existingIds.contains(a.id)).toList();
+      final fresh = newItems.where((a) => existingIds.add(a.id)).toList();
 
       setState(() {
         _villageArticles.addAll(fresh);
@@ -368,15 +431,22 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _isLoadingMoreVillage = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _isLoadingMoreVillage = false);
+      if (mounted &&
+          generation == _loadGeneration &&
+          locationKey == _currentLocationKey)
+        setState(() => _isLoadingMoreVillage = false);
     }
   }
 
   Future<void> _loadMoreMandal() async {
-    if (_isLoadingMoreMandal || !_mandalHasMore || _mandalCursor == null) {
+    if (_sectionsRefreshing ||
+        _isLoadingMoreMandal ||
+        !_mandalHasMore ||
+        _mandalCursor == null) {
       return;
     }
     final locationKey = _currentLocationKey;
+    final generation = _loadGeneration;
     setState(() => _isLoadingMoreMandal = true);
 
     try {
@@ -391,7 +461,10 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         pageSize: 10,
       );
 
-      if (!mounted || locationKey != _currentLocationKey) return;
+      if (!mounted ||
+          generation != _loadGeneration ||
+          locationKey != _currentLocationKey) return;
+      if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) => _isMandalArticle(
           article,
@@ -404,7 +477,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         ..._villageArticles.map((a) => a.id),
         ..._mandalArticles.map((a) => a.id),
       };
-      final fresh = newItems.where((a) => !existingIds.contains(a.id)).toList();
+      final fresh = newItems.where((a) => existingIds.add(a.id)).toList();
 
       setState(() {
         _mandalArticles.addAll(fresh);
@@ -413,17 +486,22 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _isLoadingMoreMandal = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _isLoadingMoreMandal = false);
+      if (mounted &&
+          generation == _loadGeneration &&
+          locationKey == _currentLocationKey)
+        setState(() => _isLoadingMoreMandal = false);
     }
   }
 
   Future<void> _loadMoreDistrict() async {
-    if (_isLoadingMoreDistrict ||
+    if (_sectionsRefreshing ||
+        _isLoadingMoreDistrict ||
         !_districtHasMore ||
         _districtCursor == null) {
       return;
     }
     final locationKey = _currentLocationKey;
+    final generation = _loadGeneration;
     setState(() => _isLoadingMoreDistrict = true);
 
     try {
@@ -438,7 +516,10 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         pageSize: 10,
       );
 
-      if (!mounted || locationKey != _currentLocationKey) return;
+      if (!mounted ||
+          generation != _loadGeneration ||
+          locationKey != _currentLocationKey) return;
+      if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) =>
             _isCoverage(article, 'district') &&
@@ -449,7 +530,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         ..._mandalArticles.map((a) => a.id),
         ..._districtArticles.map((a) => a.id),
       };
-      final fresh = newItems.where((a) => !existingIds.contains(a.id)).toList();
+      final fresh = newItems.where((a) => existingIds.add(a.id)).toList();
 
       setState(() {
         _districtArticles.addAll(fresh);
@@ -458,13 +539,20 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _isLoadingMoreDistrict = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _isLoadingMoreDistrict = false);
+      if (mounted &&
+          generation == _loadGeneration &&
+          locationKey == _currentLocationKey)
+        setState(() => _isLoadingMoreDistrict = false);
     }
   }
 
   Future<void> _loadMoreState() async {
-    if (_isLoadingMoreState || !_stateHasMore || _stateCursor == null) return;
+    if (_sectionsRefreshing ||
+        _isLoadingMoreState ||
+        !_stateHasMore ||
+        _stateCursor == null) return;
     final locationKey = _currentLocationKey;
+    final generation = _loadGeneration;
     setState(() => _isLoadingMoreState = true);
 
     try {
@@ -476,12 +564,16 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
             ? AppState.instance.stateName
             : null,
         district: '',
+        city: '',
         subdistrict: '',
         village: '',
         pageSize: 10,
       );
 
-      if (!mounted || locationKey != _currentLocationKey) return;
+      if (!mounted ||
+          generation != _loadGeneration ||
+          locationKey != _currentLocationKey) return;
+      if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = res.data ?? <NewsArticle>[];
       final existingIds = {
         ..._villageArticles.map((a) => a.id),
@@ -498,23 +590,52 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                 !existingIds.contains(article.id),
           )
           .toList();
-      final freshGlobal = newItems
-          .where(
-            (article) =>
-                _isCoverage(article, 'global') &&
-                !existingIds.contains(article.id),
-          )
-          .toList();
-
       setState(() {
         _stateArticles.addAll(freshState);
-        _globalArticles.addAll(freshGlobal);
         _stateCursor = res.nextCursor;
         _stateHasMore = res.nextCursor != null && res.nextCursor!.isNotEmpty;
         _isLoadingMoreState = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _isLoadingMoreState = false);
+      if (mounted &&
+          generation == _loadGeneration &&
+          locationKey == _currentLocationKey)
+        setState(() => _isLoadingMoreState = false);
+    }
+  }
+
+  Future<void> _loadMoreGlobal() async {
+    if (_sectionsRefreshing ||
+        _isLoadingMoreGlobal ||
+        !_globalHasMore ||
+        _globalCursor == null) return;
+    final generation = _loadGeneration;
+    setState(() => _isLoadingMoreGlobal = true);
+    try {
+      final response = await ApiService.instance.getNewsFeed(
+          cursor: _globalCursor,
+          scope: 'main',
+          lang: _feedLang,
+          state: '',
+          district: '',
+          city: '',
+          subdistrict: '',
+          village: '',
+          pageSize: 10);
+      if (!mounted || generation != _loadGeneration) return;
+      if (response.hasErrors) throw Exception(response.errorMessage);
+      setState(() {
+        final ids = _globalArticles.map((article) => article.id).toSet();
+        _globalArticles.addAll((response.data ?? []).where((article) =>
+            _isCoverage(article, 'global') && ids.add(article.id)));
+        _globalCursor = response.nextCursor;
+        _globalHasMore = response.nextCursor != null;
+      });
+    } catch (_) {
+      // Keep this section cursor intact so the existing load-more action can retry.
+    } finally {
+      if (mounted && generation == _loadGeneration)
+        setState(() => _isLoadingMoreGlobal = false);
     }
   }
 
@@ -531,6 +652,8 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   }
 
   String get _currentLocationKey => [
+        AppState.instance.contentLanguage,
+        AppState.instance.city,
         AppState.instance.stateName,
         AppState.instance.district,
         AppState.instance.subdistrict,
@@ -1020,6 +1143,20 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     return 'Local';
   }
 
+  Map<String, FeedPresentationItem<NewsArticle>> _sectionAdSlots = {};
+  Widget _buildArticleWithAd(
+      NewsArticle article, Color cardColor, Color borderColor) {
+    final entry = _sectionAdSlots['${article.contentKind}:${article.id}'];
+    return Column(children: [
+      _buildArticleCard(article, cardColor, borderColor),
+      if (entry != null)
+        UnifiedAdWidget(
+            ad: entry.ad!,
+            placementZone: 'feed',
+            exposureKey: 'local_${_currentLocationKey}_${entry.stableKey}'),
+    ]);
+  }
+
   Widget _buildArticleCard(
       NewsArticle article, Color cardColor, Color borderColor) {
     return Container(
@@ -1265,6 +1402,26 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
         _stateArticles.isNotEmpty ||
         _globalArticles.isNotEmpty;
 
+    final entries = insertAdsIntoFeed<NewsArticle>(
+        contentItems: [
+          ..._villageArticles,
+          ..._mandalArticles,
+          ..._districtArticles,
+          ..._stateArticles,
+          ..._globalArticles,
+        ],
+        eligibleAds: _localAds,
+        contentKey: (article) => '${article.contentKind}:${article.id}');
+    _sectionAdSlots = {};
+    String? previousContent;
+    for (final entry in entries) {
+      if (!entry.isAd) {
+        previousContent = '${entry.content!.contentKind}:${entry.content!.id}';
+      } else if (previousContent != null) {
+        _sectionAdSlots[previousContent] = entry;
+      }
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
@@ -1306,7 +1463,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     ),
                                     if (_villageArticles.isNotEmpty) ...[
                                       ..._villageArticles.map((a) =>
-                                          _buildArticleCard(
+                                          _buildArticleWithAd(
                                               a, cardColor, borderColor)),
                                       if (_villageHasMore)
                                         _buildLoadMoreButton(
@@ -1331,13 +1488,6 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                         ),
                                       ),
                                     ],
-                                    if (_localAds.isNotEmpty) ...[
-                                      const SizedBox(height: 10),
-                                      UnifiedAdWidget(
-                                          ad: _localAds[0],
-                                          placementZone: 'local'),
-                                      const SizedBox(height: 10),
-                                    ],
                                   ],
 
                                   // --- 2. Mandal Tier Section ---
@@ -1351,7 +1501,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     ),
                                     if (_mandalArticles.isNotEmpty) ...[
                                       ..._mandalArticles.map((a) =>
-                                          _buildArticleCard(
+                                          _buildArticleWithAd(
                                               a, cardColor, borderColor)),
                                       if (_mandalHasMore)
                                         _buildLoadMoreButton(
@@ -1376,13 +1526,6 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                         ),
                                       ),
                                     ],
-                                    if (_localAds.length > 1) ...[
-                                      const SizedBox(height: 10),
-                                      UnifiedAdWidget(
-                                          ad: _localAds[1],
-                                          placementZone: 'local'),
-                                      const SizedBox(height: 10),
-                                    ],
                                   ],
 
                                   // --- 3. District Tier Section ---
@@ -1396,7 +1539,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     ),
                                     if (_districtArticles.isNotEmpty) ...[
                                       ..._districtArticles.map((a) =>
-                                          _buildArticleCard(
+                                          _buildArticleWithAd(
                                               a, cardColor, borderColor)),
                                       if (_districtHasMore)
                                         _buildLoadMoreButton(
@@ -1424,7 +1567,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                       accentColor: Colors.deepOrange,
                                     ),
                                     ..._stateArticles.map((a) =>
-                                        _buildArticleCard(
+                                        _buildArticleWithAd(
                                             a, cardColor, borderColor)),
                                   ],
 
@@ -1439,7 +1582,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                       accentColor: Colors.blueGrey,
                                     ),
                                     ..._globalArticles.map((a) =>
-                                        _buildArticleCard(
+                                        _buildArticleWithAd(
                                             a, cardColor, borderColor)),
                                     if (_stateHasMore)
                                       _buildLoadMoreButton(
@@ -1447,6 +1590,11 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                         isLoading: _isLoadingMoreState,
                                         onLoadMore: _loadMoreState,
                                       ),
+                                    if (_globalHasMore)
+                                      _buildLoadMoreButton(
+                                          title: 'India / Global',
+                                          isLoading: _isLoadingMoreGlobal,
+                                          onLoadMore: _loadMoreGlobal),
                                   ],
 
                                   const SizedBox(height: 24),

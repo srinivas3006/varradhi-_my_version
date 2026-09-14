@@ -78,14 +78,17 @@ void main() {
       expect(requestCount, 1);
     });
 
-    test('caches ads and satisfies subsequent requests from cache within TTL', () async {
+    test('caches ads and satisfies subsequent requests from cache within TTL',
+        () async {
       // First call -> hits network
-      final first = await repo.getAds(placementZone: 'feed', state: 'Telangana');
+      final first =
+          await repo.getAds(placementZone: 'feed', state: 'Telangana');
       expect(first.isSuccess, isTrue);
       expect(requestCount, 1);
 
       // Second call -> returns from cache, does NOT hit network
-      final second = await repo.getAds(placementZone: 'feed', state: 'Telangana');
+      final second =
+          await repo.getAds(placementZone: 'feed', state: 'Telangana');
       expect(second.isSuccess, isTrue);
       expect(second.data!.length, 1);
       expect(requestCount, 1);
@@ -95,7 +98,8 @@ void main() {
       await repo.getAds(placementZone: 'feed', state: 'Telangana');
       expect(requestCount, 1);
 
-      await repo.getAds(placementZone: 'feed', state: 'Telangana', forceRefresh: true);
+      await repo.getAds(
+          placementZone: 'feed', state: 'Telangana', forceRefresh: true);
       expect(requestCount, 2);
     });
 
@@ -128,7 +132,7 @@ void main() {
       });
       repo = AdRepository.test(dio: dio);
 
-      final res = await repo.getAds(placementZone: 'error_zone');
+      final res = await repo.getAds(placementZone: 'search');
 
       expect(res.hasErrors, isTrue);
       expect(res.data, isEmpty);

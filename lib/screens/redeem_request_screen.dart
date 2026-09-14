@@ -26,10 +26,11 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
   String? _error;
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     final upi = _upiController.text.trim();
     final accountName = _accountNameController.text.trim();
 
-    if (upi.isEmpty || !upi.contains('@')) {
+    if (!RegExp(r'^[a-zA-Z0-9._-]+@[a-zA-Z0-9][a-zA-Z0-9.-]*$').hasMatch(upi)) {
       setState(() => _error = 'దయచేసి సరైన UPI ID నమోదు చేయండి (ఉదా: name@bank లేదా 9876543210@upi).');
       return;
     }
@@ -54,8 +55,9 @@ class _RedeemRequestScreenState extends State<RedeemRequestScreen> {
       });
 
       if (mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(
             content: Text('₹${(widget.minimumCoins * widget.coinValue).toStringAsFixed(0)} నగదు బదిలీ అభ్యర్థన విజయవంతంగా సమర్పించబడింది!'),
             backgroundColor: const Color(0xFF10B981),

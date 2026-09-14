@@ -1,4 +1,7 @@
 import 'dart:async';
+import '../core/ads/ad_insertion.dart';
+import '../core/network/api_response.dart';
+import '../repositories/ugc_repository.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/spotlight_item.dart';
@@ -6,7 +9,6 @@ import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
-import '../services/ad_manager.dart';
 import '../repositories/ad_repository.dart';
 import '../repositories/feed_repository.dart';
 import '../services/notification_service.dart';
@@ -23,10 +25,15 @@ class SpotlightController extends ChangeNotifier {
   SpotlightState get state => _state;
 
   final List<dynamic> _postersPool = [];
+  final List<NewsArticle> _ugcItems = [];
+  String? _ugcCursor;
+  bool _ugcHasMore = true;
+  bool _articleHasMore = true;
+  final Set<String> _dismissedSlots = {};
   final List<AdBanner> _adsPool = [];
-  Map<String, dynamic>? _cachedQuote;
   Timer? _overlayTimer;
   int _requestGeneration = 0;
+  bool _disposed = false;
   int _paginationSequence = 0;
 
   // Performance caches & debouncers
@@ -39,6 +46,23 @@ class SpotlightController extends ChangeNotifier {
     _detailCache[key] = article;
   }
 
+  late String _preferencesIdentity;
+  String get _currentPreferencesIdentity => [
+        AppState.instance.contentLanguage,
+        AppState.instance.stateName,
+        AppState.instance.district,
+        AppState.instance.city,
+        AppState.instance.subdistrict,
+        AppState.instance.village,
+      ].join('|');
+
+  void _onPreferencesChanged() {
+    final identity = _currentPreferencesIdentity;
+    if (identity == _preferencesIdentity || _disposed) return;
+    _preferencesIdentity = identity;
+    updateLocation();
+  }
+
   SpotlightController({
     FeedRepository? feedRepository,
     String? initialCategory,
@@ -49,12 +73,17 @@ class SpotlightController extends ChangeNotifier {
           category: initialCategory,
           locationName: AppState.instance.displayLocation,
         ).copyWith(isLocalNews: isLocal) {
+    _preferencesIdentity = _currentPreferencesIdentity;
+    AppState.instance.addListener(_onPreferencesChanged);
     startOverlayTimer();
     loadFeed(refresh: true);
   }
 
   @override
   void dispose() {
+    AppState.instance.removeListener(_onPreferencesChanged);
+    _disposed = true;
+    ++_requestGeneration;
     _overlayTimer?.cancel();
     super.dispose();
   }
@@ -98,12 +127,10 @@ class SpotlightController extends ChangeNotifier {
   /// Loads feed using the unified FeedRepository data layer.
   /// Enforces request generation IDs to prevent stale or mixed-location stories.
   Future<void> loadFeed({bool refresh = false}) async {
-    if (_state.isFetching) {
-      if (!refresh) {
-        await _currentFetchCompleter?.future;
-        return;
-      }
+    if (_disposed) return;
+    if (_state.isFetching && !refresh) {
       await _currentFetchCompleter?.future;
+      return;
     }
     if (!_state.hasMore && !refresh) return;
 
@@ -116,7 +143,7 @@ class SpotlightController extends ChangeNotifier {
       AdDeliveryService.instance.resetSession();
       _state = _state.copyWith(
         isFetching: true,
-        errorMessage: null,
+        clearError: true,
         generation: gen,
       );
       notifyListeners();
@@ -128,152 +155,161 @@ class SpotlightController extends ChangeNotifier {
     try {
       final isLocal = _state.isLocalNews;
       final category = _state.selectedCategory;
-      final lang = AppState.instance.contentLanguage;
-
-      // 1. Fetch ancillary items (quotes, ads, posters) asynchronously in background
-      ApiService.instance.getRandomQuote(lang: lang).then((q) {
-        if (q != null && (q['text'] != null || q['quote'] != null)) {
-          _cachedQuote = q;
-        }
-      }).catchError((_) {});
-
-      AdRepository.instance
-          .getAds(
-        placementZone: 'spotlight',
-        scope: isLocal ? 'local' : null,
-        forceRefresh: refresh,
-      )
-          .then((adsResp) {
-        final activeAds = adsResp.data ?? [];
-        for (var ad in activeAds) {
-          if (!_adsPool.any((existing) => existing.id == ad.id)) {
-            _adsPool.add(ad);
-          }
-        }
-      }).catchError((_) {});
-
-      if (_postersPool.length < 5) {
-        ApiService.instance.getPosters(pageSize: 10, lang: lang).then((posters) {
-          if (posters.isNotEmpty) _postersPool.addAll(posters);
-        }).catchError((_) {});
-      }
-
-      // 2. Fetch primary feed from FeedRepository (shared cache + cursor pagination)
-      final currentFeedState = FeedState<NewsArticle>.success(
-        items: _state.feed.map((i) => i.article).whereType<NewsArticle>().toList(),
-        nextCursor: _state.nextCursor,
-        hasMore: _state.hasMore,
-      );
-
-      final feedState = (refresh || _state.nextCursor == null)
-          ? await _feedRepository.getInitialFeed(
-              pageSize: 25,
-              scope: isLocal ? 'local' : null,
+      final app = AppState.instance;
+      final lang = app.contentLanguage;
+      final selectedState = app.stateName;
+      final district = app.district;
+      final city = app.city;
+      final subdistrict = isLocal ? app.subdistrict : '';
+      final village = isLocal ? app.village : '';
+      final scope = isLocal ? 'local' : 'main';
+      final currentArticles = _state.feed
+          .map((item) => item.article)
+          .whereType<NewsArticle>()
+          .where((article) => !article.isUgc)
+          .toList();
+      final current = FeedState<NewsArticle>.success(
+          items: currentArticles,
+          nextCursor: _state.nextCursor,
+          hasMore: _articleHasMore);
+      final primary = refresh
+          ? _feedRepository.getInitialFeed(
+              scope: scope,
               category: category,
               lang: lang,
-              state: isLocal ? AppState.instance.stateName : null,
-              district: isLocal ? AppState.instance.district : null,
-              city: isLocal ? AppState.instance.city : null,
-              subdistrict: isLocal && AppState.instance.subdistrict.isNotEmpty
-                  ? AppState.instance.subdistrict
-                  : null,
-              village: isLocal && AppState.instance.village.isNotEmpty
-                  ? AppState.instance.village
-                  : null,
-              forceRefresh: refresh,
-            )
-          : await _feedRepository.loadNextPage(
-              currentState: currentFeedState,
+              state: selectedState,
+              district: district,
+              city: city,
+              subdistrict: subdistrict,
+              village: village,
               pageSize: 25,
-              scope: isLocal ? 'local' : null,
-              category: category,
-              lang: lang,
-              state: isLocal ? AppState.instance.stateName : null,
-              district: isLocal ? AppState.instance.district : null,
-              city: isLocal ? AppState.instance.city : null,
-              subdistrict: isLocal && AppState.instance.subdistrict.isNotEmpty
-                  ? AppState.instance.subdistrict
-                  : null,
-              village: isLocal && AppState.instance.village.isNotEmpty
-                  ? AppState.instance.village
-                  : null,
-            );
-
-      // Stale request guard: if generation or sequence changed during async fetch, discard result
-      if (gen != _requestGeneration || seq != _paginationSequence) {
-        debugPrint('[SpotlightController] Discarding stale or out-of-order response (gen: $gen vs $_requestGeneration, seq: $seq vs $_paginationSequence)');
+              forceRefresh: true)
+          : _articleHasMore
+              ? _feedRepository.loadNextPage(
+                  currentState: current,
+                  scope: scope,
+                  category: category,
+                  lang: lang,
+                  state: selectedState,
+                  district: district,
+                  city: city,
+                  subdistrict: subdistrict,
+                  village: village,
+                  pageSize: 25)
+              : Future.value(current);
+      final community = (refresh || _ugcHasMore)
+          ? UgcRepository.instance
+              .getUgcFeed(
+                  cursor: refresh ? null : _ugcCursor,
+                  scope: scope,
+                  state: selectedState,
+                  district: district,
+                  subdistrict: subdistrict,
+                  village: village)
+              .catchError((Object e) =>
+                  ApiResponse<List<NewsArticle>>.error(message: e.toString()))
+          : Future.value(
+              ApiResponse<List<NewsArticle>>.success(<NewsArticle>[]));
+      final results = await Future.wait<dynamic>([
+        primary,
+        community,
+        AdRepository.instance.getAds(
+            placementZone: 'feed',
+            scope: scope,
+            state: selectedState,
+            district: district,
+            city: city,
+            subdistrict: subdistrict,
+            village: village,
+            lang: lang,
+            forceRefresh: true),
+        refresh
+            ? ApiService.instance.getPosters(pageSize: 10, lang: lang)
+            : Future.value(List<dynamic>.from(_postersPool)),
+      ]);
+      if (_disposed || gen != _requestGeneration || seq != _paginationSequence)
         return;
+      final feedState = results[0] as FeedState<NewsArticle>;
+      final ugc = results[1] as ApiResponse<List<NewsArticle>>;
+      final ads = results[2] as ApiResponse<List<AdBanner>>;
+      final failure = feedState.errorMessage ?? feedState.refreshErrorMessage;
+      if (refresh) {
+        _ugcItems.clear();
+        _dismissedSlots.clear();
       }
-
-      final newArticles = feedState.items;
-      final updatedFeed = refresh ? <SpotlightItem>[] : List<SpotlightItem>.from(_state.feed);
-
-      // Remove trailing shimmer card if present
-      if (updatedFeed.isNotEmpty && updatedFeed.last.type == SpotlightType.shimmer) {
-        updatedFeed.removeLast();
+      if (!ugc.hasErrors) {
+        final ids = _ugcItems.map((item) => item.id).toSet();
+        _ugcItems.addAll((ugc.data ?? []).where((item) => ids.add(item.id)));
+        _ugcCursor = ugc.nextCursor;
+        _ugcHasMore = ugc.nextCursor != null;
       }
-
-      final int offset = updatedFeed.length;
-      final newItems = <SpotlightItem>[];
-
-      for (int i = 0; i < newArticles.length; i++) {
-        final article = newArticles[i];
-
-        // Map carousel vs standard
-        if (article.imageUrls != null && article.imageUrls!.length > 1) {
-          newItems.add(SpotlightItem.carousel(
-            id: article.id,
-            imageUrls: article.imageUrls!,
-            title: article.title,
-            baseArticle: article,
-          ));
-        } else {
-          newItems.add(SpotlightItem.standard(article));
+      _adsPool
+        ..clear()
+        ..addAll(ads.data ?? []);
+      _postersPool
+        ..clear()
+        ..addAll(results[3] as List);
+      if (failure != null &&
+          feedState.items.isEmpty &&
+          _ugcItems.isEmpty &&
+          _postersPool.isEmpty) {
+        throw ApiException(failure);
+      }
+      _articleHasMore = feedState.hasMore;
+      final seen = <String>{};
+      final stories = [...feedState.items, ..._ugcItems]
+          .where((item) => seen.add('${item.contentKind}:${item.id}'))
+          .toList()
+        ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
+      final posterIds = <String>{};
+      final posters = _postersPool
+          .whereType<Map>()
+          .map((json) =>
+              SpotlightItem.posterRecord(Map<String, dynamic>.from(json)))
+          .where((item) =>
+              item.id.isNotEmpty &&
+              (item.imageUrls?.isNotEmpty ?? false) &&
+              posterIds.add(item.id))
+          .toList();
+      final content = <SpotlightItem>[];
+      var posterIndex = 0;
+      for (var index = 0; index < stories.length; index++) {
+        // Content type comes from the backend; media stays within this parent.
+        content.add(SpotlightItem.standard(stories[index]));
+        if ((index + 1) % 5 == 0 && posterIndex < posters.length) {
+          content.add(posters[posterIndex++]);
         }
-
-        int count = offset + i + 1;
-
-        // Inject poster sparingly (every 8 items) to ensure stories dominate
-        if (count % 8 == 0 && _postersPool.isNotEmpty) {
-          final posterData = _postersPool.removeAt(0);
-          final imageUrl = posterData['image_url'] ?? posterData['imageUrl'];
-          if (imageUrl != null && imageUrl.toString().isNotEmpty) {
-            newItems.add(SpotlightItem.poster(
-              posterData['id'] ?? 'poster_$count',
-              imageUrl.toString(),
-            ));
-          }
-        }
-
-        // Inject random quote at item 6 if available
-        if (count == 6 && _cachedQuote != null && (_cachedQuote!['text'] != null || _cachedQuote!['quote'] != null)) {
-          newItems.add(SpotlightItem.infoCard(
-            _cachedQuote!['id'] ?? 'info_$count',
-            (_cachedQuote!['text'] ?? _cachedQuote!['quote']).toString(),
-          ));
-        }
       }
-
-      updatedFeed.addAll(newItems);
-      final String? nextCursor = feedState.nextCursor;
-      final bool hasMore = feedState.hasMore;
-
-      if (updatedFeed.isNotEmpty && hasMore) {
-        updatedFeed.add(SpotlightItem.shimmer());
-      }
-
-      _state = _state.copyWith(
-        feed: updatedFeed,
-        nextCursor: nextCursor,
-        hasMore: hasMore,
-        isLoading: false,
-        isFetching: false,
+      content.addAll(posters.skip(posterIndex));
+      final run = insertAdsIntoFeed<SpotlightItem>(
+        contentItems: content,
+        eligibleAds: _adsPool,
+        allowTimed: true,
+        contentKey: (item) => '${item.type.name}:${item.id}',
       );
-
-      // Trigger deferred notification permission ONLY after user sees articles
-      if (updatedFeed.any((item) => item.type == SpotlightType.standard)) {
+      final updatedFeed = run
+          .where((entry) => !_dismissedSlots.contains(entry.stableKey))
+          .map((entry) => entry.isAd
+              ? SpotlightItem(
+                  id: entry.stableKey,
+                  type: SpotlightType.ad,
+                  adBanner: entry.ad)
+              : entry.content!)
+          .toList();
+      final hasMore = _articleHasMore || _ugcHasMore;
+      if (updatedFeed.isNotEmpty && hasMore)
+        updatedFeed.add(SpotlightItem.shimmer());
+      _state = _state.copyWith(
+          feed: updatedFeed,
+          nextCursor: feedState.nextCursor,
+          clearCursor: feedState.nextCursor == null,
+          hasMore: hasMore,
+          isLoading: false,
+          isFetching: false,
+          errorMessage: failure,
+          clearError: failure == null);
+      if (stories.isNotEmpty)
         NotificationService.instance.requestPermissionAfterArticlesLoaded();
-      }
     } catch (e) {
       if (gen != _requestGeneration) return;
       debugPrint('[SpotlightController] feed load error: $e');
@@ -288,78 +324,41 @@ class SpotlightController extends ChangeNotifier {
       if (gen == _requestGeneration) {
         _state = _state.copyWith(isFetching: false);
       }
-      _currentFetchCompleter = null;
+      if (identical(_currentFetchCompleter, completer)) {
+        _currentFetchCompleter = null;
+      }
       if (!completer.isCompleted) {
         completer.complete();
       }
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
-  /// Evaluates user behavior and conditionally inserts an ad right after [currentIndex].
-  bool evaluateAndInjectAdAfter(int currentIndex) {
-    if (_adsPool.isEmpty) return false;
-    final targetIndex = currentIndex + 1;
-
-    // Boundary check
-    if (targetIndex > _state.feed.length) return false;
-
-    // Prevent duplicate ads or inserting into shimmer
-    if (targetIndex < _state.feed.length) {
-      final existingType = _state.feed[targetIndex].type;
-      if (existingType == SpotlightType.ad || existingType == SpotlightType.shimmer) {
-        return false;
-      }
-    }
-
-    // Check behavior-based trigger via AdDeliveryService
-    final canShow = AdDeliveryService.instance.canShowSpotlightAd(
-      targetIndex: targetIndex,
-      isSwipingBack: false,
-    );
-
-    if (!canShow) return false;
-
-    final adToInsert = AdManager.instance.selectAd(_adsPool) ??
-        AdDeliveryService.instance.selectAd(_adsPool);
-    if (adToInsert == null) return false;
-
-    // Hardened ID-based deduplication: prevent injecting the same ad twice in feed deck
-    if (_state.feed.any((item) => item.type == SpotlightType.ad && item.adBanner?.id == adToInsert.id)) {
-      return false;
-    }
-
-    final updated = List<SpotlightItem>.from(_state.feed);
-    updated.insert(targetIndex, SpotlightItem.ad(adToInsert));
-    _state = _state.copyWith(feed: updated);
-    notifyListeners();
-
-    debugPrint('[SpotlightController] Ad injected at index $targetIndex (adId: ${adToInsert.id})');
-    return true;
-  }
+  /// Placement is computed from parent content, never from elapsed swipe time.
+  bool evaluateAndInjectAdAfter(int currentIndex) => false;
 
   /// Removes a completed or dismissed ad to ensure NO REPEAT on back-swipe.
   void removeAdAt(int index) {
-    if (index >= 0 && index < _state.feed.length && _state.feed[index].type == SpotlightType.ad) {
-      final adItem = _state.feed[index];
-      if (adItem.adBanner != null) {
-        AdDeliveryService.instance.markAdShown(
-          adId: adItem.adBanner!.id,
-          position: index,
-        );
-      }
+    if (index >= 0 &&
+        index < _state.feed.length &&
+        _state.feed[index].type == SpotlightType.ad) {
+      _dismissedSlots.add(_state.feed[index].id);
       final updated = List<SpotlightItem>.from(_state.feed);
       updated.removeAt(index);
       _state = _state.copyWith(feed: updated);
       notifyListeners();
-      debugPrint('[SpotlightController] Ad at $index removed to prevent repeat on back swipe.');
+      debugPrint(
+          '[SpotlightController] Ad at $index removed to prevent repeat on back swipe.');
     }
   }
 
   /// Switches category filter, cancels stale requests, resets cursor, and reloads.
   Future<void> selectCategory(String? category) async {
     final trimmed = category?.trim();
-    final cat = (trimmed == null || trimmed.isEmpty || trimmed.toLowerCase() == 'all') ? null : trimmed;
+    final cat =
+        (trimmed == null || trimmed.isEmpty || trimmed.toLowerCase() == 'all')
+            ? null
+            : trimmed;
     if (_state.selectedCategory == cat) return;
 
     HapticFeedback.selectionClick();
@@ -370,7 +369,7 @@ class SpotlightController extends ChangeNotifier {
       feed: const [],
       isLoading: true,
       hasMore: true,
-      nextCursor: null,
+      clearCursor: true,
     );
     notifyListeners();
     await loadFeed(refresh: true);
@@ -387,7 +386,7 @@ class SpotlightController extends ChangeNotifier {
       feed: const [],
       isLoading: true,
       hasMore: true,
-      nextCursor: null,
+      clearCursor: true,
     );
     notifyListeners();
     await loadFeed(refresh: true);
@@ -402,7 +401,7 @@ class SpotlightController extends ChangeNotifier {
       feed: const [],
       isLoading: true,
       hasMore: true,
-      nextCursor: null,
+      clearCursor: true,
     );
     notifyListeners();
     await loadFeed(refresh: true);
@@ -411,7 +410,8 @@ class SpotlightController extends ChangeNotifier {
   /// Locates the story index for [storyId], or 0 if not found.
   int findInitialIndex(String? storyId) {
     if (storyId == null || storyId.isEmpty) return 0;
-    final index = _state.feed.indexWhere((item) => item.id == storyId || (item.article?.slug == storyId));
+    final index = _state.feed.indexWhere(
+        (item) => item.id == storyId || (item.article?.slug == storyId));
     return index >= 0 ? index : 0;
   }
 
@@ -425,7 +425,8 @@ class SpotlightController extends ChangeNotifier {
     if (_state.isFetching || !_state.hasMore) return;
 
     final now = DateTime.now();
-    if (_lastPrefetchTime != null && now.difference(_lastPrefetchTime!) < _prefetchDebounce) {
+    if (_lastPrefetchTime != null &&
+        now.difference(_lastPrefetchTime!) < _prefetchDebounce) {
       return;
     }
     _lastPrefetchTime = now;

@@ -35,7 +35,10 @@ void main() {
     await tester.pump();
 
     expect(find.text('Road damage reported in Kesaram'), findsOneWidget);
-    expect(find.text('Residents requested urgent repairs.'), findsOneWidget);
+    expect(
+        find.textContaining('esidents requested urgent repairs.',
+            findRichText: true),
+        findsOneWidget);
     expect(find.text('పౌర వార్త'), findsOneWidget);
     expect(find.text('నివేదించండి'), findsOneWidget);
     expect(find.byIcon(Icons.favorite_outline_rounded), findsNothing);
@@ -47,6 +50,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('పౌర వార్తను నివేదించండి'), findsOneWidget);
-    expect(find.text('తప్పుడు లేదా తప్పుదారి పట్టించే సమాచారం'), findsOneWidget);
+    expect(
+        find.text('తప్పుడు లేదా తప్పుదారి పట్టించే సమాచారం'), findsOneWidget);
   });
 }

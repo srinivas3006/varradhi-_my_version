@@ -200,6 +200,15 @@ void main() {
   });
 
   group('FeedState Machine Tests', () {
+    test('terminal page explicitly clears the previous cursor', () {
+      final state = FeedState<String>.success(items: ['story'], nextCursor: 'old');
+      final completed = state.copyWith(clearCursor: true, hasMore: false);
+      expect(completed.nextCursor, isNull);
+      expect(completed.hasMore, isFalse);
+      expect(completed.items, ['story']);
+      expect(state.toRefreshing().nextCursor, 'old');
+    });
+
     test('1. Initial state', () {
       final state = FeedState<String>.initial();
       expect(state.status, FeedStatus.initial);
@@ -347,6 +356,7 @@ void main() {
       expect(secondPage.items.length, 3);
       expect(secondPage.items.map((e) => e.id).toList(), ['art_1', 'art_2', 'art_3']);
       expect(secondPage.hasMore, isFalse);
+      expect(secondPage.nextCursor, isNull);
     });
 
     test('3. Refresh failure preserves existing items with non-blocking error', () async {

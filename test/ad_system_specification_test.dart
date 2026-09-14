@@ -20,22 +20,33 @@ void main() {
       AdEventQueue.instance.reset();
     });
 
-    test('1. APK enforces fixed UI aspect ratios and heights per ad type (no stretching)', () {
-      expect(AdTypeResolver.getFixedAspectRatio('banner'), closeTo(16 / 5, 0.001));
+    test(
+        '1. APK enforces fixed UI aspect ratios and heights per ad type (no stretching)',
+        () {
+      expect(
+          AdTypeResolver.getFixedAspectRatio('banner'), closeTo(16 / 5, 0.001));
       expect(AdTypeResolver.getFixedAspectRatio('box'), closeTo(1.0, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('three_d'), closeTo(4 / 3, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('video'), closeTo(16 / 9, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('poster'), closeTo(4 / 5, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('native'), closeTo(16 / 9, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('sponsored_card'), closeTo(16 / 9, 0.001));
-      expect(AdTypeResolver.getFixedAspectRatio('local_listing'), closeTo(16 / 7, 0.001));
+      expect(
+          AdTypeResolver.getFixedAspectRatio('three_d'), closeTo(4 / 3, 0.001));
+      expect(
+          AdTypeResolver.getFixedAspectRatio('video'), closeTo(16 / 9, 0.001));
+      expect(
+          AdTypeResolver.getFixedAspectRatio('poster'), closeTo(4 / 5, 0.001));
+      expect(
+          AdTypeResolver.getFixedAspectRatio('native'), closeTo(16 / 9, 0.001));
+      expect(AdTypeResolver.getFixedAspectRatio('sponsored_card'),
+          closeTo(16 / 9, 0.001));
+      expect(AdTypeResolver.getFixedAspectRatio('local_listing'),
+          closeTo(16 / 7, 0.001));
 
       // Fixed height components
       expect(AdTypeResolver.getFixedHeight('breaking_strip'), 42.0); // 36-48dp
       expect(AdTypeResolver.getFixedHeight('bottom_sticky'), 64.0); // 56-80dp
     });
 
-    test('2. Video vs Image URL separation: imageUrl is poster, videoUrl is source', () {
+    test(
+        '2. Video vs Image URL separation: imageUrl is poster, videoUrl is source',
+        () {
       final videoAd = AdBanner(
         id: 'v_spec',
         imageUrl: 'https://cdn.example.com/poster.jpg',
@@ -69,7 +80,8 @@ void main() {
       expect(bannerAd.isBanner, isTrue);
     });
 
-    test('3. Feed placement adheres to display_frequency (every 4 articles)', () {
+    test('3. Feed placement adheres to display_frequency (every 4 articles)',
+        () {
       final pool = [
         AdBanner(
           id: 'ad_rot_1',
@@ -124,7 +136,8 @@ void main() {
       expect(presentation[9].ad!.id, 'ad_rot_2');
     });
 
-    test('4. Multiple ads in backend pool rotate cleanly across feed slots', () {
+    test('4. Multiple ads in backend pool rotate cleanly across feed slots',
+        () {
       final pool = [
         AdBanner(
           id: 'ad_A',
@@ -155,7 +168,8 @@ void main() {
         overrideFrequency: 3,
       );
 
-      final adsInFeed = presentation.where((p) => p.isAd).map((p) => p.ad!.id).toList();
+      final adsInFeed =
+          presentation.where((p) => p.isAd).map((p) => p.ad!.id).toList();
 
       // Ensure multiple ads rotate instead of duplicating the same ad in all slots
       expect(adsInFeed.length, greaterThanOrEqualTo(2));
@@ -163,7 +177,7 @@ void main() {
       expect(adsInFeed[1], 'ad_B');
     });
 
-    test('5. Enforces daily_max_impressions_per_user cap', () {
+    test('5. Defers daily cap eligibility to backend', () {
       final capped = AdBanner(
         id: 'ad_cap_test',
         imageUrl: 'https://cdn.example.com/cap.jpg',
@@ -182,11 +196,12 @@ void main() {
       expect(first!.id, 'ad_cap_test');
 
       // Record impression
-      manager.recordImpression(capped, placementZone: 'feed', contextKey: 'first_view');
+      manager.recordImpression(capped,
+          placementZone: 'feed', contextKey: 'first_view');
 
-      // 2nd time -> capped out!
+      // A returned eligible ad stays eligible; session counts are not daily caps.
       final second = manager.selectAd([capped]);
-      expect(second, isNull);
+      expect(second, isNotNull);
     });
 
     test('6. Tracks all supported ad lifecycle event types', () {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
@@ -14,7 +13,7 @@ import '../repositories/news_article_repository.dart';
 import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
-import '../widgets/news_article_video_player.dart';
+import '../widgets/article_media_carousel.dart';
 import 'comments_screen.dart';
 
 class NewsDetailScreen extends StatefulWidget {
@@ -105,7 +104,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       return;
     }
 
-    final isCurrentlyLiked = AppState.instance.isLiked(targetId) || article.isLiked;
+    final isCurrentlyLiked =
+        AppState.instance.isLiked(targetId) || article.isLiked;
     AppState.instance.toggleLike(targetId);
     final isNowLiked = AppState.instance.isLiked(targetId);
     final prevLikes = article.likes;
@@ -125,7 +125,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         );
         if (mounted && res.containsKey('like_count')) {
           setState(() {
-            article.likes = (res['like_count'] as num?)?.toInt() ?? article.likes;
+            article.likes =
+                (res['like_count'] as num?)?.toInt() ?? article.likes;
           });
         }
       }
@@ -287,93 +288,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Media Content
-                if (article.mediaItems.isNotEmpty)
-                  PageView.builder(
-                    onPageChanged: (index) {
-                      setState(() {
-                        _currentImageIndex = index;
-                      });
-                    },
-                    itemCount: article.mediaItems.length,
-                    itemBuilder: (context, index) {
-                      final item = article.mediaItems[index];
-                      if (item.isVideo) {
-                        return NewsArticleVideoPlayer(
-                          article: article,
-                          height: 360,
-                        );
-                      }
-                      return CachedNetworkImage(
-                        imageUrl:
-                            item.url.isNotEmpty ? item.url : item.thumbnailUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) =>
-                            Container(color: AppColors.chipBg),
-                        errorWidget: (context, url, error) => Container(
-                          color: AppColors.chipBg,
-                          child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined,
-                                color: AppColors.textMuted, size: 40),
-                          ),
-                        ),
-                      );
-                    },
-                  )
-                else if (article.isVideo || article.videoUrl.isNotEmpty)
-                  NewsArticleVideoPlayer(
-                    article: article,
-                    height: 360,
-                  )
-                else if (article.imageUrls != null &&
-                    article.imageUrls!.length > 1)
-                  PageView.builder(
-                    onPageChanged: (index) {
-                      setState(() {
-                        _currentImageIndex = index;
-                      });
-                    },
-                    itemCount: article.imageUrls!.length,
-                    itemBuilder: (context, index) {
-                      return CachedNetworkImage(
-                        imageUrl: article.imageUrls![index],
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) =>
-                            Container(color: AppColors.chipBg),
-                        errorWidget: (context, url, error) => Container(
-                          color: AppColors.chipBg,
-                          child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined,
-                                color: AppColors.textMuted, size: 40),
-                          ),
-                        ),
-                      );
-                    },
-                  )
-                else if (article.imageUrl.isNotEmpty)
-                  CachedNetworkImage(
-                    imageUrl: article.imageUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) =>
-                        Container(color: AppColors.chipBg),
-                    errorWidget: (context, url, error) => Container(
-                      color: AppColors.chipBg,
-                      child: const Center(
-                        child: Icon(Icons.image_not_supported_outlined,
-                            color: AppColors.textMuted, size: 40),
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    color: isDark ? const Color(0xFF202124) : AppColors.chipBg,
-                    alignment: Alignment.center,
-                    child: Icon(
-                      _isUgc ? Icons.campaign_outlined : Icons.article_outlined,
-                      color: AppColors.textMuted,
-                      size: 64,
-                    ),
-                  ),
+                ArticleMediaCarousel(
+                  article: article,
+                  onPageChanged: (index) =>
+                      setState(() => _currentImageIndex = index),
+                ),
 
                 // Top Gradient Overlay for readability of status bar & top buttons
                 Positioned(
@@ -415,7 +334,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   bottom: 44,
                   left: 16,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(16),
@@ -423,12 +343,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.camera_alt_outlined, color: Colors.white, size: 14),
+                        const Icon(Icons.camera_alt_outlined,
+                            color: Colors.white, size: 14),
                         const SizedBox(width: 5),
                         Text(
                           article.authorName.isNotEmpty
                               ? article.authorName
-                              : (article.source.isNotEmpty ? article.source : 'VARADHI Desk'),
+                              : (article.source.isNotEmpty
+                                  ? article.source
+                                  : 'VARADHI Desk'),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
@@ -446,7 +369,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     bottom: 44,
                     right: 16,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.65),
                         borderRadius: BorderRadius.circular(12),
@@ -505,7 +429,9 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        article.category.isNotEmpty ? article.category : 'General',
+                        article.category.isNotEmpty
+                            ? article.category
+                            : 'General',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -517,7 +443,9 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Text(
                         article.authorName.isNotEmpty
                             ? article.authorName
-                            : (article.source.isNotEmpty ? article.source : 'VARADHI Desk'),
+                            : (article.source.isNotEmpty
+                                ? article.source
+                                : 'VARADHI Desk'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -580,7 +508,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           color: Colors.black.withValues(alpha: 0.45),
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.2), width: 1),
+                              color: Colors.white.withValues(alpha: 0.2),
+                              width: 1),
                         ),
                         child: const Icon(Icons.share_rounded,
                             color: Colors.white, size: 18),
@@ -936,9 +865,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                           Navigator.push(
                                             context,
                                             MaterialPageRoute(
-                                              builder: (_) =>
-                                                  CommentsScreen(
-                                                      article: article),
+                                              builder: (_) => CommentsScreen(
+                                                  article: article),
                                             ),
                                           ).then((_) {
                                             if (mounted) setState(() {});
@@ -1019,7 +947,9 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         _buildWay2NewsBodyText(
                           article.body.isNotEmpty
                               ? article.body
-                              : (article.summary.isNotEmpty ? article.summary : ''),
+                              : (article.summary.isNotEmpty
+                                  ? article.summary
+                                  : ''),
                           textColor,
                         ),
 
@@ -1158,7 +1088,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           if (i == 1 && paragraphs.length > 2) ...[
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 14.0),
-              child: BannerAdSlot(placementZone: 'article_detail', maxHeight: 80),
+              child:
+                  BannerAdSlot(placementZone: 'article_detail', maxHeight: 80),
             ),
           ],
         ],

@@ -25,9 +25,11 @@ class BottomStickyAdBanner extends StatefulWidget {
 
 class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
   bool _isDismissed = false;
+  bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
@@ -37,14 +39,15 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
   }
 
   void _handleDismiss() {
-    AdManager.instance.recordDismiss(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordDismiss(widget.ad, placementZone: widget.placementZone);
     setState(() => _isDismissed = true);
     widget.onDismiss?.call();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isDismissed) return const SizedBox.shrink();
+    if (_isDismissed || _hasError) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -83,7 +86,12 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
                       child: CachedNetworkImage(
                         imageUrl: widget.ad.imageUrl,
                         fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                        errorWidget: (_, __, ___) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) setState(() => _hasError = true);
+                          });
+                          return const SizedBox.shrink();
+                        },
                       ),
                     ),
 
@@ -98,7 +106,8 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 2),
                               decoration: BoxDecoration(
                                 color: Colors.blueGrey.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(3),
@@ -124,7 +133,9 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          widget.ad.title.isNotEmpty ? widget.ad.title : 'Featured Promotion',
+                          widget.ad.title.isNotEmpty
+                              ? widget.ad.title
+                              : 'Featured Promotion',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -140,7 +151,8 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
                   // Destination CTA icon
                   const Padding(
                     padding: EdgeInsets.only(right: 36.0),
-                    child: Icon(Icons.open_in_new_rounded, size: 16, color: Colors.grey),
+                    child: Icon(Icons.open_in_new_rounded,
+                        size: 16, color: Colors.grey),
                   ),
                 ],
               ),
@@ -159,7 +171,8 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
                     color: Colors.black.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.close_rounded, size: 14, color: Colors.grey),
+                  child: const Icon(Icons.close_rounded,
+                      size: 14, color: Colors.grey),
                 ),
               ),
             ),

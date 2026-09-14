@@ -2,10 +2,86 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/redeem_request.dart';
 import '../state/app_state.dart';
+import '../services/api_service.dart';
+import '../core/navigation/auth_guard.dart';
 import 'redeem_request_screen.dart';
 
-class ReporterWalletScreen extends StatelessWidget {
+class ReporterWalletScreen extends StatefulWidget {
   const ReporterWalletScreen({super.key});
+
+  @override
+  State<ReporterWalletScreen> createState() => _ReporterWalletScreenState();
+}
+
+class _ReporterWalletScreenState extends State<ReporterWalletScreen> {
+  RewardWallet? _wallet;
+  List<RewardPayout> _payouts = [];
+  bool _loading = false;
+  bool _openingPayout = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadWallet();
+    });
+  }
+
+  Future<void> _loadWallet() async {
+    if (_loading || !AppState.instance.isLoggedIn) return;
+    _loading = true;
+    try {
+      final wallet = RewardWallet.fromJson(await ApiService.instance.getRewardWallet());
+      if (!mounted) return;
+      setState(() => _wallet = wallet);
+      final payouts = await ApiService.instance.getRewardPayouts();
+      if (!mounted) return;
+      setState(() {
+        _payouts = payouts.map((json) =>
+          RewardPayout.fromJson(Map<String, dynamic>.from(json as Map)),
+        ).toList();
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString()),
+          action: SnackBarAction(label: 'Retry', onPressed: _loadWallet),
+        ));
+      }
+    } finally {
+      _loading = false;
+    }
+  }
+
+  Future<void> _openPayout() async {
+    if (_openingPayout) return;
+    _openingPayout = true;
+    try {
+    if (!await ensureAuth(context) || !mounted) return;
+    if (_loading) return;
+    _wallet = null;
+    await _loadWallet();
+    if (!mounted || _loading || _wallet == null) return;
+    final wallet = _wallet!;
+    if (wallet.availableCoins < wallet.minimumWithdrawalCoins) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        'విత్‌డ్రా కోసం ఇంకా ${wallet.minimumWithdrawalCoins - wallet.availableCoins} కాయిన్లు కావాలి',
+      )));
+      return;
+    }
+    final submitted = await Navigator.push<bool>(context, MaterialPageRoute(
+      builder: (_) => RedeemRequestScreen(
+        availableCoins: wallet.availableCoins,
+        minimumCoins: wallet.minimumWithdrawalCoins,
+        coinValue: wallet.coinValueRupees,
+      ),
+    ));
+    if (mounted && submitted == true) await _loadWallet();
+    } finally {
+      _openingPayout = false;
+    }
+  }
+
 
   String _redeemStatusLabel(RedeemStatus status) {
     switch (status) {
@@ -40,10 +116,10 @@ class ReporterWalletScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: AppState.instance,
       builder: (context, _) {
-        final state = AppState.instance;
-        final progress =
-            (state.reporterTokens / AppState.tokensNeededToRedeem).clamp(0.0, 1.0);
-        final canRedeem = state.reporterTokens >= AppState.tokensNeededToRedeem;
+        final available = _wallet?.availableCoins ?? 0;
+        final minimum = _wallet?.minimumWithdrawalCoins ?? AppState.tokensNeededToRedeem;
+        final progress = minimum > 0 ? (available / minimum).clamp(0.0, 1.0) : 0.0;
+        final canRedeem = _wallet != null && available >= minimum;
 
         return Scaffold(
           backgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF8F9FA),
@@ -177,14 +253,14 @@ class ReporterWalletScreen extends StatelessWidget {
                             // Balance + Rupee estimate
                             Builder(
                               builder: (context) {
-                                final coins = state.reporterTokens > 0 ? state.reporterTokens : 5549;
-                                final rupees = coins * 3.0;
+                                final coins = _wallet?.availableCoins;
+                                final rupees = _wallet?.availableValueRupees;
                                 return Row(
                                   crossAxisAlignment: CrossAxisAlignment.baseline,
                                   textBaseline: TextBaseline.alphabetic,
                                   children: [
                                     Text(
-                                      '$coins',
+                                      coins?.toString() ?? '—',
                                       style: const TextStyle(
                                         fontSize: 40,
                                         fontWeight: FontWeight.w900,
@@ -194,7 +270,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(width: 10),
                                     Text(
-                                      '≈ ₹${rupees.toStringAsFixed(2)}',
+                                      rupees == null ? '—' : '≈ ₹${rupees.toStringAsFixed(2)}',
                                       style: TextStyle(
                                         fontSize: 19,
                                         fontWeight: FontWeight.w700,
@@ -225,7 +301,7 @@ class ReporterWalletScreen extends StatelessWidget {
                             Text(
                               canRedeem
                                   ? 'మీరు ఇప్పుడు విత్‌డ్రా చేసుకోవచ్చు.'
-                                  : 'విత్‌డ్రా కోసం ఇంకా ${AppState.tokensNeededToRedeem - state.reporterTokens} కాయిన్లు కావాలి',
+                                  : 'విత్‌డ్రా కోసం ఇంకా ${minimum - available} కాయిన్లు కావాలి',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -239,10 +315,7 @@ class ReporterWalletScreen extends StatelessWidget {
                             GestureDetector(
                               onTap: () {
                                 HapticFeedback.lightImpact();
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const RedeemRequestScreen()),
-                                );
+                                _openPayout();
                               },
                               child: Container(
                                 width: double.infinity,
@@ -306,7 +379,7 @@ class ReporterWalletScreen extends StatelessWidget {
                               child: Column(
                                 children: [
                                   Text(
-                                    '10000',
+                                    _wallet?.lifetimeEarnedCoins.toString() ?? '—',
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -345,7 +418,7 @@ class ReporterWalletScreen extends StatelessWidget {
                               child: Column(
                                 children: [
                                   Text(
-                                    '580',
+                                    _wallet?.lockedCoins.toString() ?? '—',
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -384,7 +457,7 @@ class ReporterWalletScreen extends StatelessWidget {
                               child: Column(
                                 children: [
                                   Text(
-                                    '3871',
+                                    _wallet?.redeemedCoins.toString() ?? '—',
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -426,7 +499,7 @@ class ReporterWalletScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       
-                      if (state.redeemRequests.isEmpty)
+                      if (_payouts.isEmpty)
                         Center(
                           child: Padding(
                             padding: const EdgeInsets.all(40.0),
@@ -446,7 +519,7 @@ class ReporterWalletScreen extends StatelessWidget {
                           ),
                         )
                       else
-                        ...state.redeemRequests.map((r) => Container(
+                        ..._payouts.map((r) => Container(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
@@ -483,7 +556,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '₹${r.amountRupees}',
+                                      '₹${r.valueRupees.toStringAsFixed(2)}',
                                       style: TextStyle(
                                         color: isDark ? Colors.white : Colors.black87,
                                         fontWeight: FontWeight.bold,
@@ -492,7 +565,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'UPI: ${r.upiId}',
+                                      'UPI: ${r.payoutUpiId ?? ''}',
                                       style: TextStyle(
                                         color: isDark ? Colors.white54 : Colors.black45,
                                         fontSize: 12,
@@ -505,7 +578,7 @@ class ReporterWalletScreen extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(
-                                    '-${r.tokensRedeemed} టోకెన్లు',
+                                    '-${r.coinsRequested} టోకెన్లు',
                                     style: const TextStyle(
                                       color: Colors.redAccent,
                                       fontWeight: FontWeight.bold,
@@ -516,13 +589,13 @@ class ReporterWalletScreen extends StatelessWidget {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: _redeemStatusColor(r.status).withValues(alpha: 0.15),
+                                      color: _redeemStatusColor(r.parsedStatus).withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
-                                      _redeemStatusLabel(r.status),
+                                      _redeemStatusLabel(r.parsedStatus),
                                       style: TextStyle(
-                                        color: _redeemStatusColor(r.status),
+                                        color: _redeemStatusColor(r.parsedStatus),
                                         fontWeight: FontWeight.bold,
                                         fontSize: 10,
                                       ),

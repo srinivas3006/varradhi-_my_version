@@ -10,6 +10,7 @@ import 'local_listing_ad_widget.dart';
 import 'bottom_sticky_ad_banner.dart';
 import 'native_ad_card.dart';
 import 'video_ad_card.dart';
+import 'ad_viewability_detector.dart';
 
 /// Master frontend ad component that resolves any backend [ad.adType]
 /// into its required fixed aspect-ratio container and specialized UI layout.
@@ -22,18 +23,23 @@ import 'video_ad_card.dart';
 /// - Automatic impression & viewability tracking
 class UnifiedAdWidget extends StatelessWidget {
   final AdBanner ad;
+  final bool active;
   final String placementZone;
   final String? exposureKey;
 
   const UnifiedAdWidget({
     super.key,
     required this.ad,
+    this.active = true,
     this.placementZone = 'feed',
     this.exposureKey,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      AdActivityScope(active: active, child: _buildCreative(context));
+
+  Widget _buildCreative(BuildContext context) {
     // 1. Video ad (16:9 video player with poster)
     if (ad.isVideo) {
       return VideoAdCard(
@@ -111,7 +117,6 @@ class UnifiedAdWidget extends StatelessWidget {
 
       case AdPresentationType.interstitial:
       case AdPresentationType.fullScreen:
-      case AdPresentationType.unsupported:
         // Interstitials/full-screen are screen-transition ads shown via showInterstitialAd
         // For inline feed presentation, fallback gracefully to native card or banner
         return NativeAdCard(
@@ -119,6 +124,8 @@ class UnifiedAdWidget extends StatelessWidget {
           placementZone: placementZone,
           exposureKey: exposureKey,
         );
+      case AdPresentationType.unsupported:
+        return const SizedBox.shrink();
     }
   }
 }

@@ -11,6 +11,7 @@ import '../../screens/comments_screen.dart';
 import '../../services/api_service.dart';
 import '../../repositories/news_article_repository.dart';
 import '../news_article_video_player.dart';
+import '../article_media_carousel.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
@@ -46,6 +47,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   bool _isLoadingDetail = false;
   String? _detailError;
   NewsArticle? _detailArticle;
+  int _detailGeneration = 0;
 
   @override
   void initState() {
@@ -54,7 +56,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final slugToFetch = widget.article.slug.isNotEmpty
         ? widget.article.slug
         : widget.article.id;
-    if (slugToFetch.isNotEmpty) {
+    if (slugToFetch.isNotEmpty && widget.article.contentKind == 'article') {
       _fetchArticleDetail(slugToFetch);
     }
   }
@@ -62,6 +64,19 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   @override
   void didUpdateWidget(covariant SpotlightNewsCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.article.id != widget.article.id ||
+        oldWidget.article.slug != widget.article.slug) {
+      ++_detailGeneration;
+      _detailArticle = null;
+      _isLoadingDetail = false;
+      _detailError = null;
+      if (widget.article.contentKind == 'article') {
+        final slug = widget.article.slug.isNotEmpty
+            ? widget.article.slug
+            : widget.article.id;
+        if (slug.isNotEmpty) _fetchArticleDetail(slug);
+      }
+    }
     if (oldWidget.isCurrent && !widget.isCurrent) {
       final articleId = widget.article.id.isNotEmpty
           ? widget.article.id
@@ -100,11 +115,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   }
 
   Future<void> _fetchArticleDetail(String slug) async {
-    // If article already has full body loaded in feed model, skip redundant network roundtrip
-    if (widget.article.body.trim().length > 100) {
-      _detailArticle = widget.article;
-      return;
-    }
+    final generation = ++_detailGeneration;
 
     setState(() {
       _isLoadingDetail = true;
@@ -116,7 +127,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       final full = await NewsArticleRepository.instance.getDetail(slug);
       debugPrint(
           'Spotlight: detail fetched for $slug. Content length: ${full.body.length}');
-      if (mounted) {
+      if (mounted && generation == _detailGeneration) {
         setState(() {
           _detailArticle = full;
           _isLoadingDetail = false;
@@ -124,7 +135,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       }
     } catch (e) {
       debugPrint('Spotlight: failed to fetch detail for $slug: $e');
-      if (mounted) {
+      if (mounted && generation == _detailGeneration) {
         setState(() {
           _detailError = e.toString();
           _isLoadingDetail = false;
@@ -135,7 +146,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
   @override
   Widget build(BuildContext context) {
-    final article = widget.article;
+    final article = _detailArticle ?? widget.article;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mediaHeight = MediaQuery.of(context).size.height * 0.38;
 
@@ -172,139 +183,148 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                     opacity: imageOpacity,
                     child: Transform.scale(
                       scale: imageScale,
-                      child: article.isVideo
-                          ? NewsArticleVideoPlayer(
+                      child: article.mediaItems.isNotEmpty ||
+                              article.orderedMedia.length > 1
+                          ? ArticleMediaCarousel(
                               article: article,
-                              isCurrent: widget.isCurrent,
-                              onDoubleTap: () {
-                                HapticFeedback.mediumImpact();
-                                if (!AppState.instance.isLoggedIn) {
-                                  requireAuth(context, () {});
-                                  return;
-                                }
-                                if (!AppState.instance.likedItemIds
-                                    .contains(article.id)) {
-                                  AppState.instance.toggleLike(article.id);
-                                }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Liked story ❤️'),
-                                    duration: Duration(milliseconds: 900),
-                                  ),
-                                );
-                              },
-                            )
-                          : GestureDetector(
-                              onTap: widget.onTap,
-                              onDoubleTap: () {
-                                HapticFeedback.mediumImpact();
-                                if (!AppState.instance.isLoggedIn) {
-                                  requireAuth(context, () {});
-                                  return;
-                                }
-                                if (!AppState.instance.likedItemIds
-                                    .contains(article.id)) {
-                                  AppState.instance.toggleLike(article.id);
-                                }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Liked story ❤️'),
-                                    duration: Duration(milliseconds: 900),
-                                  ),
-                                );
-                              },
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  CachedNetworkImage(
-                                    imageUrl: (article.mediaItems.isNotEmpty &&
-                                            article.mediaItems.first.url
-                                                .isNotEmpty)
-                                        ? article.mediaItems.first.url
-                                        : article.imageUrl,
-                                    fit: BoxFit.cover,
-                                    memCacheWidth: 480,
-                                    memCacheHeight: 480,
-                                    maxWidthDiskCache: 800,
-                                    maxHeightDiskCache: 800,
-                                    placeholder: (context, url) =>
-                                        Container(color: AppColors.chipBg),
-                                    errorWidget: (context, url, error) =>
-                                        Container(
-                                      color: AppColors.chipBg,
-                                      child: const Icon(
-                                          Icons.image_not_supported_outlined,
-                                          color: AppColors.textMuted),
-                                    ),
-                                  ),
-                                  // Smooth Gradient Masking (Vignette) for seamless blend
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        colors: [
-                                          Colors.transparent,
-                                          Theme.of(context)
-                                              .scaffoldBackgroundColor
-                                              .withValues(alpha: 0.5),
-                                          Theme.of(context)
-                                              .scaffoldBackgroundColor,
-                                        ],
-                                        stops: const [0.6, 0.9, 1.0],
+                              active: widget.isCurrent,
+                              onTap: widget.onTap)
+                          : article.isVideo
+                              ? NewsArticleVideoPlayer(
+                                  article: article,
+                                  isCurrent: widget.isCurrent,
+                                  onDoubleTap: () {
+                                    HapticFeedback.mediumImpact();
+                                    if (!AppState.instance.isLoggedIn) {
+                                      requireAuth(context, () {});
+                                      return;
+                                    }
+                                    if (!AppState.instance.likedItemIds
+                                        .contains(article.id)) {
+                                      AppState.instance.toggleLike(article.id);
+                                    }
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Liked story ❤️'),
+                                        duration: Duration(milliseconds: 900),
                                       ),
-                                    ),
-                                  ),
-                                  // Multi-media Indicator (If multiple photos/videos)
-                                  if (article.mediaItems.length > 1)
-                                    Positioned(
-                                      bottom: 32,
-                                      left: 16,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
+                                    );
+                                  },
+                                )
+                              : GestureDetector(
+                                  onTap: widget.onTap,
+                                  onDoubleTap: () {
+                                    HapticFeedback.mediumImpact();
+                                    if (!AppState.instance.isLoggedIn) {
+                                      requireAuth(context, () {});
+                                      return;
+                                    }
+                                    if (!AppState.instance.likedItemIds
+                                        .contains(article.id)) {
+                                      AppState.instance.toggleLike(article.id);
+                                    }
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Liked story ❤️'),
+                                        duration: Duration(milliseconds: 900),
+                                      ),
+                                    );
+                                  },
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      CachedNetworkImage(
+                                        imageUrl:
+                                            (article.mediaItems.isNotEmpty &&
+                                                    article.mediaItems.first.url
+                                                        .isNotEmpty)
+                                                ? article.mediaItems.first.url
+                                                : article.imageUrl,
+                                        fit: BoxFit.cover,
+                                        memCacheWidth: 480,
+                                        memCacheHeight: 480,
+                                        maxWidthDiskCache: 800,
+                                        maxHeightDiskCache: 800,
+                                        placeholder: (context, url) =>
+                                            Container(color: AppColors.chipBg),
+                                        errorWidget: (context, url, error) =>
+                                            Container(
+                                          color: AppColors.chipBg,
+                                          child: const Icon(
+                                              Icons
+                                                  .image_not_supported_outlined,
+                                              color: AppColors.textMuted),
+                                        ),
+                                      ),
+                                      // Smooth Gradient Masking (Vignette) for seamless blend
+                                      Container(
                                         decoration: BoxDecoration(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.6),
-                                          borderRadius:
-                                              BorderRadius.circular(10),
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.transparent,
+                                              Theme.of(context)
+                                                  .scaffoldBackgroundColor
+                                                  .withValues(alpha: 0.5),
+                                              Theme.of(context)
+                                                  .scaffoldBackgroundColor,
+                                            ],
+                                            stops: const [0.6, 0.9, 1.0],
+                                          ),
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                                Icons.photo_library_rounded,
-                                                size: 12,
-                                                color: Colors.white),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              '${article.mediaItems.length}',
-                                              style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold),
+                                      ),
+                                      // Multi-media Indicator (If multiple photos/videos)
+                                      if (article.mediaItems.length > 1)
+                                        Positioned(
+                                          bottom: 32,
+                                          left: 16,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.6),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
                                             ),
-                                          ],
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                    Icons.photo_library_rounded,
+                                                    size: 12,
+                                                    color: Colors.white),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${article.mediaItems.length}',
+                                                  style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.bold),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      // Logo Watermark (Bottom-Right of Image)
+                                      Positioned(
+                                        bottom: 32,
+                                        right: 16,
+                                        child: Opacity(
+                                          opacity: 0.8,
+                                          child: Image.asset(
+                                            'assets/images/logo.png',
+                                            width: 38,
+                                            height: 38,
+                                            fit: BoxFit.contain,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  // Logo Watermark (Bottom-Right of Image)
-                                  Positioned(
-                                    bottom: 32,
-                                    right: 16,
-                                    child: Opacity(
-                                      opacity: 0.8,
-                                      child: Image.asset(
-                                        'assets/images/logo.png',
-                                        width: 38,
-                                        height: 38,
-                                        fit: BoxFit.contain,
-                                      ),
-                                    ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            ),
+                                ),
                     ),
                   ),
                 ),

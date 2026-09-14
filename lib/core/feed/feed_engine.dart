@@ -5,6 +5,7 @@ import '../../models/category.dart';
 import '../../models/poll.dart';
 import '../../models/live_news.dart';
 import 'feed_block.dart';
+import '../ads/ad_insertion.dart';
 
 /// Configuration for feed composition and progressive hydration.
 class FeedEngineConfig {
@@ -171,48 +172,18 @@ class FeedEngine {
     required List<AdBanner> adPool,
     int startIndex = 0,
   }) {
-    final result = <FeedBlock>[];
-    if (articles.isEmpty) return result;
-
-    if (adPool.isEmpty) {
-      for (int i = 0; i < articles.length; i++) {
-        result.add(ArticleBlock(
-          article: articles[i],
-          stableKey: 'article_${articles[i].id}_${startIndex + i}',
-        ));
-      }
-      return result;
-    }
-
-    int articleCounter = startIndex;
-    int adPoolIndex = 0;
-
-    for (int i = 0; i < articles.length; i++) {
-      final article = articles[i];
-      result.add(ArticleBlock(
-        article: article,
-        stableKey: 'article_${article.id}_${startIndex + i}',
-      ));
-      articleCounter++;
-
-      final shouldInsertAd =
-          articleCounter >= config.minArticlesBeforeFirstAd &&
-              articleCounter % config.defaultAdFrequency == 0;
-
-      if (shouldInsertAd && adPool.isNotEmpty) {
-        final ad = adPool[adPoolIndex % adPool.length];
-        adPoolIndex++;
-        final exposureKey =
-            'feed_ad_${ad.id}_after_art_${article.id}_pos_$articleCounter';
-        result.add(AdBlock(
-          ad: ad,
-          exposureKey: exposureKey,
-          placementZone: 'feed',
-        ));
-      }
-    }
-
-    return result;
+    return insertAdsIntoFeed<NewsArticle>(
+      contentItems: articles,
+      eligibleAds: adPool,
+      contentKey: (article) => '${article.contentKind}:${article.id}',
+    )
+        .map<FeedBlock>((item) => item.isAd
+            ? AdBlock(
+                ad: item.ad!,
+                exposureKey: item.stableKey,
+                placementZone: 'feed')
+            : ArticleBlock(article: item.content!, stableKey: item.stableKey))
+        .toList();
   }
 
   HyperLocalBlock _buildVillageBlock(String name, List<NewsArticle> articles) {

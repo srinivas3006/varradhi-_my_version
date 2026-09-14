@@ -380,6 +380,9 @@ class FeedRepository {
         pageSize: pageSize,
       );
 
+      if (response.hasErrors) {
+        throw ApiException(response.errorMessage ?? 'Unable to load the next page.');
+      }
       final newArticles = response.data ?? [];
       final seen = _seenIdsPerKey.putIfAbsent(key, () => currentState.items.map((e) => e.id).toSet());
 
@@ -409,6 +412,7 @@ class FeedRepository {
         status: FeedStatus.success,
         items: combined,
         nextCursor: newCursor,
+        clearCursor: newCursor == null,
         hasMore: hasMore,
       );
     } catch (e) {
