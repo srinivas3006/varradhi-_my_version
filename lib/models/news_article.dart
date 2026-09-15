@@ -20,7 +20,7 @@ class NewsArticle {
   final String category;
   final DateTime publishedAt;
   int likes;
-  final int comments;
+  int comments;
   final int shares;
   final int readTimeMinutes;
   final int viewCount;
@@ -395,8 +395,9 @@ String _resolveVideoUrl(Map<dynamic, dynamic> json) {
       mediaType: json['media_type']?.toString().toLowerCase() ?? '',
       url: mediaUrl,
       thumbnailUrl: '');
-  if (mediaUrl.isNotEmpty && (candidate.isVideo || json['type'] == 'live'))
+  if (mediaUrl.isNotEmpty && (candidate.isVideo || json['type'] == 'live')) {
     return mediaUrl;
+  }
   return '';
 }
 

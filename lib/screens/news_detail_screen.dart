@@ -118,20 +118,25 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     });
 
     try {
-      if (AppState.instance.isLoggedIn) {
-        final res = await ApiService.instance.postArticleReaction(
-          targetId,
-          isNowLiked ? 'like' : 'none',
-        );
-        if (mounted && res.containsKey('like_count')) {
-          setState(() {
-            article.likes =
-                (res['like_count'] as num?)?.toInt() ?? article.likes;
-          });
-        }
+      final res = await ApiService.instance.postArticleReaction(
+        targetId,
+        isNowLiked ? 'like' : 'none',
+      );
+      if (mounted && res.containsKey('like_count')) {
+        setState(() {
+          article.likes =
+              (res['like_count'] as num?)?.toInt() ?? article.likes;
+        });
       }
     } catch (e) {
       debugPrint('[NewsDetailScreen] Could not sync reaction to backend: $e');
+      if (mounted) {
+        AppState.instance.setReaction(targetId, isCurrentlyLiked ? 'like' : 'none');
+        setState(() {
+          article.isLiked = isCurrentlyLiked;
+          article.likes = prevLikes;
+        });
+      }
     } finally {
       _isTogglingLike = false;
     }

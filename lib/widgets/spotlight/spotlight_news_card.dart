@@ -43,7 +43,6 @@ class SpotlightNewsCard extends StatefulWidget {
 }
 
 class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
-  bool _isDisliked = false;
   bool _isLoadingDetail = false;
   String? _detailError;
   NewsArticle? _detailArticle;
@@ -744,12 +743,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    final isLiked = AppState
-                                            .instance.likedItemIds
-                                            .contains(targetId) ||
+                                    final isLiked = AppState.instance.isLiked(targetId) ||
                                         (article.id.isNotEmpty &&
-                                            AppState.instance.likedItemIds
-                                                .contains(article.id));
+                                            AppState.instance.isLiked(article.id));
                                     return _buildActionIcon(
                                       icon: isLiked
                                           ? Icons.thumb_up_rounded
@@ -760,76 +756,152 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       label: _formatCount(
                                           article.likes + (isLiked ? 1 : 0)),
                                       onTap: () async {
+                                        final messenger = ScaffoldMessenger.of(context);
                                         HapticFeedback.lightImpact();
-                                        final nowLiked = !isLiked;
-                                        AppState.instance.toggleLike(targetId);
+                                        final wasLiked = isLiked;
+                                        final nextReaction = wasLiked ? 'none' : 'like';
+
+                                        // 1. Optimistic local update
+                                        AppState.instance.setReaction(targetId, nextReaction);
+                                        final prevLikes = article.likes;
                                         setState(() {
-                                          if (nowLiked) {
-                                            _isDisliked = false;
+                                          article.isLiked = (nextReaction == 'like');
+                                          if (nextReaction == 'like') {
+                                            article.likes = wasLiked ? prevLikes : prevLikes + 1;
+                                          } else {
+                                            article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
                                           }
                                         });
-                                        if (AppState.instance.isLoggedIn) {
-                                          ApiService.instance
-                                              .postArticleReaction(
-                                                targetId,
-                                                nowLiked ? 'like' : 'none',
-                                              )
-                                              .catchError(
-                                                  (_) => <String, dynamic>{});
+
+                                        // 2. Sync to backend (guest or authenticated)
+                                        try {
+                                          final res = await ApiService.instance.postArticleReaction(
+                                            targetId,
+                                            nextReaction,
+                                          );
+                                          if (mounted && res['like_count'] != null) {
+                                            setState(() {
+                                              article.likes = (res['like_count'] as num).toInt();
+                                            });
+                                          }
+                                        } catch (e) {
+                                          debugPrint('[SpotlightNewsCard] Like sync failed: $e');
+                                          if (mounted) {
+                                            AppState.instance.setReaction(targetId, wasLiked ? 'like' : 'none');
+                                            setState(() {
+                                              article.isLiked = wasLiked;
+                                              article.likes = prevLikes;
+                                            });
+                                            messenger.removeCurrentSnackBar();
+                                            messenger.showSnackBar(
+                                              SnackBar(
+                                                content: Text(AppState.instance.language == 'Telugu'
+                                                    ? 'స్పందనను నమోదు చేయలేకపోయాము. మళ్లీ ప్రయత్నించండి.'
+                                                    : 'Could not sync reaction. Please try again.'),
+                                                duration: const Duration(seconds: 2),
+                                                behavior: SnackBarBehavior.floating,
+                                              ),
+                                            );
+                                          }
                                         }
                                       },
                                     );
                                   },
                                 ),
                                 // Dislike
-                                _buildActionIcon(
-                                  icon: _isDisliked
-                                      ? Icons.thumb_down_rounded
-                                      : Icons.thumb_down_alt_outlined,
-                                  color: _isDisliked
-                                      ? Colors.redAccent
-                                      : AppColors.textMuted,
-                                  label: '',
-                                  onTap: () async {
-                                    HapticFeedback.lightImpact();
+                                AnimatedBuilder(
+                                  animation: AppState.instance,
+                                  builder: (context, _) {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    final nowDisliked = !_isDisliked;
-                                    setState(() {
-                                      _isDisliked = nowDisliked;
-                                      if (nowDisliked &&
-                                          (AppState.instance.isLiked(targetId) ||
-                                              AppState.instance
-                                                  .isLiked(article.id))) {
-                                        AppState.instance.toggleLike(targetId);
-                                      }
-                                    });
-                                    if (AppState.instance.isLoggedIn) {
-                                      ApiService.instance
-                                          .postArticleReaction(
+                                    final isDisliked = AppState.instance.isDisliked(targetId) ||
+                                        (article.id.isNotEmpty &&
+                                            AppState.instance.isDisliked(article.id));
+                                    final isLiked = AppState.instance.isLiked(targetId) ||
+                                        (article.id.isNotEmpty &&
+                                            AppState.instance.isLiked(article.id));
+                                    return _buildActionIcon(
+                                      icon: isDisliked
+                                          ? Icons.thumb_down_rounded
+                                          : Icons.thumb_down_alt_outlined,
+                                      color: isDisliked
+                                          ? Colors.redAccent
+                                          : AppColors.textMuted,
+                                      label: '',
+                                      onTap: () async {
+                                        final messenger = ScaffoldMessenger.of(context);
+                                        HapticFeedback.lightImpact();
+                                        final wasDisliked = isDisliked;
+                                        final wasLiked = isLiked;
+                                        final nextReaction = wasDisliked ? 'none' : 'dislike';
+
+                                        // 1. Optimistic local update
+                                        AppState.instance.setReaction(targetId, nextReaction);
+                                        final prevLikes = article.likes;
+                                        setState(() {
+                                          if (wasLiked) {
+                                            article.isLiked = false;
+                                            article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
+                                          }
+                                        });
+
+                                        // 2. Sync to backend (guest or authenticated)
+                                        try {
+                                          final res = await ApiService.instance.postArticleReaction(
                                             targetId,
-                                            nowDisliked ? 'dislike' : 'none',
-                                          )
-                                          .catchError(
-                                              (_) => <String, dynamic>{});
-                                    }
-                                    ScaffoldMessenger.of(context)
-                                        .removeCurrentSnackBar();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(nowDisliked
-                                            ? (AppState.instance.language ==
-                                                    'Telugu'
-                                                ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
-                                                : 'Feedback received')
-                                            : (AppState.instance.language ==
-                                                    'Telugu'
-                                                ? 'డిస్‌లైక్ తీసివేయబడింది'
-                                                : 'Dislike removed')),
-                                        duration: const Duration(seconds: 1),
-                                        behavior: SnackBarBehavior.floating,
-                                      ),
+                                            nextReaction,
+                                          );
+                                          if (mounted && res['like_count'] != null) {
+                                            setState(() {
+                                              article.likes = (res['like_count'] as num).toInt();
+                                            });
+                                          }
+                                        } catch (e) {
+                                          debugPrint('[SpotlightNewsCard] Dislike sync failed: $e');
+                                          if (mounted) {
+                                            if (wasLiked) {
+                                              AppState.instance.setReaction(targetId, 'like');
+                                              setState(() {
+                                                article.isLiked = true;
+                                                article.likes = prevLikes;
+                                              });
+                                            } else if (wasDisliked) {
+                                              AppState.instance.setReaction(targetId, 'dislike');
+                                            } else {
+                                              AppState.instance.setReaction(targetId, 'none');
+                                            }
+                                            messenger.removeCurrentSnackBar();
+                                            messenger.showSnackBar(
+                                              SnackBar(
+                                                content: Text(AppState.instance.language == 'Telugu'
+                                                    ? 'స్పందనను నమోదు చేయలేకపోయాము. మళ్లీ ప్రయత్నించండి.'
+                                                    : 'Could not sync reaction. Please try again.'),
+                                                duration: const Duration(seconds: 2),
+                                                behavior: SnackBarBehavior.floating,
+                                              ),
+                                            );
+                                            return;
+                                          }
+                                        }
+
+                                        if (mounted) {
+                                          messenger.removeCurrentSnackBar();
+                                          messenger.showSnackBar(
+                                            SnackBar(
+                                              content: Text(nextReaction == 'dislike'
+                                                  ? (AppState.instance.language == 'Telugu'
+                                                      ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
+                                                      : 'Feedback received')
+                                                  : (AppState.instance.language == 'Telugu'
+                                                      ? 'డిస్‌లైక్ తీసివేయబడింది'
+                                                      : 'Dislike removed')),
+                                              duration: const Duration(seconds: 1),
+                                              behavior: SnackBarBehavior.floating,
+                                            ),
+                                          );
+                                        }
+                                      },
                                     );
                                   },
                                 ),

@@ -1,6 +1,6 @@
 // ignore_for_file: deprecated_member_use
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -47,6 +47,23 @@ class ShareService {
         '$webUrl';
   }
 
+  /// Pre-fetches the image bytes into memory so `Image.memory` paints synchronously
+  /// during off-screen screenshot capture.
+  static Future<Uint8List?> _fetchImageBytes(String url) async {
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 8);
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        return await consolidateHttpClientResponseBytes(response);
+      }
+    } catch (e) {
+      debugPrint('[ShareService] Failed to pre-fetch image bytes: $e');
+    }
+    return null;
+  }
+
   /// Captures an off-screen branded widget and shares it via the native share sheet.
   /// One-tap guarded: ignores rapid duplicate taps while processing.
   static Future<void> shareArticle(NewsArticle article) async {
@@ -66,23 +83,29 @@ class ShareService {
       final hasValidImage = normalizedUrl.isNotEmpty &&
           (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://'));
 
-      // If valid image exists, generate the branded watermark card image
+      Uint8List? imageBytes;
       if (hasValidImage) {
+        imageBytes = await _fetchImageBytes(normalizedUrl);
+      }
+
+      // If valid image exists and bytes downloaded, generate the branded watermark card image
+      if (imageBytes != null && imageBytes.isNotEmpty) {
         try {
-          final Uint8List imageBytes =
+          final Uint8List cardBytes =
               await _screenshotController.captureFromWidget(
             _WatermarkShareCard(
               article: article,
-              resolvedImageUrl: normalizedUrl,
+              imageBytes: imageBytes,
             ),
-            delay: const Duration(milliseconds: 150),
+            targetSize: const Size(1200, 675),
+            delay: const Duration(milliseconds: 100),
           );
 
-          if (imageBytes.isNotEmpty) {
+          if (cardBytes.isNotEmpty) {
             final tempDir = await getTemporaryDirectory();
             final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
             final file = await File('${tempDir.path}/vaaradhi_share_$safeId.png').create();
-            await file.writeAsBytes(imageBytes);
+            await file.writeAsBytes(cardBytes);
 
             final shareText = buildShareText(article);
             await Share.shareXFiles(
@@ -116,50 +139,41 @@ class ShareService {
   }
 }
 
-/// The off-screen widget representing the exact image with bottom logo watermark banner.
-/// Uses 16:9 news standard aspect ratio with a sleek gradient bottom watermark.
+/// The off-screen widget representing the article image with a bottom logo watermark banner.
+/// Standard 16:9 aspect ratio (1200x675) optimized for WhatsApp and social previews.
 class _WatermarkShareCard extends StatelessWidget {
   final NewsArticle article;
-  final String resolvedImageUrl;
+  final Uint8List imageBytes;
 
   const _WatermarkShareCard({
     required this.article,
-    required this.resolvedImageUrl,
+    required this.imageBytes,
   });
 
   @override
   Widget build(BuildContext context) {
     return Directionality(
       textDirection: TextDirection.ltr,
-      child: Container(
-        width: 1080,
-        height: 1080, // High-definition 1080x1080 social card
-        color: const Color(0xFF0F172A),
+      child: SizedBox(
+        width: 1200,
+        height: 675,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. Full Image Background (Main visual)
-            Image.network(
-              resolvedImageUrl,
+            // 1. Article Image (Full Background)
+            Image.memory(
+              imageBytes,
+              width: 1200,
+              height: 675,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) => Container(
-                color: const Color(0xFF1E293B),
-                child: const Center(
-                  child: Icon(
-                    Icons.image_not_supported_outlined,
-                    color: Colors.white54,
-                    size: 120,
-                  ),
-                ),
-              ),
             ),
 
-            // 2. Dark Vignette Gradient on bottom for high-contrast watermark readability
+            // 2. Subtle Bottom Shadow Vignette
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              height: 240,
+              height: 180,
               child: Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
@@ -175,14 +189,23 @@ class _WatermarkShareCard extends StatelessWidget {
               ),
             ),
 
-            // 3. Bottom Logo Watermark Bar
+            // 3. Bottom Watermark Bar with Logo, Branding, and Download CTA
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 28),
-                color: const Color(0xE6111827), // Sleek semi-translucent dark slate
+                height: 110,
+                padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0xF20B1120), // Dark translucent slate
+                  border: Border(
+                    top: BorderSide(
+                      color: Color(0x33FFFFFF),
+                      width: 1.5,
+                    ),
+                  ),
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -191,71 +214,73 @@ class _WatermarkShareCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                       child: Image.asset(
                         'assets/images/logo.png',
-                        width: 72,
-                        height: 72,
+                        width: 76,
+                        height: 76,
                         fit: BoxFit.cover,
                       ),
                     ),
-                    const SizedBox(width: 24),
+                    const SizedBox(width: 20),
 
-                    // Brand Name & Tagline
+                    // Brand Title & Tagline
                     const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 'Vaaradhi',
                                 style: TextStyle(
-                                  fontSize: 40,
+                                  fontSize: 34,
                                   fontWeight: FontWeight.w900,
                                   color: Colors.white,
-                                  fontFamily: 'Roboto',
                                   letterSpacing: 0.5,
                                 ),
                               ),
-                              SizedBox(width: 14),
+                              SizedBox(width: 12),
                               Text(
                                 '• వారధి',
                                 style: TextStyle(
-                                  fontSize: 34,
+                                  fontSize: 28,
                                   fontWeight: FontWeight.w700,
-                                  color: Color(0xFFFED915), // Brand Accent Yellow
-                                  fontFamily: 'NotoSansTelugu',
+                                  color: Color(0xFFFF4726),
                                 ),
                               ),
                             ],
                           ),
-                          SizedBox(height: 6),
+                          SizedBox(height: 4),
                           Text(
                             'నిజమైన వార్తలకు నిలువెత్తు వారధి',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w500,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
                               color: Color(0xFFCBD5E1),
-                              fontFamily: 'NotoSansTelugu',
                             ),
                           ),
                         ],
                       ),
                     ),
 
+                    const SizedBox(width: 16),
+
                     // App Store Download Badge CTA
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 26,
+                        horizontal: 24,
                         vertical: 14,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF2300), // AppColors.primary
-                        borderRadius: BorderRadius.circular(36),
+                        color: const Color(0xFFFF2300),
+                        borderRadius: BorderRadius.circular(32),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x66FF2300),
-                            blurRadius: 16,
-                            offset: Offset(0, 6),
+                            blurRadius: 14,
+                            offset: Offset(0, 4),
                           ),
                         ],
                       ),
@@ -265,16 +290,16 @@ class _WatermarkShareCard extends StatelessWidget {
                           Icon(
                             Icons.download_rounded,
                             color: Colors.white,
-                            size: 32,
+                            size: 28,
                           ),
-                          SizedBox(width: 10),
+                          SizedBox(width: 8),
                           Text(
                             'Get App',
                             style: TextStyle(
-                              fontSize: 26,
+                              fontSize: 22,
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
-                              fontFamily: 'Roboto',
+                              letterSpacing: 0.3,
                             ),
                           ),
                         ],

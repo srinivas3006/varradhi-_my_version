@@ -115,6 +115,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
         _commentController.clear();
         _focusNode.unfocus();
+        widget.article.comments++;
+        final targetId = widget.article.id.isNotEmpty
+            ? widget.article.id
+            : widget.article.slug;
+        if (targetId.isNotEmpty) {
+          AppState.instance.userAddedComments[targetId] =
+              (AppState.instance.userAddedComments[targetId] ?? 0) + 1;
+        }
         AppState.instance.setComments(widget.article.id, _comments);
 
         ScaffoldMessenger.of(context).showSnackBar(
