@@ -3,6 +3,7 @@ import '../../data/models/admin_ugc_status.dart';
 import '../../data/models/admin_ugc_submission_model.dart';
 import '../controllers/admin_ugc_detail_controller.dart';
 import '../theme/admin_colors.dart';
+import '../widgets/admin_access_guard.dart';
 import '../widgets/admin_media_viewer.dart';
 import '../widgets/admin_section_label.dart';
 import '../widgets/admin_trust_badge.dart';
@@ -26,7 +27,9 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _controller.loadDetail();
+    // Skip the fetch for non-admins; the guard below shows the refusal
+    // instead, and the call would only come back 403.
+    if (hasAdminConsoleAccess) _controller.loadDetail();
   }
 
   @override
@@ -50,6 +53,8 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (!hasAdminConsoleAccess) return const AdminAccessDenied();
 
     return AnimatedBuilder(
       animation: _controller,

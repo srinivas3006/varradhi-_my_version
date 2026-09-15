@@ -4,6 +4,7 @@ enum NotificationTargetType {
   category,
   poster,
   ugc,
+  admin,
   screen,
   unknown,
 }
@@ -81,6 +82,26 @@ class NotificationTarget {
       screenName: action,
       notificationId: notificationId,
       requiresAuth: requiresAuth,
+      originalPayload: originalPayload,
+    );
+  }
+
+  /// Moderation console destination, e.g. `/admin/ugc/reports` or
+  /// `/admin/ugc/{id}` — the paths the admin backend sends when a submission
+  /// needs review. Always [requiresAuth]; the console additionally checks
+  /// admin role at dispatch, since being signed in is not enough.
+  factory NotificationTarget.admin({
+    String? section, // 'queue' | 'reports' | 'logs' | 'otp'
+    String? submissionId,
+    String? notificationId,
+    Map<String, dynamic>? originalPayload,
+  }) {
+    return NotificationTarget(
+      type: NotificationTargetType.admin,
+      identifier: submissionId,
+      screenName: section,
+      notificationId: notificationId,
+      requiresAuth: true,
       originalPayload: originalPayload,
     );
   }

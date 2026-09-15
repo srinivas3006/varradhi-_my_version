@@ -89,12 +89,13 @@ class NotificationDeepLinkResolver {
 
     // 4. Handle relative paths like "/article/slug" or "/category/slug"
     if (trimmed.startsWith('/')) {
-      if (segments.length >= 2) {
-        final type = segments[0].toLowerCase();
-        final id = segments[1];
+      if (segments.isNotEmpty) {
+        // Forward every remaining segment: multi-segment paths like
+        // "/admin/ugc/reports" and "/ugc/reporter/dashboard" need more than
+        // the first one, and each case below validates what it receives.
         return _resolveSegments(
-          type: type,
-          segments: [id],
+          type: segments[0].toLowerCase(),
+          segments: segments.sublist(1),
           notificationId: notificationId,
           originalPayload: originalPayload,
           rawUri: trimmed,
@@ -203,6 +204,20 @@ class NotificationDeepLinkResolver {
       }
     }
 
+    // Admin moderation target. Checked before plain UGC so a moderation
+    // alert opens the console rather than the public submission view.
+    if (contentType == 'admin' || contentType == 'admin_ugc') {
+      final section = data['admin_section']?.toString().toLowerCase();
+      final aId =
+          (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      return NotificationTarget.admin(
+        section: (aId == null || aId.isEmpty) ? (section ?? 'queue') : section,
+        submissionId: aId,
+        notificationId: notificationId,
+        originalPayload: data,
+      );
+    }
+
     // UGC target
     if (contentType == 'ugc') {
       final uId =
@@ -302,6 +317,35 @@ class NotificationDeepLinkResolver {
           action: action,
           notificationId: notificationId,
           requiresAuth: action != null,
+          originalPayload: originalPayload,
+        );
+
+      case 'admin':
+        // e.g. /admin/ugc, /admin/ugc/reports, /admin/ugc/logs, /admin/ugc/{id}
+        // — the paths the admin backend sends. Anything that is not a known
+        // section is read as a submission id.
+        if (segments.isEmpty || segments[0].toLowerCase() != 'ugc') {
+          break;
+        }
+        const sections = {'reports', 'logs', 'otp', 'queue'};
+        final tail = segments.length > 1 ? segments[1] : '';
+        if (tail.isEmpty) {
+          return NotificationTarget.admin(
+            section: 'queue',
+            notificationId: notificationId,
+            originalPayload: originalPayload,
+          );
+        }
+        if (sections.contains(tail.toLowerCase())) {
+          return NotificationTarget.admin(
+            section: tail.toLowerCase(),
+            notificationId: notificationId,
+            originalPayload: originalPayload,
+          );
+        }
+        return NotificationTarget.admin(
+          submissionId: tail,
+          notificationId: notificationId,
           originalPayload: originalPayload,
         );
 

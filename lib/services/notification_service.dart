@@ -8,6 +8,10 @@ import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../core/navigation/notification_navigation_gate.dart';
+import '../features/admin/data/repositories/admin_ugc_repository.dart';
+import '../features/admin/presentation/screens/admin_ugc_detail_screen.dart';
+import '../features/admin/presentation/screens/admin_ugc_screen.dart';
+import '../features/admin/presentation/widgets/admin_access_guard.dart';
 import '../models/notification_target.dart';
 import '../models/news_article.dart';
 import '../repositories/news_article_repository.dart';
@@ -480,6 +484,72 @@ class NotificationService {
           }
           break;
 
+        case NotificationTargetType.admin:
+          // Being signed in is not enough: a forwarded moderation link must
+          // not open the console for an ordinary reader.
+          if (!hasAdminConsoleAccess) {
+            debugPrint(
+                '[NotificationService] Admin target refused for non-admin: $target');
+            ScaffoldMessenger.of(navContext)
+              ..removeCurrentSnackBar()
+              ..showSnackBar(
+                const SnackBar(
+                  content: Text('ఈ లింక్ అడ్మిన్ ఖాతాలకు మాత్రమే.'),
+                  behavior: SnackBarBehavior.floating,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            break;
+          }
+
+          final submissionId = target.identifier;
+          if (submissionId != null && submissionId.isNotEmpty) {
+            // The detail screen needs the full submission, so fetch before
+            // pushing rather than opening an empty shell.
+            _showLoadingIndicator(navContext);
+            try {
+              final submission = await AdminUgcRepository()
+                  .getSubmissionDetail(submissionId)
+                  .timeout(const Duration(seconds: 10));
+
+              _dismissLoadingIndicator();
+
+              if (navContext.mounted) {
+                await AppNavigator.pushSafe(
+                  navContext,
+                  MaterialPageRoute(
+                    builder: (_) => AdminUgcDetailScreen(initial: submission),
+                  ),
+                );
+              }
+            } catch (e) {
+              _dismissLoadingIndicator();
+              debugPrint(
+                  '[NotificationService] Admin submission load error for "$submissionId": $e');
+              if (navContext.mounted) {
+                ScaffoldMessenger.of(navContext)
+                  ..removeCurrentSnackBar()
+                  ..showSnackBar(
+                    const SnackBar(
+                      content: Text('ఈ సమర్పణ అందుబాటులో లేదు లేదా తొలగించబడింది.'),
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+              }
+            }
+            break;
+          }
+
+          await AppNavigator.pushSafe(
+            navContext,
+            MaterialPageRoute(
+              builder: (_) =>
+                  AdminUgcScreen(initialTab: _adminTabFor(target.screenName)),
+            ),
+          );
+          break;
+
         case NotificationTargetType.screen:
           switch (target.screenName?.toLowerCase()) {
             case 'bookmarks':
@@ -517,6 +587,20 @@ class NotificationService {
       debugPrint('[NotificationService] Error routing notification target: $e');
     } finally {
       NotificationNavigationGate.instance.releaseDispatchLock();
+    }
+  }
+
+  /// Maps an `/admin/ugc/<section>` deep link onto a console tab.
+  int _adminTabFor(String? section) {
+    switch (section?.toLowerCase()) {
+      case 'reports':
+        return AdminConsoleTab.reports;
+      case 'logs':
+        return AdminConsoleTab.logs;
+      case 'otp':
+        return AdminConsoleTab.otp;
+      default:
+        return AdminConsoleTab.queue;
     }
   }
 
