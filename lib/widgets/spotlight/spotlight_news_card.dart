@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/navigation/auth_guard.dart';
 import '../../services/tts_service.dart';
@@ -336,7 +337,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
               child: Opacity(
                 opacity: textOpacity.clamp(0.0, 1.0),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -565,19 +566,19 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                       ),
                       const SizedBox(height: 14),
 
-                      // Headline
+                      // Headline with Noto Sans Telugu shaping
                       Transform.translate(
                         offset: Offset(0, headlineOffset),
                         child: Text(
                           article.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 23,
+                          style: GoogleFonts.notoSansTelugu(
+                            fontSize: 22,
                             fontWeight: FontWeight.w800,
                             color: isDark ? Colors.white : Colors.black87,
-                            height: 1.25,
-                            letterSpacing: -0.5,
+                            height: 1.38,
+                            letterSpacing: 0.0,
                           ),
                         ),
                       ),
@@ -620,17 +621,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                             return LayoutBuilder(
                               builder: (context, constraints) {
-                                final textStyle = TextStyle(
-                                  fontSize: 15.5,
+                                final textStyle = GoogleFonts.notoSansTelugu(
+                                  fontSize: 16.5,
                                   color: isDark
-                                      ? Colors.white70
-                                      : AppColors.textDark
-                                          .withValues(alpha: 0.88),
-                                  height: 1.55,
-                                  letterSpacing: 0.1,
+                                      ? Colors.white.withValues(alpha: 0.88)
+                                      : const Color(0xFF2C2C2E),
+                                  height: 1.68,
+                                  fontWeight: FontWeight.w400,
+                                  letterSpacing: 0.0,
                                 );
 
-                                // Line height based on font size and height factor (~24px)
+                                // Line height based on font size and height factor
                                 final double lineHeight =
                                     textStyle.fontSize! * textStyle.height!;
                                 const double reservedForButton = 44.0;
@@ -672,7 +673,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       toShow,
                                       maxLines: dynamicMaxLines,
                                       overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.justify,
+                                      textAlign: TextAlign.start,
                                       style: textStyle,
                                     ),
                                     if (shouldShowReadMore) ...[

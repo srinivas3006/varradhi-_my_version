@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
@@ -257,8 +258,9 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     child: AnimatedBuilder(
                       animation: _heartController,
                       builder: (context, child) {
-                        if (_heartOpacity.value == 0.0)
+                        if (_heartOpacity.value == 0.0) {
                           return const SizedBox.shrink();
+                        }
                         return Opacity(
                           opacity: _heartOpacity.value,
                           child: Transform.scale(
@@ -354,11 +356,12 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     article.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16.5,
+                    style: GoogleFonts.notoSansTelugu(
+                      fontSize: 16.0,
                       fontWeight: FontWeight.w700,
                       color: AppColors.textDark,
-                      height: 1.25,
+                      height: 1.35,
+                      letterSpacing: 0.0,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -369,10 +372,12 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                             ? article.summary.trim()
                             : article.body.trim();
 
-                        const textStyle = TextStyle(
-                          fontSize: 13.0,
+                        final textStyle = GoogleFonts.notoSansTelugu(
+                          fontSize: 13.5,
                           color: AppColors.textMuted,
-                          height: 1.35,
+                          height: 1.55,
+                          fontWeight: FontWeight.w400,
+                          letterSpacing: 0.0,
                         );
 
                         final double lineHeight =
@@ -409,6 +414,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                                 toShow,
                                 maxLines: dynamicMaxLines,
                                 overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.start,
                                 style: textStyle,
                               ),
                             ),
