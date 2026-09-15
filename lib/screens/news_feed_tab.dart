@@ -135,11 +135,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final queryIdentity = _feedLocationKey;
     try {
       final list = await ApiService.instance.getLiveNews();
-      if (mounted && queryIdentity == _feedLocationKey)
+      if (mounted && queryIdentity == _feedLocationKey) {
         setState(() => _liveNewsList = list);
+      }
     } catch (_) {
-      if (mounted && queryIdentity == _feedLocationKey)
+      if (mounted && queryIdentity == _feedLocationKey) {
         setState(() => _liveNewsList = []);
+      }
     }
   }
 
@@ -481,8 +483,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final queryIdentity = _feedLocationKey;
     try {
       final polls = await ApiService.instance.getPolls();
-      if (mounted && queryIdentity == _feedLocationKey && polls.isNotEmpty)
+      if (mounted && queryIdentity == _feedLocationKey && polls.isNotEmpty) {
         setState(() => _poll = polls.first);
+      }
     } catch (_) {}
   }
 
@@ -490,8 +493,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final queryIdentity = _feedLocationKey;
     try {
       final posters = await ApiService.instance.getPosters();
-      if (mounted && queryIdentity == _feedLocationKey)
+      if (mounted && queryIdentity == _feedLocationKey) {
         setState(() => _posters = posters);
+      }
     } catch (_) {}
   }
 
@@ -901,144 +905,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  Widget _buildSpotlightHeroBanner() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF1E1B4B), const Color(0xFF311042)]
-              : [const Color(0xFF4338CA), const Color(0xFF7C3AED)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF4338CA).withValues(alpha: 0.25),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.15),
-          width: 1,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () {
-            AppNavigator.pushSafe(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const SpotlightScreen(isLocal: false),
-              ),
-            );
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.3),
-                      width: 1.5,
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.auto_awesome_rounded,
-                      color: Color(0xFFFDE047),
-                      size: 26,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Text(
-                              'స్పాట్‌లైట్',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'పూర్తి స్క్రీన్',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.8),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'స్పాట్‌లైట్ కథనాలు చదవండి',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'తాజా ముఖ్యాంశాలు స్వైప్ చేస్తూ వీక్షించండి',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildBreakingNewsSection(List<NewsArticle> breakingNews) {
     if (breakingNews.isEmpty) return const SizedBox.shrink();
@@ -1072,13 +939,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(28),
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: borderColor),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.15),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
+                        color: Colors.black.withValues(alpha: 0.12),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
                       ),
                     ],
                     image: article.imageUrl.isNotEmpty
@@ -1091,7 +958,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   ),
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(24),
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -1251,7 +1118,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             },
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         // Pagination Dots
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1261,8 +1128,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeOutCubic,
               margin: const EdgeInsets.symmetric(horizontal: 3),
-              height: 6,
-              width: isActive ? 24 : 6,
+              height: 5,
+              width: isActive ? 22 : 5,
               decoration: BoxDecoration(
                 color: isActive
                     ? AppColors.primary
@@ -1272,6 +1139,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             );
           }),
         ),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -1332,127 +1200,143 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     Color borderColor,
   ) {
     final article = item.content!;
-    return GestureDetector(
+    return Container(
       key: ValueKey(item.stableKey),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        AdManager.instance.recordContentInteraction();
-        AppNavigator.pushSafe(
-          context,
-          MaterialPageRoute(
-              builder: (_) =>
-                  NewsDetailScreen(article: article, slug: article.slug)),
-        );
-      },
-      child: Row(
-        children: [
-          Container(
-            width: 100,
-            height: 110,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              color: cardColor,
-              border: Border.all(color: borderColor),
-              image: article.imageUrl.isNotEmpty
-                  ? DecorationImage(
-                      image: CachedNetworkImageProvider(
-                        article.imageUrl,
-                        maxWidth: 300,
-                        maxHeight: 300,
-                      ),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            AdManager.instance.recordContentInteraction();
+            AppNavigator.pushSafe(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      NewsDetailScreen(article: article, slug: article.slug)),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    article.category.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.primary,
-                      letterSpacing: 1.0,
-                    ),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 96,
+                    height: 86,
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    child: article.imageUrl.isNotEmpty
+                        ? CachedNetworkImage(
+                            imageUrl: article.imageUrl,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 300,
+                            memCacheHeight: 300,
+                            placeholder: (_, __) => Container(
+                              color: Colors.grey.withValues(alpha: 0.1),
+                            ),
+                            errorWidget: (_, __, ___) => const Icon(
+                              Icons.broken_image_rounded,
+                              size: 28,
+                              color: Colors.grey,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.article_rounded,
+                            size: 32,
+                            color: Colors.grey,
+                          ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  article.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    height: 1.3,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                if (article.summary.trim().isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    article.summary.trim(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.location_on_outlined,
-                      size: 12,
-                      color: AppColors.primary,
-                    ),
-                    const SizedBox(width: 3),
-                    Flexible(
-                      child: Text(
-                        _locationLabelFor(article),
-                        maxLines: 1,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              article.category.toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.primary,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            Icons.access_time_rounded,
+                            size: 11,
+                            color: Theme.of(context).textTheme.bodySmall?.color,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            article.timeAgo,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color:
+                                  Theme.of(context).textTheme.bodySmall?.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        article.title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primary,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                          letterSpacing: -0.2,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.access_time_rounded,
-                      size: 12,
-                      color: Theme.of(context).textTheme.bodySmall?.color,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      article.timeAgo,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: Theme.of(context).textTheme.bodySmall?.color,
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 12,
+                            color: AppColors.primary,
+                          ),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              _locationLabelFor(article),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1491,12 +1375,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }) {
     if (articles.isEmpty && !showWhenEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(top: 18),
+      padding: const EdgeInsets.only(top: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Row(
               children: [
                 Icon(icon, size: 20, color: accent),
@@ -1525,26 +1409,30 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           if (articles.isEmpty)
             Container(
               width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
               decoration: BoxDecoration(
                 color: cardColor,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: borderColor),
               ),
               child: Text(
                 emptyMessage,
                 textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                ),
               ),
             )
           else
             ...articles.take(5).map(
                   (article) => Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
                     child: _buildFeedArticleCard(
                       FeedPresentationItem<NewsArticle>.content(
                         article,
@@ -1883,7 +1771,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       child: _buildCategorySelector(),
                                     ),
                                     _buildLiveSection(),
-                                    _buildSpotlightHeroBanner(),
                                     RepaintBoundary(
                                       child: _buildBreakingNewsSection(
                                           breakingNews),
@@ -1994,7 +1881,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                   itemCount: presentationItems.length +
                                       (_hasMore ? 1 : 0),
                                   separatorBuilder: (context, index) =>
-                                      const SizedBox(height: 16),
+                                      const SizedBox(height: 10),
                                   itemBuilder: (context, index) {
                                     if (index == presentationItems.length) {
                                       return const Center(

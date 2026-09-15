@@ -63,24 +63,32 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
   }
 
   void _resolveMediaSource() {
-    final previewUrl = widget.article.imageUrl.isNotEmpty
-        ? widget.article.imageUrl
-        : (widget.article.imageUrls != null &&
-                widget.article.imageUrls!.isNotEmpty
-            ? widget.article.imageUrls!.first
-            : '');
+    final effectiveVid = (widget.media?.url.isNotEmpty == true)
+        ? widget.media!.url
+        : widget.article.effectiveVideoUrl;
+
+    final previewUrl = (widget.media?.thumbnailUrl.isNotEmpty == true)
+        ? widget.media!.thumbnailUrl
+        : (widget.article.imageUrl.isNotEmpty
+            ? widget.article.imageUrl
+            : (widget.article.imageUrls != null &&
+                    widget.article.imageUrls!.isNotEmpty
+                ? widget.article.imageUrls!.first
+                : ''));
 
     _mediaSource = MediaResolver.resolve(
-      videoUrl: (widget.media?.url ?? widget.article.videoUrl),
-      thumbnailUrl: widget.media?.thumbnailUrl ?? previewUrl,
-      isVideoFlag: widget.media?.isVideo ?? widget.article.isVideo,
+      videoUrl: effectiveVid,
+      thumbnailUrl: previewUrl,
+      isVideoFlag: true,
     );
   }
 
   void _startPlayback() async {
-    if (!widget.isCurrent) return;
     HapticFeedback.mediumImpact();
-    if (_mediaSource == null || !_mediaSource!.isPlayable) return;
+    if (_mediaSource == null || !_mediaSource!.isPlayable) {
+      _resolveMediaSource();
+      if (_mediaSource == null || !_mediaSource!.isPlayable) return;
+    }
 
     SpotlightMediaCoordinator.instance.notifyVideoStarted(widget.article.id);
 
@@ -96,7 +104,6 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
       await ctrl.initialize();
       if (mounted &&
           _isPlaying &&
-          widget.isCurrent &&
           identical(ctrl, _playbackController)) {
         ctrl.play();
         setState(() {});
@@ -130,8 +137,9 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
       _stopPlayback();
     }
 
-    if ((oldWidget.media?.url ?? oldWidget.article.videoUrl) !=
-        (widget.media?.url ?? widget.article.videoUrl)) {
+    final oldVid = oldWidget.media?.url ?? oldWidget.article.effectiveVideoUrl;
+    final newVid = widget.media?.url ?? widget.article.effectiveVideoUrl;
+    if (oldVid != newVid) {
       _stopPlayback();
       _resolveMediaSource();
     }
@@ -234,6 +242,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
         fit: widget.fit,
         showControls: true,
         onRetry: _startPlayback,
+        onFullscreenToggle: widget.allowFullscreen ? _openFullscreen : null,
       ),
     );
   }

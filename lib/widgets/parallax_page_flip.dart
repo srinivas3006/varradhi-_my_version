@@ -23,6 +23,7 @@ class ParallaxPageFlip extends StatefulWidget {
   final ParallaxPageFlipBuilder itemBuilder;
   final int initialIndex;
   final ValueChanged<int>? onPageChanged;
+  final VoidCallback? onSwipeStart;
   final VoidCallback? onTap;
   final Duration flingDuration;
   final Duration matchCutDuration;
@@ -36,6 +37,7 @@ class ParallaxPageFlip extends StatefulWidget {
     required this.itemBuilder,
     this.initialIndex = 0,
     this.onPageChanged,
+    this.onSwipeStart,
     this.onTap,
     this.flingDuration = const Duration(milliseconds: 300),
     this.matchCutDuration = const Duration(milliseconds: 200),
@@ -123,6 +125,7 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip>
     if (_index < widget.itemCount - 1 &&
         !_dragCtrl.isAnimating &&
         !_matchCutCtrl.isAnimating) {
+      widget.onSwipeStart?.call();
       _direction = -1;
       _dragCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
     }
@@ -130,6 +133,7 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip>
 
   void previous() {
     if (_index > 0 && !_dragCtrl.isAnimating && !_matchCutCtrl.isAnimating) {
+      widget.onSwipeStart?.call();
       _direction = 1;
       _dragCtrl.animateTo(1.0, curve: Curves.easeOutCubic);
     }
@@ -148,8 +152,10 @@ class _ParallaxPageFlipState extends State<ParallaxPageFlip>
     if (_direction == 0) {
       if (dy < -4 && _index < widget.itemCount - 1) {
         _direction = -1; // next
+        widget.onSwipeStart?.call();
       } else if (dy > 4 && _index > 0) {
         _direction = 1; // prev
+        widget.onSwipeStart?.call();
       } else {
         return;
       }

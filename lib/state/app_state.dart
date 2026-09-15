@@ -646,7 +646,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleLike(String itemId) {
-    if (!isLoggedIn) return;
+    if (itemId.isEmpty) return;
     if (likedItemIds.contains(itemId)) {
       likedItemIds.remove(itemId);
     } else {
@@ -657,7 +657,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleBookmark(String itemId) {
-    if (!isLoggedIn) return;
+    if (itemId.isEmpty) return;
     if (bookmarkedItemIds.contains(itemId)) {
       bookmarkedItemIds.remove(itemId);
     } else {

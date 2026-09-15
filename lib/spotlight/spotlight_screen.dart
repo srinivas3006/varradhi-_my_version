@@ -6,7 +6,6 @@ import '../core/navigation/auth_guard.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
-import '../widgets/ads/unified_ad_widget.dart';
 import '../services/ad_delivery_service.dart';
 import '../widgets/parallax_page_flip.dart';
 import '../widgets/spotlight/spotlight_news_card.dart';
@@ -247,24 +246,17 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
       case SpotlightType.ad:
         if (item.adBanner == null) return const SizedBox();
-        child = item.adBanner!.isInterstitial || item.adBanner!.isFullScreen
-            ? SponsoredSpotlightAdCard(
-                key: ValueKey(item.id),
-                ad: item.adBanner!,
-                active: isCurrent,
-                exposureKey:
-                    'spotlight_${_controller.state.generation}_${item.id}',
-                onClose: () => _controller.removeAdAt(index),
-                durationSeconds: item.adBanner!.displayDurationSeconds,
-                placementZone: 'feed')
-            : Center(
-                child: UnifiedAdWidget(
-                    key: ValueKey(item.id),
-                    ad: item.adBanner!,
-                    placementZone: 'feed',
-                    exposureKey:
-                        'spotlight_${_controller.state.generation}_${item.id}',
-                    active: isCurrent));
+        child = SponsoredSpotlightAdCard(
+            key: ValueKey(item.id),
+            ad: item.adBanner!,
+            active: isCurrent,
+            exposureKey:
+                'spotlight_${_controller.state.generation}_${item.id}',
+            onClose: () => _controller.removeAdAt(index),
+            durationSeconds: item.adBanner!.displayDurationSeconds > 0
+                ? item.adBanner!.displayDurationSeconds
+                : 5,
+            placementZone: 'feed');
         break;
 
       case SpotlightType.poster:
@@ -757,6 +749,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                                   : 0,
                               itemCount: state.feed.length,
                               onPageChanged: _handlePageChanged,
+                              onSwipeStart: () {
+                                SpotlightMediaCoordinator.instance.stopAll();
+                                AppTtsService.instance.stop();
+                              },
                               onTap: _controller.toggleOverlay,
                               itemBuilder: _buildItem,
                             ),

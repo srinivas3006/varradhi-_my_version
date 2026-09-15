@@ -29,19 +29,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || AppState.instance.isLoggedIn) return;
-      requireAuth(context, () {
-        if (!mounted) return;
-        _fetchComments();
-        setState(() {});
-      });
-    });
-    if (AppState.instance.isLoggedIn) {
-      _fetchComments();
-    } else {
-      _isLoading = false;
-    }
+    _fetchComments();
   }
 
   Future<void> _fetchComments() async {
@@ -708,32 +696,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     );
   }
 
-  Widget _buildGuestCommentPrompt(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: OutlinedButton.icon(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-            ).then((_) => _fetchComments());
-          },
-          icon: const Icon(Icons.login_rounded, size: 18),
-          label: Text(tr('login_to_comment'),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.primary,
-            side: BorderSide(color: AppColors.primary.withValues(alpha: 0.35)),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          ),
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildCommentComposer(BuildContext context) {
     return Container(

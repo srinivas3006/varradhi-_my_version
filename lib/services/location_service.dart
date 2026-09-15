@@ -238,75 +238,121 @@ class LocationService {
           enableDrag: false,
           showDragHandle: true,
           useSafeArea: true,
-          builder: (sheetContext) => Padding(
-            padding: EdgeInsets.fromLTRB(
-              24,
-              8,
-              24,
-              MediaQuery.viewInsetsOf(sheetContext).bottom + 24,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.location_on_rounded,
-                      color: Theme.of(sheetContext).colorScheme.primary,
-                      size: 28,
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        'వార్తల ప్రాంతాన్ని నిర్ధారించండి',
-                        style: TextStyle(
-                            fontSize: 19, fontWeight: FontWeight.w800),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          builder: (sheetContext) => SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Theme.of(sheetContext)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.location_on_rounded,
+                          color: Theme.of(sheetContext).colorScheme.primary,
+                          size: 24,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  match.displayName,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'వారధి లొకేషన్ రికార్డులతో ధృవీకరించబడింది. వార్తా విభాగాలు ఈ పేర్లతోనే ప్రదర్శించబడతాయి.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.4,
-                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'వార్తల ప్రాంతాన్ని నిర్ధారించండి',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(sheetContext, false),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
-                        child: const Text('సవరించండి'),
-                      ),
+                  const SizedBox(height: 16),
+                  Text(
+                    match.displayName,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () => Navigator.pop(sheetContext, true),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                        ),
-                        icon: const Icon(Icons.check_rounded),
-                        label: const Text('ఈ ప్రాంతాన్ని ఎంచుకోండి'),
-                      ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'వారధి లొకేషన్ రికార్డులతో ధృవీకరించబడింది. వార్తా విభాగాలు ఈ పేర్లతోనే ప్రదర్శించబడతాయి.',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      height: 1.4,
+                      color:
+                          Theme.of(sheetContext).colorScheme.onSurfaceVariant,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetContext, false),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          child: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'సవరించండి',
+                              maxLines: 1,
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 3,
+                        child: FilledButton.icon(
+                          onPressed: () => Navigator.pop(sheetContext, true),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          icon: const Icon(Icons.check_rounded, size: 20),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'ఈ ప్రాంతాన్ని ఎంచుకోండి',
+                              maxLines: 1,
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ) ??

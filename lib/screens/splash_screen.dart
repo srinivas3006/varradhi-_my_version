@@ -3,14 +3,13 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
-import 'location_selection_screen.dart';
+import 'spotlight_screen.dart';
 import '../services/api_service.dart';
 import '../core/navigation/notification_navigation_gate.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/ad_manager.dart';
 import '../models/ad_banner.dart';
-import '../widgets/ads/unified_ad_widget.dart';
 import '../widgets/ads/ad_viewability_detector.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -112,9 +111,9 @@ class _SplashScreenState extends State<SplashScreen>
     _navigated = true;
 
     final hasPendingNotif = NotificationNavigationGate.instance.hasPendingTarget;
-    final Widget nextScreen = state.hasOnboarded
-        ? HomeScreen(openSpotlightOnStart: !hasPendingNotif)
-        : const LocationSelectionScreen();
+    final Widget nextScreen = hasPendingNotif
+        ? const HomeScreen(openSpotlightOnStart: false)
+        : const SpotlightScreen(isLocal: false);
 
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(

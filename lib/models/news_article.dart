@@ -140,12 +140,25 @@ class NewsArticle {
 
     final resolvedVideoUrl = _resolveVideoUrl(json);
 
+    // Safe list of media items
+    List<MediaItem> parsedMediaItems = [];
+    if (json['media_items'] is List) {
+      for (final item in (json['media_items'] as List)) {
+        if (item is Map<String, dynamic>) {
+          parsedMediaItems.add(MediaItem.fromJson(item));
+        }
+      }
+    }
+
     // Media type resolution
     final rawMediaType =
         json['media_type']?.toString().trim().toLowerCase() ?? '';
     final isVid = (rawMediaType == 'video') ||
+        rawMediaType.startsWith('video') ||
+        rawMediaType.contains('video') ||
         resolvedVideoUrl.isNotEmpty ||
-        json['is_video'] == true;
+        json['is_video'] == true ||
+        parsedMediaItems.any((m) => m.isVideo);
 
     final mediaType =
         isVid ? 'video' : (rawMediaType.isNotEmpty ? rawMediaType : 'image');
@@ -158,16 +171,6 @@ class NewsArticle {
       parsedCategory = json['category_name'].toString();
     } else if (json['category'] != null) {
       parsedCategory = json['category'].toString();
-    }
-
-    // Safe list of media items
-    List<MediaItem> parsedMediaItems = [];
-    if (json['media_items'] is List) {
-      for (final item in (json['media_items'] as List)) {
-        if (item is Map<String, dynamic>) {
-          parsedMediaItems.add(MediaItem.fromJson(item));
-        }
-      }
     }
 
     return NewsArticle(
@@ -213,11 +216,12 @@ class NewsArticle {
                   json['article']['hasMore'] == true)),
       coverageLevel:
           json['coverage_level']?.toString().toLowerCase() ?? 'global',
-      authorName: json['author_name']?.toString() ??
-          (json['author'] is Map ? json['author']['name']?.toString() : null) ??
-          json['source_name']?.toString() ??
-          json['source']?.toString() ??
-          'VARADHI Desk',
+      authorName: _sanitizeAuthor(
+        json['author_name']?.toString() ??
+            (json['author'] is Map ? json['author']['name']?.toString() : null) ??
+            json['source_name']?.toString() ??
+            json['source']?.toString(),
+      ),
       language:
           json['language']?.toString() ?? json['lang']?.toString() ?? 'te',
       isFeatured: json['is_featured'] == true,
@@ -236,19 +240,58 @@ class NewsArticle {
         : 'article';
   }
 
+  static String _sanitizeAuthor(String? raw) {
+    if (raw == null) return 'VARADHI Desk';
+    final trimmed = raw.trim();
+    final lower = trimmed.toLowerCase();
+    if (lower.isEmpty || lower.contains('john') || lower == 'null') {
+      return 'VARADHI Desk';
+    }
+    return trimmed;
+  }
+
+  /// Resolves the effective video URL whether at top-level or within media items.
+  String get effectiveVideoUrl {
+    if (videoUrl.isNotEmpty) return videoUrl;
+    for (final item in mediaItems) {
+      if (item.isVideo && item.url.isNotEmpty) return item.url;
+    }
+    return '';
+  }
+
   /// One parent record owns this ordered media list; it is never a feed list.
   List<MediaItem> get orderedMedia {
-    if (mediaItems.isNotEmpty) return mediaItems;
+    final effectiveVid = effectiveVideoUrl;
+    if (mediaItems.isNotEmpty) {
+      if (effectiveVid.isNotEmpty &&
+          !mediaItems.any((m) => m.isVideo || m.url == effectiveVid)) {
+        return [
+          MediaItem(
+            mediaType: 'video',
+            url: effectiveVid,
+            thumbnailUrl: imageUrl,
+            isPrimary: true,
+          ),
+          ...mediaItems,
+        ];
+      }
+      return mediaItems;
+    }
     final result = <MediaItem>[];
+    if (effectiveVid.isNotEmpty) {
+      result.add(MediaItem(
+        mediaType: 'video',
+        url: effectiveVid,
+        thumbnailUrl: imageUrl,
+        isPrimary: true,
+      ));
+    }
     for (final url in imageUrls ?? <String>[]) {
       if (url.isNotEmpty && !result.any((item) => item.url == url)) {
         result.add(MediaItem(mediaType: 'image', url: url, thumbnailUrl: url));
       }
     }
-    if (videoUrl.isNotEmpty) {
-      result.add(
-          MediaItem(mediaType: 'video', url: videoUrl, thumbnailUrl: imageUrl));
-    } else if (result.isEmpty && imageUrl.isNotEmpty) {
+    if (result.isEmpty && imageUrl.isNotEmpty) {
       result.add(
           MediaItem(mediaType: 'image', url: imageUrl, thumbnailUrl: imageUrl));
     }
@@ -258,7 +301,12 @@ class NewsArticle {
   bool get isUgc => contentKind == 'ugc';
 
   bool get isVideo =>
-      (mediaType == 'video' || videoUrl.isNotEmpty) && videoUrl.isNotEmpty;
+      (mediaType == 'video' ||
+          mediaType.startsWith('video') ||
+          mediaType.contains('video') ||
+          videoUrl.isNotEmpty ||
+          mediaItems.any((m) => m.isVideo)) &&
+      effectiveVideoUrl.isNotEmpty;
 
   String get formattedVideoDuration {
     if (videoDurationSeconds <= 0) return '';
@@ -395,8 +443,11 @@ class Comment {
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     final author = json['author'] as Map<String, dynamic>?;
-    final authorName =
+    var authorName =
         author?['display_name'] ?? json['username'] ?? 'Anonymous';
+    if (authorName.toString().toLowerCase().contains('john')) {
+      authorName = 'Reader';
+    }
     final authorId = author?['id']?.toString();
     final repliesList = (json['replies'] as List<dynamic>?)
             ?.map((r) => Comment.fromJson(r as Map<String, dynamic>))
@@ -454,9 +505,14 @@ class MediaItem {
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
-    final mType =
-        (json['media_type'] ?? json['type'])?.toString().toLowerCase() ??
-            'image';
+    final rawType =
+        (json['media_type'] ?? json['type'])?.toString().toLowerCase().trim() ??
+            '';
+    final mType = (rawType == 'video' ||
+            rawType.startsWith('video') ||
+            rawType.contains('video'))
+        ? 'video'
+        : (rawType.isNotEmpty ? rawType : 'image');
     final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
       json['youtube_video_id']?.toString() ?? json['youtube_url']?.toString(),
     );
@@ -500,10 +556,12 @@ class MediaItem {
       };
 
   bool get isVideo {
+    final m = mediaType.toLowerCase().trim();
+    if (m == 'video' || m.startsWith('video') || m.contains('video')) return true;
     final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
-    return mediaType == 'video' ||
-        const ['.mp4', '.m3u8', '.mov', '.webm', '.mkv', '.m4v']
+    return const ['.mp4', '.m3u8', '.mov', '.webm', '.mkv', '.m4v']
             .any(path.endsWith) ||
+        url.toLowerCase().contains('.mp4') ||
         MediaResolver.extractYoutubeVideoId(url) != null;
   }
 }

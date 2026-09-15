@@ -56,7 +56,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final slugToFetch = widget.article.slug.isNotEmpty
         ? widget.article.slug
         : widget.article.id;
-    if (slugToFetch.isNotEmpty && widget.article.contentKind == 'article') {
+    if (slugToFetch.isNotEmpty) {
       _fetchArticleDetail(slugToFetch);
     }
   }
@@ -70,14 +70,13 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       _detailArticle = null;
       _isLoadingDetail = false;
       _detailError = null;
-      if (widget.article.contentKind == 'article') {
-        final slug = widget.article.slug.isNotEmpty
-            ? widget.article.slug
-            : widget.article.id;
-        if (slug.isNotEmpty) _fetchArticleDetail(slug);
-      }
+      final slug = widget.article.slug.isNotEmpty
+          ? widget.article.slug
+          : widget.article.id;
+      if (slug.isNotEmpty) _fetchArticleDetail(slug);
     }
-    if (oldWidget.isCurrent && !widget.isCurrent) {
+    if ((oldWidget.isCurrent && !widget.isCurrent) ||
+        (widget.isCurrent && widget.dragProgress > 0.05)) {
       final articleId = widget.article.id.isNotEmpty
           ? widget.article.id
           : widget.article.slug;
@@ -183,57 +182,58 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                     opacity: imageOpacity,
                     child: Transform.scale(
                       scale: imageScale,
-                      child: article.mediaItems.isNotEmpty ||
-                              article.orderedMedia.length > 1
-                          ? ArticleMediaCarousel(
-                              article: article,
-                              active: widget.isCurrent,
-                              onTap: widget.onTap)
-                          : article.isVideo
-                              ? NewsArticleVideoPlayer(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          article.orderedMedia.length > 1
+                              ? ArticleMediaCarousel(
                                   article: article,
-                                  isCurrent: widget.isCurrent,
-                                  onDoubleTap: () {
-                                    HapticFeedback.mediumImpact();
-                                    if (!AppState.instance.isLoggedIn) {
-                                      requireAuth(context, () {});
-                                      return;
-                                    }
-                                    if (!AppState.instance.likedItemIds
-                                        .contains(article.id)) {
-                                      AppState.instance.toggleLike(article.id);
-                                    }
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Liked story ❤️'),
-                                        duration: Duration(milliseconds: 900),
-                                      ),
-                                    );
-                                  },
-                                )
-                              : GestureDetector(
-                                  onTap: widget.onTap,
-                                  onDoubleTap: () {
-                                    HapticFeedback.mediumImpact();
-                                    if (!AppState.instance.isLoggedIn) {
-                                      requireAuth(context, () {});
-                                      return;
-                                    }
-                                    if (!AppState.instance.likedItemIds
-                                        .contains(article.id)) {
-                                      AppState.instance.toggleLike(article.id);
-                                    }
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Liked story ❤️'),
-                                        duration: Duration(milliseconds: 900),
-                                      ),
-                                    );
-                                  },
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      CachedNetworkImage(
+                                  active: widget.isCurrent,
+                                  fit: BoxFit.cover,
+                                  onTap: widget.onTap)
+                              : article.isVideo
+                                  ? NewsArticleVideoPlayer(
+                                      article: article,
+                                      isCurrent: widget.isCurrent,
+                                      fit: BoxFit.cover,
+                                      onDoubleTap: () {
+                                        HapticFeedback.mediumImpact();
+                                        if (!AppState.instance.isLoggedIn) {
+                                          requireAuth(context, () {});
+                                          return;
+                                        }
+                                        if (!AppState.instance.likedItemIds
+                                            .contains(article.id)) {
+                                          AppState.instance.toggleLike(article.id);
+                                        }
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Liked story ❤️'),
+                                            duration: Duration(milliseconds: 900),
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  : GestureDetector(
+                                      onTap: widget.onTap,
+                                      onDoubleTap: () {
+                                        HapticFeedback.mediumImpact();
+                                        if (!AppState.instance.isLoggedIn) {
+                                          requireAuth(context, () {});
+                                          return;
+                                        }
+                                        if (!AppState.instance.likedItemIds
+                                            .contains(article.id)) {
+                                          AppState.instance.toggleLike(article.id);
+                                        }
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Liked story ❤️'),
+                                            duration: Duration(milliseconds: 900),
+                                          ),
+                                        );
+                                      },
+                                      child: CachedNetworkImage(
                                         imageUrl:
                                             (article.mediaItems.isNotEmpty &&
                                                     article.mediaItems.first.url
@@ -256,75 +256,75 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               color: AppColors.textMuted),
                                         ),
                                       ),
-                                      // Smooth Gradient Masking (Vignette) for seamless blend
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: [
-                                              Colors.transparent,
-                                              Theme.of(context)
-                                                  .scaffoldBackgroundColor
-                                                  .withValues(alpha: 0.5),
-                                              Theme.of(context)
-                                                  .scaffoldBackgroundColor,
-                                            ],
-                                            stops: const [0.6, 0.9, 1.0],
-                                          ),
-                                        ),
-                                      ),
-                                      // Multi-media Indicator (If multiple photos/videos)
-                                      if (article.mediaItems.length > 1)
-                                        Positioned(
-                                          bottom: 32,
-                                          left: 16,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: Colors.black
-                                                  .withValues(alpha: 0.6),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const Icon(
-                                                    Icons.photo_library_rounded,
-                                                    size: 12,
-                                                    color: Colors.white),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  '${article.mediaItems.length}',
-                                                  style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.bold),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      // Logo Watermark (Bottom-Right of Image)
-                                      Positioned(
-                                        bottom: 32,
-                                        right: 16,
-                                        child: Opacity(
-                                          opacity: 0.8,
-                                          child: Image.asset(
-                                            'assets/images/logo.png',
-                                            width: 38,
-                                            height: 38,
-                                            fit: BoxFit.contain,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                          // Smooth Gradient Masking (Vignette) for seamless blend
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 70,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Theme.of(context)
+                                        .scaffoldBackgroundColor
+                                        .withValues(alpha: 0.6),
+                                    Theme.of(context).scaffoldBackgroundColor,
+                                  ],
+                                  stops: const [0.0, 0.6, 1.0],
                                 ),
+                              ),
+                            ),
+                          ),
+                          // Multi-media Indicator (If multiple photos/videos)
+                          if (article.mediaItems.length > 1)
+                            Positioned(
+                              bottom: 28,
+                              left: 16,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.photo_library_rounded,
+                                        size: 12, color: Colors.white),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '${article.mediaItems.length}',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          // Logo Watermark (Always positioned in Bottom-Right of Media Zone)
+                          Positioned(
+                            bottom: 28,
+                            right: 16,
+                            child: Opacity(
+                              opacity: 0.88,
+                              child: Image.asset(
+                                'assets/images/logo.png',
+                                width: 42,
+                                height: 42,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -582,31 +582,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           ),
                         ),
                       ),
-                      if (article.authorName.isNotEmpty &&
-                          article.authorName != 'VARADHI Desk') ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.person_pin_rounded,
-                                size: 13,
-                                color:
-                                    isDark ? Colors.white60 : Colors.black54),
-                            const SizedBox(width: 4),
-                            Text(
-                              article.authorName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white60 : Colors.black54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-
                       const SizedBox(height: 12),
 
-                      // Body Text with Dynamic Truncation & Adaptive "Read More"
+                      // Body Text with Dynamic Auto-Adjusting & Adaptive "Read More"
                       Expanded(
                         child: Transform.translate(
                           offset: Offset(0, bodyOffset),
@@ -648,43 +626,44 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   color: isDark
                                       ? Colors.white70
                                       : AppColors.textDark
-                                          .withValues(alpha: 0.85),
-                                  height: 1.5,
+                                          .withValues(alpha: 0.88),
+                                  height: 1.55,
                                   letterSpacing: 0.1,
                                 );
 
-                                // Line height based on font size and height factor (~23.25px)
+                                // Line height based on font size and height factor (~24px)
                                 final double lineHeight =
                                     textStyle.fontSize! * textStyle.height!;
-                                const double reservedForButton = 46.0;
+                                const double reservedForButton = 44.0;
 
-                                // Adapt maximum lines dynamically to available height to prevent any overflow
-                                final double availableForText =
-                                    (constraints.maxHeight - reservedForButton)
-                                        .clamp(0.0, double.infinity);
-                                final int calculatedLines =
-                                    (availableForText / lineHeight).floor();
-                                // Clean viewable text lines: standard 5 lines, adapted to screen size
-                                final int dynamicMaxLines =
-                                    calculatedLines.clamp(3, 5);
+                                // Total lines that can fit in full available height without button
+                                final int maxPossibleLines =
+                                    (constraints.maxHeight / lineHeight)
+                                        .floor()
+                                        .clamp(1, 40);
 
-                                // Measure whether content actually exceeds dynamicMaxLines on this screen
+                                // Measure whether content exceeds the available screen space
                                 final textSpan =
                                     TextSpan(text: toShow, style: textStyle);
                                 final textPainter = TextPainter(
                                   text: textSpan,
                                   textDirection: Directionality.of(context),
-                                  maxLines: dynamicMaxLines,
+                                  maxLines: maxPossibleLines,
                                 )..layout(maxWidth: constraints.maxWidth);
 
+                                // If news is short and fits completely, NO read more button is shown!
+                                // Only show read more if the text exceeds what can fit on screen
                                 final bool isTruncated =
                                     textPainter.didExceedMaxLines;
-                                final bool hasMoreBackend = article.hasMore ||
-                                    (_detailArticle != null &&
-                                        _detailArticle!.body.length >
-                                            toShow.length);
-                                final bool shouldShowReadMore =
-                                    isTruncated || hasMoreBackend;
+                                final bool shouldShowReadMore = isTruncated;
+
+                                // When read more button is shown, reserve space for button and fill remaining lines
+                                final int dynamicMaxLines = shouldShowReadMore
+                                    ? (((constraints.maxHeight - reservedForButton) /
+                                                lineHeight)
+                                            .floor())
+                                        .clamp(3, 35)
+                                    : maxPossibleLines;
 
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -694,6 +673,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       toShow,
                                       maxLines: dynamicMaxLines,
                                       overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.justify,
                                       style: textStyle,
                                     ),
                                     if (shouldShowReadMore) ...[
@@ -761,51 +741,96 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 AnimatedBuilder(
                                   animation: AppState.instance,
                                   builder: (context, _) {
+                                    final targetId = article.id.isNotEmpty
+                                        ? article.id
+                                        : article.slug;
                                     final isLiked = AppState
-                                        .instance.likedItemIds
-                                        .contains(article.id);
+                                            .instance.likedItemIds
+                                            .contains(targetId) ||
+                                        (article.id.isNotEmpty &&
+                                            AppState.instance.likedItemIds
+                                                .contains(article.id));
                                     return _buildActionIcon(
                                       icon: isLiked
-                                          ? Icons.thumb_up
+                                          ? Icons.thumb_up_rounded
                                           : Icons.thumb_up_alt_outlined,
                                       color: isLiked
                                           ? AppColors.primary
                                           : AppColors.textMuted,
                                       label: _formatCount(
                                           article.likes + (isLiked ? 1 : 0)),
-                                      onTap: () {
+                                      onTap: () async {
                                         HapticFeedback.lightImpact();
-                                        requireAuth(
-                                          context,
-                                          () => AppState.instance
-                                              .toggleLike(article.id),
-                                        );
+                                        final nowLiked = !isLiked;
+                                        AppState.instance.toggleLike(targetId);
+                                        setState(() {
+                                          if (nowLiked) {
+                                            _isDisliked = false;
+                                          }
+                                        });
+                                        if (AppState.instance.isLoggedIn) {
+                                          ApiService.instance
+                                              .postArticleReaction(
+                                                targetId,
+                                                nowLiked ? 'like' : 'none',
+                                              )
+                                              .catchError(
+                                                  (_) => <String, dynamic>{});
+                                        }
                                       },
                                     );
                                   },
                                 ),
                                 // Dislike
                                 _buildActionIcon(
-                                  icon: Icons.thumb_down_alt_outlined,
+                                  icon: _isDisliked
+                                      ? Icons.thumb_down_rounded
+                                      : Icons.thumb_down_alt_outlined,
                                   color: _isDisliked
-                                      ? Colors.red
+                                      ? Colors.redAccent
                                       : AppColors.textMuted,
                                   label: '',
-                                  onTap: () {
+                                  onTap: () async {
                                     HapticFeedback.lightImpact();
-                                    requireAuth(context, () {
-                                      setState(
-                                          () => _isDisliked = !_isDisliked);
-                                      if (_isDisliked) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Feedback received'),
-                                            duration: Duration(seconds: 1),
-                                          ),
-                                        );
+                                    final targetId = article.id.isNotEmpty
+                                        ? article.id
+                                        : article.slug;
+                                    final nowDisliked = !_isDisliked;
+                                    setState(() {
+                                      _isDisliked = nowDisliked;
+                                      if (nowDisliked &&
+                                          (AppState.instance.isLiked(targetId) ||
+                                              AppState.instance
+                                                  .isLiked(article.id))) {
+                                        AppState.instance.toggleLike(targetId);
                                       }
                                     });
+                                    if (AppState.instance.isLoggedIn) {
+                                      ApiService.instance
+                                          .postArticleReaction(
+                                            targetId,
+                                            nowDisliked ? 'dislike' : 'none',
+                                          )
+                                          .catchError(
+                                              (_) => <String, dynamic>{});
+                                    }
+                                    ScaffoldMessenger.of(context)
+                                        .removeCurrentSnackBar();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(nowDisliked
+                                            ? (AppState.instance.language ==
+                                                    'Telugu'
+                                                ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
+                                                : 'Feedback received')
+                                            : (AppState.instance.language ==
+                                                    'Telugu'
+                                                ? 'డిస్‌లైక్ తీసివేయబడింది'
+                                                : 'Dislike removed')),
+                                        duration: const Duration(seconds: 1),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
                                   },
                                 ),
                                 // Share (Center, Prominent)
@@ -822,7 +847,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                         color: AppColors.primary, size: 24),
                                   ),
                                 ),
-                                // Comment
+                                // Comment (Opens directly without auth gate)
                                 AnimatedBuilder(
                                   animation: AppState.instance,
                                   builder: (context, _) {
@@ -835,28 +860,33 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       label: _formatCount(count),
                                       onTap: () {
                                         HapticFeedback.selectionClick();
-                                        requireAuth(
+                                        Navigator.push(
                                           context,
-                                          () => Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                                builder: (_) => CommentsScreen(
-                                                    article: article)),
+                                          MaterialPageRoute(
+                                            builder: (_) => CommentsScreen(
+                                                article: _detailArticle ??
+                                                    widget.article),
                                           ),
                                         );
                                       },
                                     );
                                   },
                                 ),
-                                // Save
+                                // Save / Bookmark
                                 AnimatedBuilder(
                                   animation: AppState.instance,
                                   builder: (context, _) {
+                                    final targetId = article.id.isNotEmpty
+                                        ? article.id
+                                        : article.slug;
                                     final isSaved = AppState.instance
-                                        .isBookmarked(widget.article.id);
+                                            .isBookmarked(targetId) ||
+                                        (widget.article.id.isNotEmpty &&
+                                            AppState.instance.isBookmarked(
+                                                widget.article.id));
                                     return _buildActionIcon(
                                       icon: isSaved
-                                          ? Icons.bookmark
+                                          ? Icons.bookmark_rounded
                                           : Icons.bookmark_border_rounded,
                                       color: isSaved
                                           ? AppColors.primary
@@ -864,12 +894,33 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       label: '',
                                       onTap: () async {
                                         HapticFeedback.lightImpact();
-                                        requireAuth(context, () {
-                                          AppState.instance.toggleBookmark(
-                                              widget.article.id);
-                                          ApiService.instance.toggleBookmark(
-                                              widget.article.id);
-                                        });
+                                        final nowSaved = !isSaved;
+                                        AppState.instance
+                                            .toggleBookmark(targetId);
+                                        if (AppState.instance.isLoggedIn) {
+                                          ApiService.instance
+                                              .toggleBookmark(targetId)
+                                              .catchError((_) => false);
+                                        }
+                                        ScaffoldMessenger.of(context)
+                                            .removeCurrentSnackBar();
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(nowSaved
+                                                ? (AppState.instance.language ==
+                                                        'Telugu'
+                                                    ? 'వార్త సేవ్ చేయబడింది'
+                                                    : 'Article saved to bookmarks')
+                                                : (AppState.instance.language ==
+                                                        'Telugu'
+                                                    ? 'బుక్‌మార్క్ తీసివేయబడింది'
+                                                    : 'Bookmark removed')),
+                                            duration: const Duration(
+                                                milliseconds: 1200),
+                                            behavior: SnackBarBehavior.floating,
+                                          ),
+                                        );
                                       },
                                     );
                                   },

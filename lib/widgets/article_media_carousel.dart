@@ -29,7 +29,7 @@ class ArticleMediaCarousel extends StatefulWidget {
 class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
   final PageController _controller = PageController();
   int _index = 0;
-  bool _visible = false;
+  bool _visible = true;
   final Key _visibilityKey = UniqueKey();
 
   @override
@@ -56,7 +56,7 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
         media: item,
         isCurrent: widget.active && _visible && _index == index,
         onDoubleTap: widget.onDoubleTap,
-        fit: BoxFit.contain,
+        fit: widget.fit,
       );
     }
     return GestureDetector(
