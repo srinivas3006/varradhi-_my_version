@@ -269,6 +269,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   }
 
   @override
+  void dispose() {
+    AppTtsService.instance.stop();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
@@ -347,7 +353,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                             color: Colors.white, size: 14),
                         const SizedBox(width: 5),
                         Text(
-                          article.authorName.isNotEmpty
+                          article.authorName.isNotEmpty &&
+                                  !article.authorName
+                                      .toLowerCase()
+                                      .contains('john')
                               ? article.authorName
                               : (article.source.isNotEmpty
                                   ? article.source
@@ -363,11 +372,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Multi-Image Index Indicator Pill
+                // Multi-Image Index Indicator Pill (Positioned to the left of the Logo watermark so no overlap occurs)
                 if (article.imageUrls != null && article.imageUrls!.length > 1)
                   Positioned(
                     bottom: 44,
-                    right: 16,
+                    right: 64,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
@@ -441,7 +450,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         ),
                       ),
                       Text(
-                        article.authorName.isNotEmpty
+                        article.authorName.isNotEmpty &&
+                                !article.authorName
+                                    .toLowerCase()
+                                    .contains('john')
                             ? article.authorName
                             : (article.source.isNotEmpty
                                 ? article.source

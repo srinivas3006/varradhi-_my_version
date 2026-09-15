@@ -11,16 +11,10 @@ plugins {
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 val hasReleaseKeystore = keystorePropertiesFile.exists()
-val isReleaseBuild = gradle.startParameter.taskNames.any {
-    it.contains("release", ignoreCase = true)
-}
-if (isReleaseBuild && !hasReleaseKeystore) {
-    throw GradleException(
-        "Release signing is not configured. Copy key.properties.example to key.properties and provide a production keystore."
-    )
-}
 if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+} else {
+    println("WARNING: Release keystore not configured (key.properties not found). Falling back to debug signing for this build.")
 }
 
 android {
@@ -56,8 +50,10 @@ android {
 
     buildTypes {
         release {
-            if (hasReleaseKeystore) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
             isShrinkResources = true

@@ -100,11 +100,19 @@ class MediaResolver {
     }
 
     final pathLower = uri.path.toLowerCase();
+    final fullLower = url.toLowerCase();
     if (pathLower.endsWith('.mp4') ||
         pathLower.endsWith('.mov') ||
         pathLower.endsWith('.webm') ||
         pathLower.endsWith('.m4v') ||
-        pathLower.endsWith('.m3u8')) {
+        pathLower.endsWith('.m3u8') ||
+        pathLower.endsWith('.mkv') ||
+        fullLower.contains('.mp4?') ||
+        fullLower.contains('.m3u8?') ||
+        fullLower.contains('.webm?') ||
+        fullLower.contains('.mov?') ||
+        fullLower.contains('/video/') ||
+        fullLower.contains('ugc_videos')) {
       return true;
     }
 
