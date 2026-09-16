@@ -35,20 +35,7 @@ extension AdminUgcStatusX on AdminUgcStatus {
     }
   }
 
-  String get label {
-    switch (this) {
-      case AdminUgcStatus.pending:
-        return 'Pending';
-      case AdminUgcStatus.review:
-        return 'Review';
-      case AdminUgcStatus.flagged:
-        return 'Flagged';
-      case AdminUgcStatus.approved:
-        return 'Approved';
-      case AdminUgcStatus.rejected:
-        return 'Rejected';
-    }
-  }
+  String get label => teluguLabel;
 
   String get teluguLabel {
     switch (this) {
@@ -57,7 +44,7 @@ extension AdminUgcStatusX on AdminUgcStatus {
       case AdminUgcStatus.review:
         return 'సమీక్షలో ఉంది';
       case AdminUgcStatus.flagged:
-        return 'ఫ్లాగ్డ్';
+        return 'ఫ్లాగ్ చేయబడింది';
       case AdminUgcStatus.approved:
         return 'ఆమోదించబడింది';
       case AdminUgcStatus.rejected:
@@ -108,21 +95,12 @@ extension AdminTrustLevelX on AdminTrustLevel {
     }
   }
 
-  String get label {
-    switch (this) {
-      case AdminTrustLevel.newUser:
-        return 'New User';
-      case AdminTrustLevel.trustedReporter:
-        return 'Trusted Reporter';
-      case AdminTrustLevel.adminReporter:
-        return 'Admin Reporter';
-    }
-  }
+  String get label => teluguLabel;
 
   String get teluguLabel {
     switch (this) {
       case AdminTrustLevel.newUser:
-        return 'కొత్త యూజర్';
+        return 'కొత్త రిపోర్టర్';
       case AdminTrustLevel.trustedReporter:
         return 'విశ్వసనీయ రిపోర్టర్';
       case AdminTrustLevel.adminReporter:

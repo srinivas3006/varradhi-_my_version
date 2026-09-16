@@ -56,7 +56,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final slugToFetch = widget.article.slug.isNotEmpty
         ? widget.article.slug
         : widget.article.id;
-    if (slugToFetch.isNotEmpty) {
+    if (!widget.article.isUgc && slugToFetch.isNotEmpty) {
       _fetchArticleDetail(slugToFetch);
     }
   }
@@ -73,7 +73,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       final slug = widget.article.slug.isNotEmpty
           ? widget.article.slug
           : widget.article.id;
-      if (slug.isNotEmpty) _fetchArticleDetail(slug);
+      if (!widget.article.isUgc && slug.isNotEmpty) {
+        _fetchArticleDetail(slug);
+      }
     }
     if ((oldWidget.isCurrent && !widget.isCurrent) ||
         (widget.isCurrent && widget.dragProgress > 0.05)) {
@@ -114,6 +116,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   }
 
   Future<void> _fetchArticleDetail(String slug) async {
+    if (widget.article.isUgc) return;
     final generation = ++_detailGeneration;
 
     setState(() {
@@ -207,9 +210,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           AppState.instance.toggleLike(article.id);
                                         }
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Liked story ❤️'),
-                                            duration: Duration(milliseconds: 900),
+                                          SnackBar(
+                                            content: Text(AppState.instance.language == 'Telugu'
+                                                ? 'స్టోరీని లైక్ చేసారు ❤️'
+                                                : 'Liked story ❤️'),
+                                            duration: const Duration(milliseconds: 900),
                                           ),
                                         );
                                       },
@@ -227,9 +232,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           AppState.instance.toggleLike(article.id);
                                         }
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('Liked story ❤️'),
-                                            duration: Duration(milliseconds: 900),
+                                          SnackBar(
+                                            content: Text(AppState.instance.language == 'Telugu'
+                                                ? 'స్టోరీని లైక్ చేసారు ❤️'
+                                                : 'Liked story ❤️'),
+                                            duration: const Duration(milliseconds: 900),
                                           ),
                                         );
                                       },
@@ -423,10 +430,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             const SizedBox(width: 6),
                                             Text(
                                               isLoading
-                                                  ? 'Loading...'
+                                                  ? (AppState.instance.language == 'Telugu' ? 'లోడ్ అవుతోంది...' : 'Loading...')
                                                   : (isPlaying
-                                                      ? 'Playing'
-                                                      : 'Listen'),
+                                                      ? (AppState.instance.language == 'Telugu' ? 'వింటున్నారు' : 'Playing')
+                                                      : (AppState.instance.language == 'Telugu' ? 'వినండి' : 'Listen')),
                                               style: TextStyle(
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.w700,
@@ -477,7 +484,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                               },
                             ),
 
-                            // Right: Breaking / Location / Time
+                            // Right: Breaking / UGC / Location / Time
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -489,11 +496,41 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       color: const Color(0xFFFF3B30),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: const Text('BREAKING',
+                                    child: const Text('బ్రేకింగ్',
                                         style: TextStyle(
                                             fontSize: 10,
                                             color: Colors.white,
                                             fontWeight: FontWeight.w800)),
+                                  ),
+                                  const SizedBox(width: 6),
+                                ],
+                                if (article.isUgc) ...[
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                          color: Colors.amber.withValues(alpha: 0.4)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.person_pin_circle_rounded,
+                                            size: 11, color: Colors.amber),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          article.authorName.isNotEmpty
+                                              ? article.authorName
+                                              : 'సిటిజెన్ రిపోర్ట్',
+                                          style: const TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.amber,
+                                              fontWeight: FontWeight.w800),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                   const SizedBox(width: 6),
                                 ],
@@ -609,8 +646,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             if (toShow.isEmpty) {
                               return Text(
                                 _detailError != null
-                                    ? 'Failed to load content.'
-                                    : 'No content available.',
+                                    ? (AppState.instance.language == 'Telugu'
+                                        ? 'కంటెంట్‌ను లోడ్ చేయడంలో విఫలమైంది.'
+                                        : 'Failed to load content.')
+                                    : (AppState.instance.language == 'Telugu'
+                                        ? 'సమాచారం అందుబాటులో లేదు.'
+                                        : 'No content available.'),
                                 style: TextStyle(
                                     fontSize: 15,
                                     color: isDark

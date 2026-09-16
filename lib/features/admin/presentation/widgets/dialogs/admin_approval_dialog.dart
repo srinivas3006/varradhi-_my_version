@@ -47,7 +47,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
   void initState() {
     super.initState();
     _publicationLevel = AdminUgcOptions.publicationLevels.first.value;
-    _notesController = TextEditingController(text: 'Verified by editor.');
+    _notesController = TextEditingController(text: 'ఎడిటర్ ద్వారా ధృవీకరించబడింది.');
     _pushTitleController = TextEditingController(text: widget.submission.title);
     _pushBodyController = TextEditingController(text: widget.submission.title);
   }
@@ -82,7 +82,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
       await widget.onApprove(_notesController.text.trim(), _publicationLevel, push);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Failed to approve. Please try again.');
+      if (mounted) setState(() => _error = 'ఆమోదించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -110,7 +110,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Approve Submission', style: TextStyle(color: AdminColors.textPrimary(isDark), fontWeight: FontWeight.w800, fontSize: 17)),
+                        Text('వార్తను ఆమోదించండి', style: TextStyle(color: AdminColors.textPrimary(isDark), fontWeight: FontWeight.w800, fontSize: 17)),
                         Text(widget.submission.title, maxLines: 1, overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12.5)),
                       ],
@@ -125,7 +125,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Publication Level', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12, fontWeight: FontWeight.w700)),
+                      Text('ప్రచురణ స్థాయి', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 6),
                       DropdownButtonFormField<String>(
                         initialValue: _publicationLevel,
@@ -139,7 +139,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                         onChanged: (v) => setState(() => _publicationLevel = v ?? _publicationLevel),
                       ),
                       const SizedBox(height: 16),
-                      Text('Admin Notes', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12, fontWeight: FontWeight.w700)),
+                      Text('అడ్మిన్ గమనికలు', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 12, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 6),
                       TextField(
                         controller: _notesController,
@@ -158,7 +158,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                           children: [
                             SwitchListTile(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('Send Push Notification', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                              title: const Text('పుష్ నోటిఫికేషన్ పంపండి', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
                               value: _sendPush,
                               activeThumbColor: AdminColors.primary,
                               onChanged: (v) => setState(() => _sendPush = v),
@@ -167,12 +167,12 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                               const SizedBox(height: 4),
                               TextField(
                                 controller: _pushTitleController,
-                                decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()),
+                                decoration: const InputDecoration(labelText: 'శీర్షిక', border: OutlineInputBorder()),
                               ),
                               const SizedBox(height: 10),
                               TextField(
                                 controller: _pushBodyController,
-                                decoration: const InputDecoration(labelText: 'Body', border: OutlineInputBorder()),
+                                decoration: const InputDecoration(labelText: 'సందేశం', border: OutlineInputBorder()),
                               ),
                               const SizedBox(height: 10),
                               Row(
@@ -180,7 +180,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                                   Expanded(
                                     child: DropdownButtonFormField<String>(
                                       initialValue: _pushType,
-                                      decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
+                                      decoration: const InputDecoration(labelText: 'రకం', border: OutlineInputBorder()),
                                       items: AdminUgcOptions.pushNotificationTypes
                                           .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                                           .toList(),
@@ -191,7 +191,7 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
                                   Expanded(
                                     child: DropdownButtonFormField<String>(
                                       initialValue: _pushTarget,
-                                      decoration: const InputDecoration(labelText: 'Target', border: OutlineInputBorder()),
+                                      decoration: const InputDecoration(labelText: 'లక్ష్యం', border: OutlineInputBorder()),
                                       items: AdminUgcOptions.pushNotificationTargets
                                           .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                                           .toList(),
@@ -216,14 +216,14 @@ class _AdminApprovalDialogState extends State<_AdminApprovalDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(onPressed: _submitting ? null : () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+                  TextButton(onPressed: _submitting ? null : () => Navigator.of(context).pop(false), child: const Text('రద్దు చేయి')),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _submitting ? null : _submit,
                     style: ElevatedButton.styleFrom(backgroundColor: AdminColors.success, foregroundColor: Colors.white),
                     child: _submitting
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Approve Now'),
+                        : const Text('ఆమోదించు'),
                   ),
                 ],
               ),

@@ -1,3 +1,4 @@
+import '../../../../core/utils/url_normalizer.dart';
 import 'admin_ugc_status.dart';
 
 int _asInt(dynamic v, [int fallback = 0]) {
@@ -14,6 +15,41 @@ double? _asDouble(dynamic v) {
 }
 
 Map<String, dynamic>? _asMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : null;
+
+String _extractMediaUrl(Map<String, dynamic> json) {
+  for (final key in [
+    'media_url',
+    'original_media_url',
+    'image_url',
+    'imageUrl',
+    'file_url',
+    'thumbnail_url',
+    'thumbnail',
+    'image',
+    'media',
+    'file',
+  ]) {
+    final val = json[key];
+    if (val != null && val.toString().trim().isNotEmpty) {
+      return UrlNormalizer.normalize(val.toString().trim());
+    }
+  }
+
+  // Check array of media or photos
+  final list = json['media'] ?? json['photos'] ?? json['images'] ?? json['files'];
+  if (list is List && list.isNotEmpty) {
+    final first = list.first;
+    if (first is String && first.trim().isNotEmpty) {
+      return UrlNormalizer.normalize(first.trim());
+    } else if (first is Map) {
+      final u = first['url'] ?? first['media_url'] ?? first['image_url'] ?? first['file_url'];
+      if (u != null && u.toString().trim().isNotEmpty) {
+        return UrlNormalizer.normalize(u.toString().trim());
+      }
+    }
+  }
+  return '';
+}
 
 /// One flat model backing both the queue card and the detail screen —
 /// detail-only fields are simply empty/zero when only list data is
@@ -132,10 +168,10 @@ class AdminUgcSubmissionModel {
       stateName: (json['state'] ?? location?['state'])?.toString() ?? '',
       latitude: _asDouble(json['latitude'] ?? json['lat'] ?? location?['latitude'] ?? location?['lat']),
       longitude: _asDouble(json['longitude'] ?? json['lng'] ?? json['lon'] ?? location?['longitude'] ?? location?['lon']),
-      originalMediaUrl: (json['media_url'] ?? json['original_media_url'] ?? json['file_url'])?.toString() ?? '',
+      originalMediaUrl: _extractMediaUrl(json),
       originalMediaType: (json['media_type'] ?? json['content_type'])?.toString() ?? 'image',
-      videoThumbnailUrl: (json['thumbnail_url'] ?? json['video_thumbnail_url'])?.toString() ?? '',
-      brandedMediaUrl: json['branded_media_url']?.toString() ?? '',
+      videoThumbnailUrl: UrlNormalizer.normalize((json['thumbnail_url'] ?? json['video_thumbnail_url'] ?? json['thumbnail'] ?? '')?.toString()),
+      brandedMediaUrl: UrlNormalizer.normalize((json['branded_media_url'] ?? json['watermarked_url'] ?? '')?.toString()),
       brandedMediaType: (json['branded_media_type'] ?? json['media_type'])?.toString() ?? 'image',
       uploadStatus: json['upload_status']?.toString() ?? '',
       validationStatus: json['validation_status']?.toString() ?? '',

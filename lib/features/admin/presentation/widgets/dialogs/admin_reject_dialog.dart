@@ -19,7 +19,7 @@ class _AdminRejectDialog extends StatefulWidget {
 }
 
 class _AdminRejectDialogState extends State<_AdminRejectDialog> {
-  late final TextEditingController _notesController = TextEditingController(text: 'Fake or unverifiable content.');
+  late final TextEditingController _notesController = TextEditingController(text: 'నిర్ధారించబడని లేదా నకిలీ కంటెంట్.');
   bool _submitting = false;
 
   @override
@@ -41,20 +41,20 @@ class _AdminRejectDialogState extends State<_AdminRejectDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Reject Submission'),
+      title: const Text('వార్తను తిరస్కరించండి', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
       content: TextField(
         controller: _notesController,
         maxLines: 2,
-        decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'Reason'),
+        decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'తిరస్కరణకు కారణం'),
       ),
       actions: [
-        TextButton(onPressed: _submitting ? null : () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+        TextButton(onPressed: _submitting ? null : () => Navigator.of(context).pop(false), child: const Text('రద్దు చేయి')),
         ElevatedButton(
           onPressed: _submitting ? null : _submit,
           style: ElevatedButton.styleFrom(backgroundColor: AdminColors.error, foregroundColor: Colors.white),
           child: _submitting
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text('Reject'),
+              : const Text('తిరస్కరించు'),
         ),
       ],
     );

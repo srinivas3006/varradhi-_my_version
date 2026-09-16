@@ -17,7 +17,6 @@ import 'create_post_screen.dart';
 import 'location_selection_screen.dart';
 import 'news_detail_screen.dart';
 import 'search_screen.dart';
-import 'ugc_feed_screen.dart';
 
 class LocalNewsTab extends StatefulWidget {
   const LocalNewsTab({super.key});
@@ -904,37 +903,8 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                       )
                     : const Icon(Icons.my_location_rounded,
                         size: 20, color: AppColors.primary),
-                tooltip: 'Detect current location via GPS',
+                tooltip: 'జీపీఎస్ ద్వారా ప్రస్తుత ప్రాంతాన్ని గుర్తించండి',
                 onPressed: _isDetectingLocation ? null : _detectLocation,
-              ),
-
-              // Citizen Feed / UGC Button
-              GestureDetector(
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const UgcFeedScreen())),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border:
-                        Border.all(color: Colors.amber.withValues(alpha: 0.35)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.record_voice_over_rounded,
-                          color: Colors.amber, size: 14),
-                      SizedBox(width: 4),
-                      Text('సిటిజెన్',
-                          style: TextStyle(
-                              color: Colors.amber,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
               ),
 
               // Search Button
@@ -943,7 +913,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
                 icon: Icon(Icons.search_rounded,
                     color: Theme.of(context).iconTheme.color, size: 22),
-                tooltip: 'Search news',
+                tooltip: 'వార్తలను వెతకండి',
                 onPressed: () {
                   AppNavigator.pushSafe(
                     context,

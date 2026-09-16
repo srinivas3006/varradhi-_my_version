@@ -476,7 +476,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 },
                 icon: const Icon(Icons.person_outline_rounded,
                     color: Colors.white, size: 28),
-                tooltip: 'Profile',
+                tooltip: 'ప్రొఫైల్',
               ),
 
               // 2. Animated Sliding Toggle Pill: [ ప్రధాన వార్తలు | స్థానికం ]
@@ -585,7 +585,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 ),
                 child: IconButton(
                   padding: EdgeInsets.zero,
-                  tooltip: 'Post News',
+                  tooltip: 'వార్తను పోస్ట్ చేయండి',
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     _controller.resetOverlayTimer();
@@ -686,7 +686,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 },
                 icon: const Icon(Icons.arrow_back_ios_new_rounded,
                     color: Colors.white, size: 22),
-                tooltip: 'Back',
+                tooltip: 'వెనుకకు',
               ),
               IconButton(
                 onPressed: () {
@@ -696,7 +696,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 },
                 icon: const Icon(Icons.refresh_rounded,
                     color: Colors.white, size: 26),
-                tooltip: 'Refresh',
+                tooltip: 'తాజాకరించండి',
               ),
             ],
           ),
