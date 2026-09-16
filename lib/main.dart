@@ -49,18 +49,31 @@ void main() async {
   };
 
   // Set preferred orientations
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-
-  await NotificationService.instance.initEarly(
-    messengerKey: scaffoldMessengerKey,
-    navigatorKey: navigatorKey,
+  await _startupStep(
+    'orientation',
+    () => SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]),
+    budget: const Duration(seconds: 2),
   );
-  await DeepLinkService.instance.init();
 
-  await AppState.instance.init();
+  await _startupStep(
+    'notifications',
+    () => NotificationService.instance.initEarly(
+      messengerKey: scaffoldMessengerKey,
+      navigatorKey: navigatorKey,
+    ),
+    budget: const Duration(seconds: 6),
+  );
+
+  await _startupStep(
+    'deep links',
+    () => DeepLinkService.instance.init(),
+    budget: const Duration(seconds: 3),
+  );
+
+  await _startupStep('app state', () => AppState.instance.init());
 
   // If we already logged in previously, sync the token we just fetched
   if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
@@ -77,6 +90,34 @@ void main() async {
   }
 
   runApp(const Way2NewsCloneApp());
+}
+
+/// Runs one startup step without letting it hold back the first frame.
+///
+/// Nothing awaited before [runApp] may run unbounded. The engine paints
+/// nothing until the first frame is produced, so a single plugin call that
+/// never returns is not a slow launch — it is a permanently black app. A
+/// try/catch does not help either, because a hang is not an exception.
+///
+/// Firebase init and the deep-link platform channel are the realistic
+/// offenders: both can stall indefinitely with no network, without Play
+/// Services, or on a cold platform channel. A step that exceeds its budget is
+/// abandoned here and left running, so a late FCM token still lands — the app
+/// simply starts degraded instead of not starting at all.
+Future<void> _startupStep(
+  String name,
+  Future<void> Function() step, {
+  Duration budget = const Duration(seconds: 5),
+}) async {
+  try {
+    await step().timeout(budget);
+  } on TimeoutException {
+    debugPrint(
+        '[startup] "$name" exceeded ${budget.inSeconds}s; continuing without it');
+  } catch (e, stack) {
+    debugPrint('[startup] "$name" failed: $e');
+    debugPrintStack(stackTrace: stack);
+  }
 }
 
 class Way2NewsCloneApp extends StatelessWidget {

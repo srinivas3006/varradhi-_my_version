@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -6,11 +7,19 @@ import 'home_screen.dart';
 import 'spotlight_screen.dart';
 import '../services/api_service.dart';
 import '../core/navigation/notification_navigation_gate.dart';
+
+
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/ad_manager.dart';
 import '../models/ad_banner.dart';
 import '../widgets/ads/ad_viewability_detector.dart';
+
+import '../core/media/media_resolver.dart';
+import '../core/media/media_source.dart';
+import '../core/media/network_video_playback_controller.dart';
+import '../core/media/video_player_widget.dart';
+
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -107,6 +116,7 @@ class _SplashScreenState extends State<SplashScreen>
       await _showSplashAd(ad);
     }
 
+
     if (!mounted || _navigated) return;
     _navigated = true;
 
@@ -124,6 +134,7 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
   }
+
 
   Future<void> _showSplashAd(AdBanner ad) async {
     if (ad.imageUrl.isNotEmpty && mounted) {
@@ -153,6 +164,11 @@ class _SplashScreenState extends State<SplashScreen>
             AdManager.instance.recordSkip(ad, placementZone: 'splash');
             Navigator.of(dialogContext).pop();
           },
+          // Ran its full duration: a completed view, not a skip, so it is
+          // not recorded as one.
+          onComplete: () => Navigator.of(dialogContext).pop(),
+          // Nothing renderable — never counted as a view.
+          onFailed: () => Navigator.of(dialogContext).pop(),
         ),
       ),
     );
@@ -206,191 +222,316 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-class _SplashAdOverlay extends StatelessWidget {
+/// Timing contract for the splash advertisement.
+///
+/// The ad holds the launch for at most [maxDurationSeconds], and the skip
+/// control unlocks at the halfway mark — 15s of a full 30s run.
+///
+/// Skip is derived from the duration rather than fixed so a shorter creative
+/// does not make the reader wait a disproportionate share of it, and it is
+/// rounded up and floored at one second so the control is never already live
+/// on the first frame.
+@immutable
+class SplashAdTiming {
+  const SplashAdTiming._(this.durationSeconds, this.skipAfterSeconds);
+
+  /// Used when the backend sends no duration.
+  static const int defaultDurationSeconds = 30;
+
+  /// Hard ceiling, however large a duration the backend sends.
+  static const int maxDurationSeconds = 30;
+
+  factory SplashAdTiming.forConfiguredSeconds(int configured) {
+    final duration = configured <= 0
+        ? defaultDurationSeconds
+        : (configured > maxDurationSeconds ? maxDurationSeconds : configured);
+    final half = (duration + 1) ~/ 2;
+    return SplashAdTiming._(duration, half < 1 ? 1 : half);
+  }
+
+  /// How long the ad stays up before closing itself.
+  final int durationSeconds;
+
+  /// When the skip control becomes usable.
+  final int skipAfterSeconds;
+}
+
+/// The app-open advertisement.
+///
+/// Two rules this screen must never break, because a reader trapped behind
+/// an ad at launch is a reader who uninstalls: the skip control becomes
+/// usable on a fixed short timer regardless of how long the creative runs,
+/// and a creative that cannot render at all closes itself instead of
+/// leaving a black screen.
+class _SplashAdOverlay extends StatefulWidget {
   final AdBanner ad;
   final VoidCallback onTap;
   final VoidCallback onSkip;
+
+  /// The ad ran its course on its own clock — not a reader-initiated skip.
+  final VoidCallback onComplete;
+
+  /// The creative could not be rendered at all (no video, no poster).
+  final VoidCallback onFailed;
 
   const _SplashAdOverlay({
     required this.ad,
     required this.onTap,
     required this.onSkip,
+    required this.onComplete,
+    required this.onFailed,
   });
 
   @override
-  Widget build(BuildContext context) {
-    // Force ad to display in a full-screen compatible format.
-    final displayAd = ad.copyWith(adType: 'full_screen');
+  State<_SplashAdOverlay> createState() => _SplashAdOverlayState();
+}
 
+class _SplashAdOverlayState extends State<_SplashAdOverlay> {
+  NetworkVideoPlaybackController? _videoController;
+  bool _videoInitialized = false;
+  Timer? _clock;
+  int _elapsed = 0;
+  bool _closed = false;
+
+  late final SplashAdTiming _timing =
+      SplashAdTiming.forConfiguredSeconds(widget.ad.durationSeconds);
+
+  int get _durationSeconds => _timing.durationSeconds;
+  int get _skipAfterSeconds => _timing.skipAfterSeconds;
+
+  bool get _canSkip => _elapsed >= _skipAfterSeconds;
+
+  int get _secondsUntilSkippable {
+    final remaining = _skipAfterSeconds - _elapsed;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _clock = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _elapsed++);
+      // The ad closes itself when its time is up, so the reader is never
+      // left waiting for something to happen.
+      if (_elapsed >= _durationSeconds) {
+        timer.cancel();
+        _close(widget.onComplete);
+      }
+    });
+
+    // Initialize video player if this is a video ad
+    if (widget.ad.isVideo && widget.ad.videoUrl.isNotEmpty) {
+      _initVideoPlayer();
+    }
+  }
+
+  /// Dismisses once. The clock, a tap and a failed creative can all race to
+  /// close the ad; firing two of them would pop the screen underneath.
+  void _close(VoidCallback action) {
+    if (_closed || !mounted) return;
+    _closed = true;
+    action();
+  }
+
+  /// Nothing renderable is left, so get out of the reader's way rather than
+  /// holding the launch behind a black screen.
+  ///
+  /// Deferred to after the frame: this can be reached synchronously from
+  /// [initState] when the video URL does not resolve, and popping a route
+  /// mid-build throws.
+  void _failIfNothingToShow() {
+    if (widget.ad.imageUrl.isNotEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _close(widget.onFailed);
+    });
+  }
+
+  void _initVideoPlayer() {
+    final mediaSource = MediaResolver.resolve(
+      videoUrl: widget.ad.videoUrl,
+      thumbnailUrl: widget.ad.imageUrl,
+      isVideoFlag: true,
+    );
+
+    if (mediaSource.type == MediaSourceType.networkVideo) {
+      _videoController = NetworkVideoPlaybackController(
+        mediaSource,
+        autoPlay: true,
+        isMuted: false,
+        loop: true,
+      );
+
+      final controller = _videoController!;
+      controller.initialize().then((_) {
+        if (mounted && identical(controller, _videoController)) {
+          setState(() {
+            _videoInitialized = true;
+          });
+          controller.play();
+        }
+      }).catchError((_) {
+        // Fall back to the poster if there is one; otherwise there is
+        // nothing to show and holding the reader here serves no one.
+        if (mounted) _failIfNothingToShow();
+      });
+    } else {
+      // The URL did not resolve to a playable video at all.
+      _failIfNothingToShow();
+    }
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    _videoController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Background blur
-          if (ad.imageUrl.isNotEmpty)
-            Positioned.fill(
-              child: Image.network(
-                ad.imageUrl,
-                fit: BoxFit.cover,
-                color: Colors.black.withValues(alpha: 0.5),
-                colorBlendMode: BlendMode.darken,
+          // Full-screen Ad Creative (edge-to-edge, no padding)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              _close(widget.onTap);
+            },
+            child: AdViewabilityDetector(
+              ad: widget.ad,
+              placementZone: 'splash',
+              exposureKey: 'splash_${widget.ad.id}',
+              child: _buildMedia(),
+            ),
+          ),
+
+          // Sponsored Badge (top-left, safe area aware)
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 16,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.ad.isVideo)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 5),
+                      child: Icon(Icons.videocam_rounded, color: Colors.amber, size: 14),
+                    ),
+                  const Text(
+                    'SPONSORED',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
             ),
-          
-          // Centered Ad Creative
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 60, bottom: 24, left: 16, right: 16),
-              child: GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  onTap();
-                },
-                child: AdViewabilityDetector(
-                  ad: ad,
-                  placementZone: 'splash',
-                  exposureKey: 'splash_${ad.id}',
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
+          ),
+
+          // Bottom gradient with title
+          if (widget.ad.title.isNotEmpty)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                    20,
+                    60,
+                    20,
+                    MediaQuery.paddingOf(context).bottom + 24,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.7),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  child: Text(
+                    widget.ad.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 8,
+                          color: Colors.black54,
                         ),
                       ],
                     ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (ad.imageUrl.isNotEmpty)
-                          Image.network(
-                            ad.imageUrl,
-                            fit: BoxFit.cover,
-                          ),
-                        // Sponsored Badge
-                        Positioned(
-                          top: 12,
-                          left: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white24),
-                            ),
-                            child: const Text(
-                              'SPONSORED',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Bottom gradient & CTA
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.8),
-                                  Colors.transparent,
-                                ],
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (ad.title.isNotEmpty)
-                                  Text(
-                                    ad.title,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                const SizedBox(height: 12),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Theme.of(context).primaryColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
-                                    onPressed: () {
-                                      HapticFeedback.selectionClick();
-                                      onTap();
-                                    },
-                                    child: const Text(
-                                      'Learn More',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
             ),
-          ),
-          
-          // Skip Button
+
+          // Skip Ad Button (top-right, safe area aware, with countdown)
           Positioned(
             top: MediaQuery.paddingOf(context).top + 16,
             right: 16,
             child: GestureDetector(
-              onTap: () {
-                HapticFeedback.lightImpact();
-                onSkip();
-              },
-              child: Container(
+              onTap: _canSkip
+                  ? () {
+                      HapticFeedback.lightImpact();
+                      _close(widget.onSkip);
+                    }
+                  : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: _canSkip
+                      ? Colors.white.withValues(alpha: 0.25)
+                      : Colors.black.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(
+                    color: _canSkip ? Colors.white38 : Colors.white24,
+                  ),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Skip',
+                      _canSkip ? 'Skip Ad' : 'Skip Ad in $_secondsUntilSkippable',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
+                        color: _canSkip
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.7),
+                        fontSize: 13,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    SizedBox(width: 4),
-                    Icon(Icons.close, color: Colors.white, size: 16),
+                    if (_canSkip) ...[
+                      const SizedBox(width: 4),
+                      const Icon(Icons.skip_next_rounded,
+                          color: Colors.white, size: 18),
+                    ],
                   ],
                 ),
               ),
@@ -399,6 +540,100 @@ class _SplashAdOverlay extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Fills the screen behind a contained creative.
+  ///
+  /// BoxFit.contain guarantees the ad is never cropped or stretched, but that
+  /// leaves bars on any device whose aspect ratio differs from the creative's
+  /// — and on a black Scaffold those read as the app failing to load. A
+  /// blurred, darkened copy of the creative fills them instead, so the slot
+  /// looks deliberate at every size. Cropping the backdrop is fine: it is
+  /// decoration, not the advertisement.
+  Widget _backdrop() {
+    if (widget.ad.imageUrl.isEmpty) return const SizedBox.shrink();
+    return ImageFiltered(
+      imageFilter: ui.ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+      child: Image.network(
+        widget.ad.imageUrl,
+        fit: BoxFit.cover,
+        color: Colors.black.withValues(alpha: 0.55),
+        colorBlendMode: BlendMode.darken,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      ),
+    );
+  }
+
+  static const Widget _spinner = Center(
+    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+  );
+
+  Widget _buildMedia() {
+    // Video ad — use VideoPlayerWidget with poster fallback
+    if (widget.ad.isVideo && _videoController != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          _backdrop(),
+          if (_videoInitialized)
+            Center(
+              child: VideoPlayerWidget(
+                controller: _videoController!,
+                fit: BoxFit.contain,
+                showControls: false,
+              ),
+            )
+          else ...[
+            // Hold the poster, contained like the video will be, so the
+            // creative does not jump size when playback starts.
+            if (widget.ad.imageUrl.isNotEmpty)
+              Center(
+                child: Image.network(
+                  widget.ad.imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            _spinner,
+          ],
+        ],
+      );
+    }
+
+    // Image ad — contained so it fits any screen whole, never cropped and
+    // never stretched, with the blurred backdrop behind it.
+    if (widget.ad.imageUrl.isNotEmpty) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          _backdrop(),
+          Center(
+            child: Image.network(
+              widget.ad.imageUrl,
+              fit: BoxFit.contain,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return _spinner;
+              },
+              errorBuilder: (_, __, ___) {
+                // The only creative failed to decode; close rather than show a
+                // placeholder icon the reader has to sit through.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _close(widget.onFailed);
+                });
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    // No media at all — nothing to advertise, so do not hold the launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _close(widget.onFailed);
+    });
+    return const SizedBox.shrink();
   }
 }
 

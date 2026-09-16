@@ -27,14 +27,17 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
   bool _isDismissed = false;
   bool _hasError = false;
 
+  /// An ad with nowhere to go must not ripple under the finger: a banner that
+  /// responds to a tap and then does nothing reads as a broken app. It also
+  /// must not report a click it cannot deliver.
+  bool get _isClickable => widget.ad.destinationUrl.trim().isNotEmpty;
+
   Future<void> _handleTap() async {
     AdManager.instance
         .recordClick(widget.ad, placementZone: widget.placementZone);
-    if (widget.ad.destinationUrl.isNotEmpty) {
-      final uri = Uri.tryParse(widget.ad.destinationUrl);
-      if (uri != null && await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
+    final uri = Uri.tryParse(widget.ad.destinationUrl);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -74,105 +77,77 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
         ),
         child: Stack(
           children: [
-            InkWell(
-              onTap: _handleTap,
-              child: Row(
-                children: [
-                  // Banner Image thumbnail / cover
-                  if (widget.ad.imageUrl.isNotEmpty)
-                    SizedBox(
-                      width: 100,
-                      height: 64,
-                      child: CachedNetworkImage(
-                        imageUrl: widget.ad.imageUrl,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) setState(() => _hasError = true);
-                          });
-                          return const SizedBox.shrink();
-                        },
-                      ),
-                    ),
+            // Background Image
+            if (widget.ad.imageUrl.isNotEmpty)
+              Positioned.fill(
+                child: CachedNetworkImage(
+                  imageUrl: widget.ad.imageUrl,
+                  fit: BoxFit.cover,
+                  errorWidget: (_, __, ___) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) setState(() => _hasError = true);
+                    });
+                    return const SizedBox.shrink();
+                  },
+                ),
+              ),
 
-                  const SizedBox(width: 12),
+            // Tap handler over the whole banner
+            Positioned.fill(
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(onTap: _isClickable ? _handleTap : null),
+              ),
+            ),
 
-                  // Headline and Sponsored Label
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.blueGrey.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: const Text(
-                                'AD',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.blueGrey,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            const Text(
-                              'Sponsored',
-                              style: TextStyle(
-                                fontSize: 9,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          widget.ad.title.isNotEmpty
-                              ? widget.ad.title
-                              : 'Featured Promotion',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ],
+            // SPONSORED Pill
+            Positioned(
+              top: 8,
+              left: 8,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4C3E35), // Dark brown pill
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'SPONSORED',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
                     ),
                   ),
-
-                  // Destination CTA icon
-                  const Padding(
-                    padding: EdgeInsets.only(right: 36.0),
-                    child: Icon(Icons.open_in_new_rounded,
-                        size: 16, color: Colors.grey),
-                  ),
-                ],
+                ),
               ),
             ),
 
             // Close / Dismiss button in top-right
+            // The dismiss control gets a real 48dp touch target. The 22dp
+            // circle it had was below the minimum and easy to miss, which on
+            // an ad the reader is trying to get rid of means they instead hit
+            // the banner underneath and get sent to the advertiser.
             Positioned(
-              top: 4,
-              right: 6,
-              child: InkWell(
-                onTap: _handleDismiss,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
+              top: 0,
+              right: 0,
+              // A plain IconButton keeps the default 48dp tap target while the
+              // visible chip stays small, so the control is easy to hit
+              // without eating the 64dp banner.
+              child: IconButton(
+                onPressed: _handleDismiss,
+                padding: EdgeInsets.zero,
+                tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                icon: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.1),
+                    color: Colors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.close_rounded,
-                      size: 14, color: Colors.grey),
+                      size: 14, color: Colors.white),
                 ),
               ),
             ),

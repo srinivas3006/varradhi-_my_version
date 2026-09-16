@@ -11,7 +11,7 @@ import 'package:way2news_clone/state/app_state.dart';
 import 'package:way2news_clone/widgets/ads/ad_viewability_detector.dart';
 import 'package:way2news_clone/widgets/ads/sponsored_spotlight_ad_card.dart';
 import 'package:way2news_clone/widgets/article_media_carousel.dart';
-import 'package:way2news_clone/widgets/parallax_page_flip.dart';
+import 'package:way2news_clone/core/widgets/flip_page_view.dart';
 import 'support/integration_contract_cases.dart';
 
 class _AdAdapter implements HttpClientAdapter {
@@ -157,25 +157,29 @@ void main() {
 
   testWidgets('horizontal media swipe does not turn parent Spotlight page',
       (tester) async {
-    final parent = ParallaxPageFlipController();
+    final parent = PageController();
+    addTearDown(parent.dispose);
     var mediaIndex = 0;
     final article = story('a', ['image', 'image', 'image']);
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-            body: ParallaxPageFlip(
+            body: FlipPageView(
       controller: parent,
       itemCount: 2,
-      itemBuilder: (_, index, active, delta, progress, match) => index == 0
+      itemBuilder: (_, index) => index == 0
           ? ArticleMediaCarousel(
               article: article,
-              active: active,
+              active: true,
               onPageChanged: (index) => mediaIndex = index)
           : const Text('Next parent'),
     ))));
-    await tester.drag(find.byType(PageView), const Offset(-600, 0));
+
+    // The inner carousel is horizontal, the feed vertical: the drag must go
+    // to the media and leave the parent page where it is.
+    await tester.drag(find.byType(ArticleMediaCarousel), const Offset(-600, 0));
     await tester.pump(const Duration(seconds: 1));
     expect(mediaIndex, 1);
-    expect(parent.currentIndex, 0);
+    expect(parent.page?.round() ?? 0, 0);
     await tester.pumpWidget(const SizedBox());
   });
 

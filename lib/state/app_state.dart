@@ -667,6 +667,31 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
+  /// Sets liked state explicitly.
+  ///
+  /// Distinct from [toggleLike] because a rollback has to restore an exact
+  /// state, not flip whatever is there now — toggling twice on a failed
+  /// request would leave the flag inverted.
+  void setLiked(String itemId, bool liked) {
+    if (itemId.isEmpty) return;
+    final changed =
+        liked ? likedItemIds.add(itemId) : likedItemIds.remove(itemId);
+    if (!changed) return;
+    notifyListeners();
+    _persist();
+  }
+
+  /// Sets bookmarked state explicitly. See [setLiked].
+  void setBookmarked(String itemId, bool bookmarked) {
+    if (itemId.isEmpty) return;
+    final changed = bookmarked
+        ? bookmarkedItemIds.add(itemId)
+        : bookmarkedItemIds.remove(itemId);
+    if (!changed) return;
+    notifyListeners();
+    _persist();
+  }
+
   bool isLiked(String itemId) {
     return likedItemIds.contains(itemId);
   }

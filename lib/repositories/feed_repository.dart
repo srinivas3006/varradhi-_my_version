@@ -211,11 +211,25 @@ class FeedRepository {
       );
     } on AppException catch (e) {
       _logDebug('[FeedRepository] Network ERROR for key: $key: ${e.message}');
-      return FeedState.error(message: e.message);
+      return _errorWithCache(key, e.message);
     } catch (e) {
       _logDebug('[FeedRepository] Unexpected ERROR for key: $key: $e');
-      return FeedState.error(message: 'డేటాను లోడ్ చేయడంలో లోపం సంభవించింది.');
+      return _errorWithCache(key, 'డేటాను లోడ్ చేయడంలో లోపం సంభవించింది.');
     }
+  }
+
+  /// Failure falls back to whatever is cached for this key.
+  ///
+  /// FeedState.error already downgrades to a non-blocking refreshErrorMessage
+  /// when previousItems is non-empty — it was just never handed any, so a
+  /// dropped request cleared the feed instead of leaving the last good one up.
+  FeedState<NewsArticle> _errorWithCache(String key, String message) {
+    final cached = getCachedFeed(key);
+    return FeedState.error(
+      message: message,
+      previousItems: cached?.items ?? const <NewsArticle>[],
+      previousCursor: cached?.nextCursor,
+    );
   }
 
   /// Pull-to-refresh: resets cursor, fetches first page, preserves existing content on error.

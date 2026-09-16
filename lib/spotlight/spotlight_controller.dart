@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../models/spotlight_item.dart';
 import '../models/ad_banner.dart';
 import '../models/news_article.dart';
+import '../models/poll.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
@@ -25,6 +26,7 @@ class SpotlightController extends ChangeNotifier {
   SpotlightState get state => _state;
 
   final List<dynamic> _postersPool = [];
+  final List<Poll> _pollsPool = [];
   final List<NewsArticle> _ugcItems = [];
   String? _ugcCursor;
   bool _ugcHasMore = true;
@@ -85,18 +87,46 @@ class SpotlightController extends ChangeNotifier {
     _disposed = true;
     ++_requestGeneration;
     _overlayTimer?.cancel();
+    overlayVisible.dispose();
     super.dispose();
+  }
+
+  /// How long the chrome stays up before fading.
+  ///
+  /// Four seconds was not enough to notice the controls and reach the ones in
+  /// the far corners, so taps aimed at the + and refresh buttons landed after
+  /// IgnorePointer had already engaged and did nothing at all.
+  static const Duration _overlayDwell = Duration(seconds: 6);
+
+  /// Chrome visibility, deliberately kept off [notifyListeners].
+  ///
+  /// The feed PageView is built inside an AnimatedBuilder on this controller,
+  /// so notifying for a chrome toggle rebuilt every visible card — and since
+  /// the chrome is toggled on every page change, that rebuild landed exactly
+  /// as the pager was settling. That is the stutter on ad and poster pages,
+  /// which are the heaviest to rebuild. A separate notifier lets the overlays
+  /// repaint without touching the feed.
+  final ValueNotifier<bool> overlayVisible = ValueNotifier<bool>(true);
+
+  void _setOverlayVisible(bool visible) {
+    _state = _state.copyWith(showOverlays: visible);
+    overlayVisible.value = visible;
   }
 
   void startOverlayTimer() {
     _overlayTimer?.cancel();
-    _state = _state.copyWith(showOverlays: true);
-    notifyListeners();
+    _setOverlayVisible(true);
+    _overlayTimer = Timer(_overlayDwell, () => _setOverlayVisible(false));
+  }
 
-    _overlayTimer = Timer(const Duration(seconds: 4), () {
-      _state = _state.copyWith(showOverlays: false);
-      notifyListeners();
-    });
+  /// Shows the chrome and leaves it up, with no hide timer running.
+  ///
+  /// For the utility cards (poll, poster, ad, info): their controls are the
+  /// point of the card, so they must not fade out from under the reader.
+  void showOverlayPersistently() {
+    _overlayTimer?.cancel();
+    if (_state.showOverlays) return;
+    _setOverlayVisible(true);
   }
 
   void toggleOverlay() {
@@ -110,8 +140,7 @@ class SpotlightController extends ChangeNotifier {
 
   void hideOverlay() {
     _overlayTimer?.cancel();
-    _state = _state.copyWith(showOverlays: false);
-    notifyListeners();
+    _setOverlayVisible(false);
   }
 
   void resetOverlayTimer() {
@@ -223,9 +252,12 @@ class SpotlightController extends ChangeNotifier {
             village: village,
             lang: lang,
             forceRefresh: true),
-        refresh
+        _postersPool.isEmpty
             ? ApiService.instance.getPosters(pageSize: 10, lang: lang)
             : Future.value(List<dynamic>.from(_postersPool)),
+        _pollsPool.isEmpty
+            ? ApiService.instance.getPolls()
+            : Future.value(List<Poll>.from(_pollsPool)),
       ]);
       if (_disposed || gen != _requestGeneration || seq != _paginationSequence)
         return;
@@ -249,10 +281,14 @@ class SpotlightController extends ChangeNotifier {
       _postersPool
         ..clear()
         ..addAll(results[3] as List);
+      _pollsPool
+        ..clear()
+        ..addAll(results[4] as List<Poll>);
       if (failure != null &&
           feedState.items.isEmpty &&
           _ugcItems.isEmpty &&
-          _postersPool.isEmpty) {
+          _postersPool.isEmpty &&
+          _pollsPool.isEmpty) {
         throw ApiException(failure);
       }
       _articleHasMore = feedState.hasMore;
@@ -262,25 +298,27 @@ class SpotlightController extends ChangeNotifier {
           .toList()
         ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
       final posterIds = <String>{};
+      // expand, not map: a multi-image poster becomes one page per image.
       final posters = _postersPool
           .whereType<Map>()
-          .map((json) =>
-              SpotlightItem.posterRecord(Map<String, dynamic>.from(json)))
-          .where((item) =>
-              item.id.isNotEmpty &&
-              (item.imageUrls?.isNotEmpty ?? false) &&
-              posterIds.add(item.id))
+          .expand((json) =>
+              SpotlightItem.posterPages(Map<String, dynamic>.from(json)))
+          .where((item) => posterIds.add(item.id))
           .toList();
       final content = <SpotlightItem>[];
       var posterIndex = 0;
+      var pollIndex = 0;
       for (var index = 0; index < stories.length; index++) {
         // Content type comes from the backend; media stays within this parent.
         content.add(SpotlightItem.standard(stories[index]));
-        if ((index + 1) % 5 == 0 && posterIndex < posters.length) {
-          content.add(posters[posterIndex++]);
+        final position = index + 1;
+        if (position % 5 == 0 && posters.isNotEmpty) {
+          content.add(posters[posterIndex++ % posters.length]);
+        }
+        if (position % 8 == 0 && _pollsPool.isNotEmpty) {
+          content.add(SpotlightItem.poll(_pollsPool[pollIndex++ % _pollsPool.length]));
         }
       }
-      content.addAll(posters.skip(posterIndex));
       final run = insertAdsIntoFeed<SpotlightItem>(
         contentItems: content,
         eligibleAds: _adsPool,

@@ -142,6 +142,7 @@ class _InterstitialAdScreenState extends State<_InterstitialAdScreen>
             children: [
               // Ad Creative Content
               GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: _handleTap,
                 child: Center(
                   child: SingleChildScrollView(

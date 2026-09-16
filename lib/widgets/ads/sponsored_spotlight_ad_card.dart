@@ -151,8 +151,27 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // Blurred, darkened copy of the creative, so the bars left by
+            // BoxFit.contain read as deliberate rather than as the ad having
+            // failed to load. Cropping this is fine: it is decoration.
+            if (widget.ad.imageUrl.isNotEmpty)
+              IgnorePointer(
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+                  child: CachedNetworkImage(
+                    imageUrl: widget.ad.imageUrl,
+                    fit: BoxFit.cover,
+                    color: Colors.black.withValues(alpha: 0.55),
+                    colorBlendMode: BlendMode.darken,
+                    placeholder: (_, __) => const SizedBox.shrink(),
+                    errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+
             // Ad Creative / Media Frame
             GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: _handleAdTap,
               child: Center(
                 child: widget.ad.videoUrl.isNotEmpty
@@ -164,7 +183,14 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
                             exposureKey: widget.exposureKey ?? widget.ad.id))
                     : CachedNetworkImage(
                         imageUrl: widget.ad.imageUrl,
-                        fit: BoxFit.cover,
+                        // Contain, not cover. A full-screen creative is a
+                        // poster: its call to action — a phone number, a
+                        // WhatsApp button — sits near the edge, and cover
+                        // crops whatever does not match the device ratio, so
+                        // the one part of the ad that has to survive is the
+                        // first thing lost. The blurred backdrop behind fills
+                        // the letterbox so it still reads as full-bleed.
+                        fit: BoxFit.contain,
                         placeholder: (context, url) => const Center(
                           child:
                               CircularProgressIndicator(color: Colors.white70),
@@ -190,37 +216,45 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
               ),
             ),
 
-            // Top-Left: Frosted "Sponsored" Badge Pill
+            // Ad disclosure. Deliberately smaller and quieter than the old
+            // "📢 SPONSORED" pill — the industry convention, and what the
+            // reference app uses — but still opaque-backed, white on black
+            // and always on top of the creative, so it stays legible on any
+            // artwork. It is a disclosure, not decoration: it must never be
+            // possible for a creative to hide it.
+            //
+            // Kept top-LEFT rather than top-right as in the reference, since
+            // the skip/close control already owns the top-right corner and
+            // overlapping the two would obscure both.
             Positioned(
               top: topPadding + 14,
               left: 16,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(4),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: Colors.white24, width: 0.8),
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.campaign_rounded,
-                            color: Colors.amber, size: 16),
-                        SizedBox(width: 6),
                         Text(
-                          'SPONSORED',
+                          'Ad',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.3,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2,
                           ),
                         ),
+                        SizedBox(width: 3),
+                        Icon(Icons.info_outline,
+                            color: Colors.white70, size: 11),
                       ],
                     ),
                   ),

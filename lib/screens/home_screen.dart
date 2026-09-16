@@ -179,12 +179,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             if (_navIndex == 0 && _homeBottomAd != null)
               Positioned(
-                left: 12,
-                right: 12,
-                bottom: MediaQuery.of(context).padding.bottom + 78,
-                child: SafeArea(
-                  top: false,
-                  child: BottomStickyAdBanner(
+                left: 0,
+                right: 0,
+                bottom: MediaQuery.of(context).padding.bottom + 65,
+                child: BottomStickyAdBanner(
                     key: ValueKey('home_bottom_${_homeBottomAd!.id}'),
                     ad: _homeBottomAd!,
                     placementZone: 'feed',
@@ -196,7 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         });
                     },
                   ),
-                ),
               ),
           ],
         ),

@@ -11,8 +11,13 @@
          Flutter UI initializes, as well as behind your Flutter UI while its
          running.
 
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+         This Theme is only used starting with V2 of Flutter's Android embedding.
+
+         windowBackground is pinned to @drawable/launch_background rather than
+         ?android:colorBackground: under Theme.Black that attribute is black, so
+         every surface shown before Flutter's first frame was black in dark
+         mode — which is what "the app opens to a black screen" looked like. -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 </resources>

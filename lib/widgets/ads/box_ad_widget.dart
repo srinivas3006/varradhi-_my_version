@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
+import 'ad_badge.dart';
 import 'ad_viewability_detector.dart';
 
 /// Square / Box ad widget (Aspect ratio: 1:1)
@@ -71,6 +72,7 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
             child: Stack(
               fit: StackFit.expand,
               children: [
+              AdBadge.positioned(),
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
                   fit: BoxFit.cover,
@@ -92,27 +94,6 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
                   },
                 ),
 
-                // Sponsored pill
-                Positioned(
-                  top: 10,
-                  left: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Sponsored',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),

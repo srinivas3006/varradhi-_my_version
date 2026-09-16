@@ -7,13 +7,16 @@ import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
 import '../services/ad_delivery_service.dart';
-import '../widgets/parallax_page_flip.dart';
+import '../core/widgets/flip_page_view.dart';
 import '../widgets/spotlight/spotlight_news_card.dart';
-import '../widgets/spotlight/spotlight_promo_card.dart';
 import '../widgets/spotlight/spotlight_shimmer_card.dart';
 import '../widgets/spotlight/location_prompt_sheet.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/info_card.dart';
+import '../widgets/poll_card.dart';
+import '../core/widgets/fit_or_scroll.dart';
+import '../widgets/spotlight/spotlight_trending_strip.dart';
+import '../screens/news_detail_screen.dart';
 import '../utils/share_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -49,9 +52,16 @@ class SpotlightScreenView extends StatefulWidget {
 class _SpotlightScreenViewState extends State<SpotlightScreenView>
     with WidgetsBindingObserver {
   late final SpotlightController _controller;
-  final ParallaxPageFlipController _flipController =
-      ParallaxPageFlipController();
+  // A real PageController: the feed rides Flutter's own scroll physics
+  // (momentum, fling, settle) instead of the hand-rolled vertical drag
+  // handlers it used before, which had none of them — that is what made the
+  // swipe feel like it caught.
+  final PageController _pageController = PageController();
   int _lastPageIndex = 0;
+
+  /// Which page is settled. A notifier rather than setState: only the two
+  /// cards whose isCurrent actually flips need to rebuild, not the feed.
+  final ValueNotifier<int> _currentPage = ValueNotifier<int>(0);
   Timer? _dwellTimer;
   Timer? _locationPromptTimer;
   bool _hasPromptedLocationThisSession = false;
@@ -66,6 +76,31 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       initialStoryId: widget.initialStoryId,
     );
     _scheduleGentleLocationPrompt();
+    // A deep link can ask for a specific story. The feed is empty at this
+    // point, so jump once as soon as it arrives.
+    _controller.addListener(_jumpToInitialStoryOnce);
+  }
+
+  bool _jumpedToInitialStory = false;
+
+  void _jumpToInitialStoryOnce() {
+    if (_jumpedToInitialStory) return;
+    final feed = _controller.state.feed;
+    if (feed.isEmpty) return;
+
+    _jumpedToInitialStory = true;
+    _controller.removeListener(_jumpToInitialStoryOnce);
+
+    final target = widget.initialStoryIndex ??
+        _controller.findInitialIndex(widget.initialStoryId);
+    if (target <= 0 || target >= feed.length) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pageController.hasClients) return;
+      _pageController.jumpToPage(target);
+      _lastPageIndex = target;
+      _currentPage.value = target;
+    });
   }
 
   @override
@@ -83,8 +118,20 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     AppTtsService.instance.stop();
     _dwellTimer?.cancel();
     _locationPromptTimer?.cancel();
+    _controller.removeListener(_jumpToInitialStoryOnce);
+    _currentPage.dispose();
+    _pageController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Moves to the next page, used by cards that dismiss themselves.
+  void _advancePage() {
+    if (!_pageController.hasClients) return;
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _scheduleGentleLocationPrompt() {
@@ -137,13 +184,30 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   void _handlePageChanged(int index) {
     final bool isSwipingBack = index < _lastPageIndex;
     _lastPageIndex = index;
+    _currentPage.value = index;
 
-    // Mutually exclusive playback: Stop active TTS/Video upon swiping
+    // Mutually exclusive playback: stop active TTS/video on swipe. This used
+    // to hang off the pager's onSwipeStart, which the PageView has no
+    // equivalent for — landing on a new page is the reliable signal.
     SpotlightMediaCoordinator.instance.stopAll();
+    AppTtsService.instance.stop();
 
-    // Auto-hide overlays on swipe for clean, immersive reading
-    if (_controller.state.showOverlays) {
-      _controller.hideOverlay();
+    // Auto-hide overlays on swipe for clean, immersive reading — but only on
+    // story cards. A poll, poster or sponsored card keeps its chrome: those
+    // carry the controls the reader needs (vote, save, close), and stripping
+    // them left no way to act on the card or leave it.
+    // A null type means the index is past the end of the feed — which happens
+    // when a dismissed ad was the last item. Default to keeping the chrome
+    // there: a blank page with no chrome is the one state with no way out.
+    final landedOn = index >= 0 && index < _controller.state.feed.length
+        ? _controller.state.feed[index].type
+        : null;
+    if (landedOn?.isImmersiveStory ?? false) {
+      if (_controller.state.showOverlays) {
+        _controller.hideOverlay();
+      }
+    } else if (!_controller.state.showOverlays) {
+      _controller.showOverlayPersistently();
     }
 
     // Track dwell and page selection in AdDeliveryService
@@ -194,14 +258,96 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     ShareService.shareArticle(article);
   }
 
-  Widget _buildItem(
-    BuildContext context,
-    int index,
-    bool isCurrent,
-    double dragDelta,
-    double dragProgress,
-    double matchCutProgress,
-  ) {
+  void _openArticle(NewsArticle article) {
+    _controller.resetOverlayTimer();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NewsDetailScreen(
+          article: article,
+          slug: article.slug.isNotEmpty ? article.slug : article.id,
+        ),
+      ),
+    );
+  }
+
+  /// Stories to offer alongside a utility card.
+  ///
+  /// Sourced from the feed already in memory rather than a new request: the
+  /// point is to use space the poll or ad leaves empty, which is not worth a
+  /// round trip. Skips the card itself and anything without a headline.
+  List<NewsArticle> _trendingNear(int index) {
+    final feed = _controller.state.feed;
+    final picks = <NewsArticle>[];
+    final seen = <String>{};
+    for (var offset = 1; offset < feed.length && picks.length < 8; offset++) {
+      for (final probe in [index + offset, index - offset]) {
+        if (probe < 0 || probe >= feed.length || probe == index) continue;
+        final article = feed[probe].article;
+        if (article == null || article.title.trim().isEmpty) continue;
+        if (!seen.add(article.id.isEmpty ? article.slug : article.id)) continue;
+        picks.add(article);
+        if (picks.length >= 8) break;
+      }
+    }
+    return picks;
+  }
+
+  /// Lays a utility card over the space it actually needs and gives the
+  /// remainder to the trending strip.
+  Widget _withTrending(int index, Widget card) {
+    final trending = _trendingNear(index);
+    if (trending.isEmpty) return card;
+    return Column(
+      children: [
+        Expanded(child: card),
+        SpotlightTrendingStrip(
+          articles: trending,
+          onOpen: _openArticle,
+        ),
+        SizedBox(height: MediaQuery.paddingOf(context).bottom + 76),
+      ],
+    );
+  }
+
+  /// Keeps a utility card clear of the chrome that now stays on screen for
+  /// it — the top bar, the local-location strip, and the bottom capsule.
+  EdgeInsets _utilityCardInsets(BuildContext context,
+      {bool reserveBottomChrome = true}) {
+    final padding = MediaQuery.paddingOf(context);
+    final state = _controller.state;
+    return EdgeInsets.fromLTRB(
+      16,
+      padding.top + (state.isLocalNews ? 124 : 76),
+      16,
+      // When a trending strip sits below, it already owns the bottom of the
+      // page. Reserving the chrome height here too double-counted it and
+      // squeezed the card enough to give its FitOrScroll real scroll extent
+      // — and a vertical scrollable inside a vertical pager wins the drag,
+      // which is exactly how a page ends up refusing to advance.
+      reserveBottomChrome ? padding.bottom + 88 : 8,
+    );
+  }
+
+  /// Builds one page.
+  ///
+  /// The transition is FlipPageView's job now, so cards are built settled:
+  /// no drag offset, no partial opacity, no scale. A card at rest renders
+  /// pixel-exact instead of sitting on a transformed layer, which is both
+  /// sharper and cheaper than re-laying it out on every frame of a swipe.
+  Widget _buildItem(BuildContext context, int index) {
+    return ValueListenableBuilder<int>(
+      valueListenable: _currentPage,
+      builder: (context, currentPage, _) =>
+          _buildItemFor(context, index, index == currentPage),
+    );
+  }
+
+  Widget _buildItemFor(BuildContext context, int index, bool isCurrent) {
+    const dragDelta = 0.0;
+    const dragProgress = 0.0;
+    const matchCutProgress = 0.0;
+
     final state = _controller.state;
     if (index >= state.feed.length) return const SizedBox();
 
@@ -215,6 +361,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         if (item.article == null) return const SizedBox();
         child = SpotlightNewsCard(
           article: item.article!,
+          pageIndex: index,
+          pageCount: state.feed.length,
           isCurrent: isCurrent,
           dragDelta: dragDelta,
           dragProgress: dragProgress,
@@ -229,6 +377,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         if (item.article == null) return const SizedBox();
         child = SpotlightNewsCard(
             article: item.article!,
+            pageIndex: index,
+            pageCount: state.feed.length,
             isCurrent: isCurrent,
             dragDelta: dragDelta,
             dragProgress: dragProgress,
@@ -236,12 +386,6 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
             onTap: _controller.toggleOverlay,
             onShare: () => _shareArticle(item.article!),
             onClose: _closeSpotlight);
-        break;
-
-      case SpotlightType.promo:
-        child = SpotlightPromoCard(
-          imageUrl: item.promoImageUrl ?? '',
-        );
         break;
 
       case SpotlightType.ad:
@@ -257,6 +401,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 ? item.adBanner!.displayDurationSeconds
                 : 5,
             placementZone: 'feed');
+        // Same treatment as the poll: a sponsored card leaves most of a tall
+        // screen unused, so the remainder goes to trending rather than blank.
+        child = _withTrending(index, child);
         break;
 
       case SpotlightType.poster:
@@ -265,13 +412,42 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
           mediaUrl: item.mediaUrl ?? '',
           imageUrls: item.imageUrls ?? [],
           durationSeconds: 0,
-          onClose: _flipController.next,
+          pageIndex: item.posterPageIndex,
+          pageCount: item.posterPageCount,
+          title: item.title ?? '',
+          onClose: _advancePage,
         );
         break;
 
       case SpotlightType.infoCard:
-        child = InfoCard(
-          title: item.title ?? '',
+        child = FitOrScroll(
+          padding: _utilityCardInsets(context),
+          child: InfoCard(
+            key: ValueKey('info_${item.id}'),
+            title: item.title ?? 'Did you know?',
+          ),
+        );
+        break;
+
+      case SpotlightType.poll:
+        if (item.poll == null) return const SizedBox();
+        // FitOrScroll, not Center: a poll builds one row per option, so a
+        // long one overflowed the card and put the last options — and the
+        // vote button — out of reach. It also keeps the scroll extent at
+        // exactly zero when the poll does fit, so the swipe still belongs to
+        // the pager rather than being swallowed by an inner scroll view.
+        child = Container(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: _withTrending(
+            index,
+            FitOrScroll(
+              padding: _utilityCardInsets(context, reserveBottomChrome: false),
+              child: PollCard(
+                key: ValueKey('poll_${item.id}'),
+                poll: item.poll!,
+              ),
+            ),
+          ),
         );
         break;
 
@@ -282,7 +458,19 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
     return RepaintBoundary(
       key: ValueKey('spotlight-card-${item.id}-$index'),
-      child: child,
+      // Tap-to-toggle lives on the wrapper so it covers every card kind, not
+      // just the story cards that happen to accept an onTap. Without it a
+      // reader who swiped onto a poster, poll or ad had no way to bring the
+      // chrome back, and no way out of the card. Children win the gesture
+      // arena, so vote buttons and ad click-through still take their taps.
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _controller.toggleOverlay,
+        child: Transform.translate(
+          offset: Offset(0, dragDelta),
+          child: child,
+        ),
+      ),
     );
   }
 
@@ -436,6 +624,22 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
           ),
         ),
       ),
+    );
+  }
+
+  /// Keeps the chrome alive while the reader is reaching for it.
+  ///
+  /// Resetting on pointer-down, not on a completed tap: every
+  /// resetOverlayTimer() call below sits inside an onPressed, which cannot
+  /// run when the tap is the thing being lost. IgnorePointer engages the
+  /// instant showOverlays flips, while the button is still visibly fading, so
+  /// a tap aimed at a control the reader can still see did nothing. This
+  /// keeps the controls live for as long as they are actually being used.
+  Widget _keepChromeAlive(Widget child) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _controller.resetOverlayTimer(),
+      child: child,
     );
   }
 
@@ -708,8 +912,6 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
-    final initialIndex = widget.initialStoryIndex ??
-        _controller.findInitialIndex(widget.initialStoryId);
 
     return PopScope(
       canPop: canPop,
@@ -740,38 +942,52 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                                   state.errorMessage == null
                               ? _buildLocationFallback()
                               : _buildEmptyFeedState(state.isLocalNews)
-                          : ParallaxPageFlip(
-                              key: ValueKey(
-                                  'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
-                              controller: _flipController,
-                              initialIndex: initialIndex < state.feed.length
-                                  ? initialIndex
-                                  : 0,
-                              itemCount: state.feed.length,
-                              onPageChanged: _handlePageChanged,
-                              onSwipeStart: () {
-                                SpotlightMediaCoordinator.instance.stopAll();
-                                AppTtsService.instance.stop();
-                              },
-                              onTap: _controller.toggleOverlay,
-                              itemBuilder: _buildItem,
+                          : ScrollConfiguration(
+                              // Android 12+ stretch overscroll swallows the
+                              // overscroll notification RefreshIndicator
+                              // needs, so the pull did nothing on device
+                              // while passing in tests. Drop the indicator
+                              // here; the refresh spinner is the feedback.
+                              behavior: const MaterialScrollBehavior()
+                                  .copyWith(overscroll: false),
+                              child: RefreshIndicator(
+                                // refreshFeed() is the same call the
+                                // bottom-bar button already makes.
+                                onRefresh: _controller.refreshFeed,
+                                edgeOffset:
+                                    MediaQuery.paddingOf(context).top,
+                                child: FlipPageView(
+                                key: ValueKey(
+                                    'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                                  controller: _pageController,
+                                  itemCount: state.feed.length,
+                                  onPageChanged: _handlePageChanged,
+                                  itemBuilder: _buildItem,
+                                ),
+                              ),
                             ),
                 ),
 
-                // 2. Top Frosted Glass Overlay (Profile, [ ప్రధాన వార్తలు | స్థానికం ], + Button)
+                // 2-4. Chrome. Listens to overlayVisible rather than the
+                // controller, so showing or hiding it repaints only these
+                // bars and never rebuilds the feed underneath.
+                ValueListenableBuilder<bool>(
+                  valueListenable: _controller.overlayVisible,
+                  builder: (context, showOverlays, _) => Stack(
+                    children: [
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 280),
                   curve: Curves.easeOutCubic,
-                  top: state.showOverlays ? 0 : -140,
+                  top: showOverlays ? 0 : -140,
                   left: 0,
                   right: 0,
                   child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
-                    opacity: state.showOverlays ? 1.0 : 0.0,
+                    opacity: showOverlays ? 1.0 : 0.0,
                     child: IgnorePointer(
-                      ignoring: !state.showOverlays,
-                      child: _buildTopOverlay(state),
+                      ignoring: !showOverlays,
+                      child: _keepChromeAlive(_buildTopOverlay(state)),
                     ),
                   ),
                 ),
@@ -780,7 +996,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 280),
                   curve: Curves.easeOutCubic,
-                  top: (state.showOverlays && state.isLocalNews)
+                  top: (showOverlays && state.isLocalNews)
                       ? MediaQuery.of(context).padding.top + 70
                       : -100,
                   left: 0,
@@ -790,10 +1006,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                       duration: const Duration(milliseconds: 220),
                       curve: Curves.easeOutCubic,
                       opacity:
-                          (state.showOverlays && state.isLocalNews) ? 1.0 : 0.0,
+                          (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
                       child: IgnorePointer(
-                        ignoring: !(state.showOverlays && state.isLocalNews),
-                        child: _buildLocationStrip(),
+                        ignoring: !(showOverlays && state.isLocalNews),
+                        child: _keepChromeAlive(_buildLocationStrip()),
                       ),
                     ),
                   ),
@@ -803,7 +1019,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 280),
                   curve: Curves.easeOutCubic,
-                  bottom: state.showOverlays
+                  bottom: showOverlays
                       ? MediaQuery.of(context).padding.bottom + 16
                       : -100,
                   left: 20,
@@ -811,11 +1027,14 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,
-                    opacity: state.showOverlays ? 1.0 : 0.0,
+                    opacity: showOverlays ? 1.0 : 0.0,
                     child: IgnorePointer(
-                      ignoring: !state.showOverlays,
-                      child: _buildBottomOverlay(),
+                      ignoring: !showOverlays,
+                      child: _keepChromeAlive(_buildBottomOverlay()),
                     ),
+                  ),
+                ),
+                    ],
                   ),
                 ),
               ],

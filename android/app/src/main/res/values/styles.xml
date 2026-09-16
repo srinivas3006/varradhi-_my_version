@@ -13,6 +13,8 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- Pinned rather than ?android:colorBackground so both light and night
+             resolve to the same colour as SplashScreen. See values-night. -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 </resources>

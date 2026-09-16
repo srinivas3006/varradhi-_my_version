@@ -8,6 +8,9 @@ import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'news_detail_screen.dart';
+import '../services/ad_manager.dart';
+import '../core/ads/ad_insertion.dart';
+import '../widgets/ads/unified_ad_widget.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -20,6 +23,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   List<NewsArticle> _results = [];
+  List<FeedPresentationItem<NewsArticle>> _presentedResults = [];
   List<String> _recent = [];
   List<String> _trending = [];
   int _queryGeneration = 0;
@@ -81,9 +85,13 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     setState(() => _isLoading = true);
 
-    final response = await ApiService.instance.searchArticles(
+    final futureResponse = ApiService.instance.searchArticles(
       trimmed, lang: AppState.instance.contentLanguage,
     );
+    final futureAds = AdManager.instance.getAdsForZone('search');
+    
+    final response = await futureResponse;
+    final ads = await futureAds;
 
     if (!mounted || generation != _queryGeneration) return;
     if (response.hasErrors) {
@@ -96,6 +104,12 @@ class _SearchScreenState extends State<SearchScreen> {
 
     setState(() {
       _results = response.data ?? [];
+      _presentedResults = insertAdsIntoFeed<NewsArticle>(
+        contentItems: _results,
+        eligibleAds: ads.cast(),
+        allowTimed: false,
+        contentKey: (article) => 'search:${article.id}',
+      );
       _isLoading = false;
       if (!_recent.contains(trimmed)) {
         _recent.insert(0, trimmed);
@@ -220,10 +234,19 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     return ListView.separated(
       padding: const EdgeInsets.all(16),
-      itemCount: _results.length,
+      itemCount: _presentedResults.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final article = _results[index];
+        final item = _presentedResults[index];
+        if (item.isAd) {
+          return UnifiedAdWidget(
+            ad: item.ad!,
+            placementZone: 'search',
+            exposureKey: item.stableKey,
+          );
+        }
+        
+        final article = item.content!;
         return ListTile(
           contentPadding: EdgeInsets.zero,
           leading: ClipRRect(
@@ -255,15 +278,23 @@ class _SearchScreenState extends State<SearchScreen> {
                     child: const Icon(Icons.newspaper_rounded, size: 20),
                   ),
           ),
-          title: Text(article.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+          title: Text(
+            article.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
+          ),
           subtitle: Text('${article.source} · ${article.timeAgo}',
               style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article, slug: article.slug)),
+            MaterialPageRoute(
+              builder: (_) => NewsDetailScreen(article: article),
+            ),
           ),
         );
       },

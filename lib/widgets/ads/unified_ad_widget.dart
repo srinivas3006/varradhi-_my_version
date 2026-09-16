@@ -40,15 +40,11 @@ class UnifiedAdWidget extends StatelessWidget {
       AdActivityScope(active: active, child: _buildCreative(context));
 
   Widget _buildCreative(BuildContext context) {
-    // 1. Video ad (16:9 video player with poster)
-    if (ad.isVideo) {
-      return VideoAdCard(
-        ad: ad,
-        placementZone: placementZone,
-        exposureKey: exposureKey,
-      );
-    }
-
+    // ad_type picks the component, nothing else. This used to short-circuit
+    // on ad.isVideo, which is true for any ad merely carrying a video_url —
+    // so a full_screen or poster creative with a video attached rendered as a
+    // 16:9 video card instead of its declared type. The switch below already
+    // has a videoCard case, driven by ad_type.
     final presentationType = AdTypeResolver.resolve(ad);
 
     switch (presentationType) {

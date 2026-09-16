@@ -6,6 +6,7 @@ import '../../services/tts_service.dart';
 import '../../screens/news_detail_screen.dart';
 import '../../models/news_article.dart';
 import '../../state/app_state.dart';
+import '../../state/engagement_store.dart';
 import '../../theme/app_theme.dart';
 import '../../screens/comments_screen.dart';
 import '../../services/api_service.dart';
@@ -20,6 +21,11 @@ class SpotlightNewsCard extends StatefulWidget {
   final VoidCallback onShare;
   final VoidCallback onClose;
 
+  /// Position of this card in the feed and how many cards are loaded, for
+  /// the "3 of 6 Pages" marker. Zero count hides it.
+  final int pageIndex;
+  final int pageCount;
+
   // Parallax properties
   final bool isCurrent;
   final double dragDelta;
@@ -32,6 +38,8 @@ class SpotlightNewsCard extends StatefulWidget {
     required this.onTap,
     required this.onShare,
     required this.onClose,
+    this.pageIndex = 0,
+    this.pageCount = 0,
     this.isCurrent = true,
     this.dragDelta = 0.0,
     this.dragProgress = 0.0,
@@ -43,15 +51,40 @@ class SpotlightNewsCard extends StatefulWidget {
 }
 
 class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
-  bool _isDisliked = false;
   bool _isLoadingDetail = false;
   String? _detailError;
   NewsArticle? _detailArticle;
   int _detailGeneration = 0;
 
+  /// Identity this card's engagement is filed under. Uses the article id
+  /// where there is one, falling back to the slug, so the same story keyed
+  /// either way lands on one entry.
+  String get _engagementId =>
+      widget.article.id.isNotEmpty ? widget.article.id : widget.article.slug;
+
+  String get _engagementKey => EngagementStore.keyFor(
+        kind: widget.article.contentKind,
+        id: _engagementId,
+      );
+
+  /// Publishes the counts that arrived with the feed payload, and the
+  /// viewer's own state as it was persisted locally, so the card renders real
+  /// numbers on first paint rather than zeroes that jump a frame later.
+  void _seedEngagement(NewsArticle article) {
+    EngagementStore.instance.seed(
+      _engagementKey,
+      likeCount: article.likes,
+      dislikeCount: article.dislikes,
+      commentCount: article.comments,
+      reaction: AppState.instance.isLiked(_engagementId) ? Reaction.like : null,
+      bookmarked: AppState.instance.bookmarkedItemIds.contains(_engagementId),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _seedEngagement(widget.article);
     // Fetch full article detail (content) using slug or id from feed item.
     final slugToFetch = widget.article.slug.isNotEmpty
         ? widget.article.slug
@@ -127,6 +160,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       debugPrint(
           'Spotlight: detail fetched for $slug. Content length: ${full.body.length}');
       if (mounted && generation == _detailGeneration) {
+        // Detail carries fresher counts than the feed summary did.
+        _seedEngagement(full);
         setState(() {
           _detailArticle = full;
           _isLoadingDetail = false;
@@ -143,23 +178,46 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     }
   }
 
+  /// Media aspect ratio, width : height.
+  ///
+  /// The image is full-bleed width and its height follows from that ratio,
+  /// rather than being a share of the screen height — so it presents the same
+  /// shape on every device instead of growing taller on tall phones. The
+  /// content below then takes whatever is left, sized by its own title and
+  /// body.
+  static const double _mediaAspectRatio = 9 / 8;
+
   @override
   Widget build(BuildContext context) {
+    // LayoutBuilder, not MediaQuery.size: the card is not the screen, and the
+    // media height is derived from the card's own width.
+    return LayoutBuilder(
+      builder: (context, constraints) => _buildCard(context, constraints),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, BoxConstraints constraints) {
     final article = _detailArticle ?? widget.article;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final mediaHeight = MediaQuery.of(context).size.height * 0.38;
+    // height = width / (w:h). Capped so a short landscape screen still
+    // leaves room for the headline.
+    final mediaHeight =
+        (constraints.maxWidth / _mediaAspectRatio).clamp(0.0, constraints.maxHeight * 0.72);
 
-    // Parallax Animation Values
-    final textOpacity =
-        widget.isCurrent ? (1.0 - widget.dragProgress) : widget.dragProgress;
-    final imageOpacity = widget.isCurrent
-        ? (1.0 - widget.matchCutProgress)
-        : widget.matchCutProgress;
-    final imageScale =
-        widget.isCurrent ? 1.0 : (0.95 + 0.05 * widget.matchCutProgress);
+    // Always fully painted. FlipPageView owns the transition now, so a card
+    // must render at full opacity whether or not it is the settled one — the
+    // neighbour it pre-builds is on screen during the swipe, and the page you
+    // land on is not "current" until onPageChanged fires afterwards.
+    //
+    // These used to be derived from the drag values, which meant a card that
+    // was not current painted at opacity 0: every story after the first was a
+    // blank white screen.
+    const textOpacity = 1.0;
+    const imageOpacity = 1.0;
+    const imageScale = 1.0;
 
-    final headlineOffset = widget.dragDelta * 1.0;
-    final bodyOffset = widget.dragDelta * 0.85;
+    const headlineOffset = 0.0;
+    final bodyOffset = widget.dragDelta * -0.15;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -168,7 +226,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         color: Theme.of(context).scaffoldBackgroundColor,
         child: Stack(
           children: [
-            // 1. IMAGE ZONE (Top 38% with Parallax)
+            // 1. IMAGE ZONE (full width at 9:8, cover, with parallax)
             Positioned(
               top: 0,
               left: 0,
@@ -177,7 +235,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
               child: RepaintBoundary(
                 child: Transform.translate(
                   offset: Offset(
-                      0, widget.dragDelta * 0.5), // Subtle image parallax
+                      0, widget.dragDelta * -0.5), // Subtle image parallax
                   child: Opacity(
                     opacity: imageOpacity,
                     child: Transform.scale(
@@ -331,13 +389,15 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
               ),
             ),
 
-            // 2. CONTENT ZONE (Overlaps image slightly)
+            // 2. CONTENT ZONE (auto height from title + body, below the image)
             Positioned.fill(
-              top: mediaHeight - 24,
+              top: mediaHeight,
               child: Opacity(
-                opacity: textOpacity.clamp(0.0, 1.0),
+                opacity: textOpacity,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18.0),
+                  // 16, not 18: the gutter sets the measure, and the column
+                  // has to match for the text to break on the same words.
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -559,6 +619,16 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       color: AppColors.textMuted,
                                       fontWeight: FontWeight.w600),
                                 ),
+                                if (widget.pageCount > 0) ...[
+                                  const Spacer(),
+                                  Text(
+                                    '${widget.pageIndex + 1} of ${widget.pageCount} Pages',
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textMuted,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                ],
                               ],
                             ),
                           ],
@@ -573,12 +643,21 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           article.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
+                          // Telugu needs more vertical room than Latin at the
+                          // same size: vowel signs sit well above the baseline
+                          // and ottulu hang below it, and Flutter lets glyphs
+                          // overflow a short line box rather than clipping —
+                          // so 1.25 let two headline lines collide.
+                          //
+                          // letterSpacing stays at 0. Negative tracking is a
+                          // Latin display-type habit; on Telugu it tightens
+                          // conjunct clusters that are already dense.
                           style: TextStyle(
-                            fontSize: 23,
+                            fontSize: 21,
                             fontWeight: FontWeight.w800,
                             color: isDark ? Colors.white : Colors.black87,
-                            height: 1.25,
-                            letterSpacing: -0.5,
+                            height: 1.4,
+                            letterSpacing: 0,
                           ),
                         ),
                       ),
@@ -621,48 +700,63 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                             return LayoutBuilder(
                               builder: (context, constraints) {
+                                // Measured against the Way2News card: ~9
+                                // lines of Telugu across a 342dp column at a
+                                // 26.5dp line rhythm, which is 16 / 1.65.
                                 final textStyle = TextStyle(
-                                  fontSize: 15.5,
+                                  fontSize: 16,
                                   color: isDark
                                       ? Colors.white70
                                       : AppColors.textDark
                                           .withValues(alpha: 0.88),
-                                  height: 1.55,
-                                  letterSpacing: 0.1,
+                                  height: 1.65,
+                                  letterSpacing: 0,
                                 );
 
-                                // Line height based on font size and height factor (~24px)
-                                final double lineHeight =
-                                    textStyle.fontSize! * textStyle.height!;
                                 const double reservedForButton = 44.0;
 
-                                // Total lines that can fit in full available height without button
-                                final int maxPossibleLines =
-                                    (constraints.maxHeight / lineHeight)
-                                        .floor()
-                                        .clamp(1, 40);
-
-                                // Measure whether content exceeds the available screen space
-                                final textSpan =
-                                    TextSpan(text: toShow, style: textStyle);
+                                // Ask the engine for the real line metrics
+                                // rather than assuming fontSize * height.
+                                // After shaping, a Telugu line is as tall as
+                                // its tallest cluster — a base consonant
+                                // carrying a vowel sign above and an ottu
+                                // below is taller than the nominal figure, so
+                                // the estimate ran high and pushed the Read
+                                // More button off its line.
                                 final textPainter = TextPainter(
-                                  text: textSpan,
+                                  text: TextSpan(text: toShow, style: textStyle),
                                   textDirection: Directionality.of(context),
-                                  maxLines: maxPossibleLines,
                                 )..layout(maxWidth: constraints.maxWidth);
 
-                                // If news is short and fits completely, NO read more button is shown!
-                                // Only show read more if the text exceeds what can fit on screen
-                                final bool isTruncated =
-                                    textPainter.didExceedMaxLines;
-                                final bool shouldShowReadMore = isTruncated;
+                                final lines = textPainter.computeLineMetrics();
+                                final int totalLines = lines.length;
 
-                                // When read more button is shown, reserve space for button and fill remaining lines
+                                /// Whole measured lines that fit in [available].
+                                int linesThatFit(double available) {
+                                  var used = 0.0;
+                                  var fitted = 0;
+                                  for (final line in lines) {
+                                    if (used + line.height > available) break;
+                                    used += line.height;
+                                    fitted++;
+                                  }
+                                  return fitted;
+                                }
+
+                                final int maxPossibleLines = totalLines == 0
+                                    ? 1
+                                    : linesThatFit(constraints.maxHeight)
+                                        .clamp(1, totalLines);
+
+                                // Short enough to sit on screen whole: no
+                                // Read More button at all.
+                                final bool shouldShowReadMore =
+                                    maxPossibleLines < totalLines;
+
                                 final int dynamicMaxLines = shouldShowReadMore
-                                    ? (((constraints.maxHeight - reservedForButton) /
-                                                lineHeight)
-                                            .floor())
-                                        .clamp(3, 35)
+                                    ? linesThatFit(constraints.maxHeight -
+                                            reservedForButton)
+                                        .clamp(1, totalLines)
                                     : maxPossibleLines;
 
                                 return Column(
@@ -673,7 +767,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       toShow,
                                       maxLines: dynamicMaxLines,
                                       overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.justify,
+                                      // Ragged right. Justifying a ~350px
+                                      // column of Telugu stretches the gaps
+                                      // around its long compound words into
+                                      // visible rivers of whitespace.
+                                      textAlign: TextAlign.start,
                                       style: textStyle,
                                     ),
                                     if (shouldShowReadMore) ...[
@@ -737,114 +835,111 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // Like
-                                AnimatedBuilder(
-                                  animation: AppState.instance,
-                                  builder: (context, _) {
-                                    final targetId = article.id.isNotEmpty
-                                        ? article.id
-                                        : article.slug;
-                                    final isLiked = AppState
-                                            .instance.likedItemIds
-                                            .contains(targetId) ||
-                                        (article.id.isNotEmpty &&
-                                            AppState.instance.likedItemIds
-                                                .contains(article.id));
+                                // Like. Reads from the shared EngagementStore
+                                // so the count here, on the detail screen and
+                                // on the feed card are the same number, and
+                                // moves the instant the reader taps.
+                                ValueListenableBuilder<Engagement>(
+                                  valueListenable: EngagementStore.instance
+                                      .listenableFor(_engagementKey),
+                                  builder: (context, engagement, _) {
                                     return _buildActionIcon(
-                                      icon: isLiked
+                                      icon: engagement.liked
                                           ? Icons.thumb_up_rounded
                                           : Icons.thumb_up_alt_outlined,
-                                      color: isLiked
+                                      color: engagement.liked
                                           ? AppColors.primary
                                           : AppColors.textMuted,
-                                      label: _formatCount(
-                                          article.likes + (isLiked ? 1 : 0)),
-                                      onTap: () async {
+                                      label: _formatCount(engagement.likeCount),
+                                      onTap: () {
                                         HapticFeedback.lightImpact();
-                                        final nowLiked = !isLiked;
-                                        AppState.instance.toggleLike(targetId);
-                                        setState(() {
-                                          if (nowLiked) {
-                                            _isDisliked = false;
-                                          }
-                                        });
-                                        if (AppState.instance.isLoggedIn) {
-                                          ApiService.instance
-                                              .postArticleReaction(
-                                                targetId,
-                                                nowLiked ? 'like' : 'none',
-                                              )
-                                              .catchError(
-                                                  (_) => <String, dynamic>{});
-                                        }
+                                        EngagementStore.instance.toggleLike(
+                                          _engagementKey,
+                                          _engagementId,
+                                        );
                                       },
                                     );
                                   },
                                 ),
-                                // Dislike
-                                _buildActionIcon(
-                                  icon: _isDisliked
-                                      ? Icons.thumb_down_rounded
-                                      : Icons.thumb_down_alt_outlined,
-                                  color: _isDisliked
-                                      ? Colors.redAccent
-                                      : AppColors.textMuted,
-                                  label: '',
-                                  onTap: () async {
-                                    HapticFeedback.lightImpact();
-                                    final targetId = article.id.isNotEmpty
-                                        ? article.id
-                                        : article.slug;
-                                    final nowDisliked = !_isDisliked;
-                                    setState(() {
-                                      _isDisliked = nowDisliked;
-                                      if (nowDisliked &&
-                                          (AppState.instance.isLiked(targetId) ||
-                                              AppState.instance
-                                                  .isLiked(article.id))) {
-                                        AppState.instance.toggleLike(targetId);
-                                      }
-                                    });
-                                    if (AppState.instance.isLoggedIn) {
-                                      ApiService.instance
-                                          .postArticleReaction(
-                                            targetId,
-                                            nowDisliked ? 'dislike' : 'none',
-                                          )
-                                          .catchError(
-                                              (_) => <String, dynamic>{});
-                                    }
-                                    ScaffoldMessenger.of(context)
-                                        .removeCurrentSnackBar();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(nowDisliked
-                                            ? (AppState.instance.language ==
-                                                    'Telugu'
-                                                ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
-                                                : 'Feedback received')
-                                            : (AppState.instance.language ==
-                                                    'Telugu'
-                                                ? 'డిస్‌లైక్ తీసివేయబడింది'
-                                                : 'Dislike removed')),
-                                        duration: const Duration(seconds: 1),
-                                        behavior: SnackBarBehavior.floating,
-                                      ),
+                                // Dislike. Same store as like, so the two
+                                // are one reaction rather than two
+                                // independent flags that could both be on.
+                                ValueListenableBuilder<Engagement>(
+                                  valueListenable: EngagementStore.instance
+                                      .listenableFor(_engagementKey),
+                                  builder: (context, engagement, _) {
+                                    return _buildActionIcon(
+                                      icon: engagement.disliked
+                                          ? Icons.thumb_down_rounded
+                                          : Icons.thumb_down_alt_outlined,
+                                      color: engagement.disliked
+                                          ? Colors.redAccent
+                                          : AppColors.textMuted,
+                                      label: _formatCount(
+                                          engagement.dislikeCount),
+                                      onTap: () {
+                                        HapticFeedback.lightImpact();
+                                        final wasDisliked = engagement.disliked;
+                                        EngagementStore.instance.toggleDislike(
+                                          _engagementKey,
+                                          _engagementId,
+                                        );
+                                        final telugu =
+                                            AppState.instance.language ==
+                                                'Telugu';
+                                        ScaffoldMessenger.of(context)
+                                          ..removeCurrentSnackBar()
+                                          ..showSnackBar(
+                                            SnackBar(
+                                              content: Text(wasDisliked
+                                                  ? (telugu
+                                                      ? 'డిస్‌లైక్ తీసివేయబడింది'
+                                                      : 'Dislike removed')
+                                                  : (telugu
+                                                      ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
+                                                      : 'Feedback received')),
+                                              duration:
+                                                  const Duration(seconds: 1),
+                                              behavior:
+                                                  SnackBarBehavior.floating,
+                                            ),
+                                          );
+                                      },
                                     );
                                   },
                                 ),
-                                // Share (Center, Prominent)
-                                GestureDetector(
-                                  onTap: widget.onShare,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.1),
-                                      shape: BoxShape.circle,
+                                // Share. A labelled pill rather than another
+                                // bare icon: sharing to WhatsApp is the single
+                                // most-used action on a card like this, and it
+                                // should not look like one more of the four
+                                // counters beside it.
+                                Material(
+                                  color: const Color(0xFF25D366),
+                                  borderRadius: BorderRadius.circular(22),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(22),
+                                    onTap: widget.onShare,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 9),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: const [
+                                          Icon(Icons.share_rounded,
+                                              color: Colors.white, size: 18),
+                                          SizedBox(width: 7),
+                                          Text(
+                                            'SHARE',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12.5,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.4,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    child: const Icon(Icons.share_rounded,
-                                        color: AppColors.primary, size: 24),
                                   ),
                                 ),
                                 // Comment (Opens directly without auth gate)

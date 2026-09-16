@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window colour shown before Flutter's first frame.
+         Fixed white in both light and dark mode on purpose: SplashScreen is
+         hardcoded Colors.white, so anything else here shows as a flash of the
+         wrong colour on launch. It must not resolve through
+         ?android:colorBackground, which is black under Theme.Black and turned
+         the whole pre-first-frame window black for dark-mode users. -->
+    <color name="launch_background">#FFFFFF</color>
+</resources>

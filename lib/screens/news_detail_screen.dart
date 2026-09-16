@@ -14,6 +14,7 @@ import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'comments_screen.dart';
 
 class NewsDetailScreen extends StatefulWidget {
@@ -31,6 +32,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   int _currentImageIndex = 0;
   bool _isLoadingDetail = false;
   String? _detailError;
+  List<NewsArticle> _recommendations = [];
+  bool _isLoadingRecommendations = true;
 
   bool get _isUgc => article.isUgc;
 
@@ -266,6 +269,21 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       article.isLiked = true;
     }
     _fetchFullArticleDetail();
+    _fetchRecommendations();
+  }
+
+  Future<void> _fetchRecommendations() async {
+    try {
+      final recs = await ApiService.instance.getRecommendations(limit: 5);
+      if (mounted) {
+        setState(() {
+          _recommendations = recs;
+          _isLoadingRecommendations = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingRecommendations = false);
+    }
   }
 
   @override
@@ -965,6 +983,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           textColor,
                         ),
 
+                      const SizedBox(height: 24),
+                      const BannerAdSlot(placementZone: 'article'),
+                      const SizedBox(height: 32),
+                      _buildRecommendations(),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -974,6 +996,97 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildRecommendations() {
+    if (_isLoadingRecommendations) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_recommendations.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('recommended_for_you') != 'recommended_for_you'
+              ? tr('recommended_for_you')
+              : 'Recommended for you',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _recommendations.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final rec = _recommendations[index];
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: rec.imageUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: rec.imageUrl,
+                        width: 64,
+                        height: 64,
+                        memCacheWidth: 200,
+                        memCacheHeight: 200,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => Container(
+                          width: 64,
+                          height: 64,
+                          color: isDark ? Colors.white10 : Colors.black12,
+                        ),
+                        errorWidget: (_, __, ___) => Container(
+                          width: 64,
+                          height: 64,
+                          color: isDark ? Colors.white10 : Colors.black12,
+                          child: const Icon(Icons.broken_image_rounded, size: 20),
+                        ),
+                      )
+                    : Container(
+                        width: 64,
+                        height: 64,
+                        color: isDark ? Colors.white10 : Colors.black12,
+                        child: const Icon(Icons.newspaper_rounded, size: 24),
+                      ),
+              ),
+              title: Text(
+                rec.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+              ),
+              subtitle: Text(
+                '${rec.source} · ${rec.timeAgo}',
+                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+              onTap: () {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => NewsDetailScreen(article: rec),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ],
     );
   }
 

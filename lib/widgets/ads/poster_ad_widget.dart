@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
+import 'ad_badge.dart';
 import 'ad_viewability_detector.dart';
 
 /// Poster-style ad creative (Aspect ratio: 4:5)
@@ -71,6 +72,7 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
             child: Stack(
               fit: StackFit.expand,
               children: [
+              AdBadge.positioned(),
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
                   fit: BoxFit.cover,
@@ -108,36 +110,6 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
                           Colors.transparent,
                         ],
                       ),
-                    ),
-                  ),
-                ),
-
-                // Sponsored Label
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.white24, width: 0.8),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.campaign_rounded, size: 12, color: Colors.amberAccent),
-                        SizedBox(width: 4),
-                        Text(
-                          'Sponsored Poster',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ],
                     ),
                   ),
                 ),

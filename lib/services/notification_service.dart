@@ -60,14 +60,21 @@ class NotificationService {
     _navigatorKey = navigatorKey;
 
     try {
-      await Firebase.initializeApp();
+      // Each platform call is bounded separately so one slow step cannot eat
+      // the whole startup budget and take the others down with it. main()
+      // caps this method as a whole; these caps decide which parts still get
+      // a chance when one of them stalls.
+      await Firebase.initializeApp().timeout(const Duration(seconds: 4));
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       final messaging = FirebaseMessaging.instance;
 
       // Acquire early FCM token so guest registration and login can send it immediately
       try {
-        final token = await messaging.getToken();
+        // Known to hang without network or Play Services. A missing token is
+        // recoverable — onTokenRefresh below still delivers one later.
+        final token =
+            await messaging.getToken().timeout(const Duration(seconds: 3));
         if (token != null && token.isNotEmpty) {
           AppState.instance.fcmToken = token;
           debugPrint('[NotificationService] Early FCM token acquired: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
@@ -143,7 +150,8 @@ class NotificationService {
       });
 
       // 4. Terminated state launch handler: store in navigation gate
-      final initialMessage = await messaging.getInitialMessage();
+      final initialMessage =
+          await messaging.getInitialMessage().timeout(const Duration(seconds: 3));
       if (initialMessage != null) {
         debugPrint(
             'Initial notification on launch: ${initialMessage.messageId}');

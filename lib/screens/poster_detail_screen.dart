@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 import '../theme/app_theme.dart';
+import '../models/poster_images.dart';
 
 /// Screen 19: PosterDetailScreen
 /// - APIs: None required after selected poster payload
@@ -24,17 +25,11 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
   @override
   void initState() {
     super.initState();
-    final rawImages = widget.poster['images'] as List?;
-    if (rawImages != null && rawImages.isNotEmpty) {
-      _images = rawImages
-          .map((img) => (img['image_url'] ?? '').toString())
-          .where((url) => url.isNotEmpty)
-          .toList();
-    }
-    if (_images.isEmpty) {
-      final mainImage = (widget.poster['image_url'] ?? widget.poster['thumbnail_url'] ?? '').toString();
-      if (mainImage.isNotEmpty) _images.add(mainImage);
-    }
+    // Shared with the spotlight feed: this screen used to parse the payload
+    // itself, without sorting by sort_order, without removing duplicates and
+    // without normalising URLs — so the same poster showed a different set of
+    // designs, in a different order, than the feed did.
+    _images = posterImageUrls(widget.poster);
   }
 
   void _shareCurrentPoster() {

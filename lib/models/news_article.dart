@@ -20,6 +20,10 @@ class NewsArticle {
   final String category;
   final DateTime publishedAt;
   int likes;
+
+  /// Sent by the backend as `dislike_count`; previously dropped on the floor,
+  /// which is why the dislike button had no number beside it.
+  final int dislikes;
   final int comments;
   final int shares;
   final int readTimeMinutes;
@@ -55,6 +59,7 @@ class NewsArticle {
     required this.category,
     required this.publishedAt,
     required this.likes,
+    this.dislikes = 0,
     required this.comments,
     required this.shares,
     required this.readTimeMinutes,
@@ -186,6 +191,7 @@ class NewsArticle {
       category: parsedCategory,
       publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
       likes: _toInt(json['likes_count'] ?? json['likes']),
+      dislikes: _toInt(json['dislike_count'] ?? json['dislikes_count'] ?? json['dislikes']),
       comments: _toInt(json['comments_count'] ?? json['comments']),
       shares: _toInt(json['shares_count'] ?? json['shares']),
       readTimeMinutes: _toInt(json['read_time_minutes'], 2),
@@ -334,6 +340,7 @@ class NewsArticle {
       'category': {'name': category},
       'published_at': publishedAt.toIso8601String(),
       'likes_count': likes,
+      'dislike_count': dislikes,
       'comments_count': comments,
       'shares_count': shares,
       'read_time_minutes': readTimeMinutes,

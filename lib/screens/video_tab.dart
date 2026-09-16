@@ -357,9 +357,9 @@ class _VideoTabState extends State<VideoTab> {
           ),
           if (_bottomAd != null)
             Positioned(
-              left: 12,
-              right: 12,
-              bottom: MediaQuery.of(context).padding.bottom + 78,
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.of(context).padding.bottom + 65,
               child: SafeArea(
                 top: false,
                 child: BottomStickyAdBanner(

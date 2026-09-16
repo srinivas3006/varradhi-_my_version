@@ -28,7 +28,11 @@ class DeepLinkService {
     });
 
     try {
-      final initialUri = await _channel.invokeMethod<String>('getInitialLink');
+      // A cold platform channel can stall rather than throw, and this runs
+      // before the first frame — an unbounded wait here is a black app.
+      final initialUri = await _channel
+          .invokeMethod<String>('getInitialLink')
+          .timeout(const Duration(seconds: 2));
       await handleUri(initialUri);
     } on PlatformException catch (e) {
       debugPrint('[DeepLinkService] Could not read initial link: $e');

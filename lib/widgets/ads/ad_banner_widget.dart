@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
+import 'ad_badge.dart';
 import 'ad_viewability_detector.dart';
 
 /// Banner Ad Widget (Aspect ratio: 16:5, height ~90-120dp)
@@ -95,27 +96,7 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
                   },
                 ),
 
-                // Top-left Sponsored Pill
-                Positioned(
-                  top: 6,
-                  left: 6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'Sponsored',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ),
-                ),
+                AdBadge.positioned(),
               ],
             ),
           ),

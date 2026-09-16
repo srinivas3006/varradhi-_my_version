@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
+import 'ad_badge.dart';
 import 'ad_viewability_detector.dart';
 
 /// Premium interactive 3D promotional ad card (Aspect ratio: 4:3, height ~260-320dp)
@@ -148,6 +149,7 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
+                      AdBadge.positioned(),
                         CachedNetworkImage(
                           imageUrl: widget.ad.imageUrl,
                           fit: BoxFit.cover,
@@ -185,44 +187,6 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                                   stops: const [0.0, 0.5, 1.0],
                                 ),
                               ),
-                            ),
-                          ),
-                        ),
-
-                        // Premium 3D Sponsored Badge
-                        Positioned(
-                          top: 12,
-                          left: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.3),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.auto_awesome, size: 12, color: Colors.white),
-                                SizedBox(width: 4),
-                                Text(
-                                  '3D Sponsored',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.4,
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
                         ),

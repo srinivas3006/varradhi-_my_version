@@ -14,6 +14,7 @@ import '../services/api_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/ad_banner.dart';
 import '../widgets/ads/unified_ad_widget.dart';
+import '../widgets/ads/rotating_breaking_strip.dart';
 import '../services/ad_delivery_service.dart';
 import '../services/ad_manager.dart';
 import '../repositories/ad_repository.dart';
@@ -46,6 +47,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   Poll? _poll;
   List<dynamic> _posters = [];
   List<AdBanner> _feedAds = [];
+
+  /// The ticker strip's own pool. It holds a fixed place above the feed and
+  /// rotates through these, so they are kept out of the in-feed ad pool.
+  List<AdBanner> get _breakingStripAds =>
+      _feedAds.where((ad) => ad.isBreakingStrip).toList();
   Map<String, dynamic>? _dailyQuote;
   bool _isLoadingMore = false;
   String? _nextCursor;
@@ -1747,11 +1753,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         final borderColor = isDark
                             ? Colors.white.withValues(alpha: 0.1)
                             : Colors.black.withValues(alpha: 0.05);
+                        final feedAdsWithoutBreakingStrip =
+                            _feedAds.where((ad) => !ad.isBreakingStrip).toList();
+                        
                         final presentationItems = recommended.isNotEmpty
                             ? AdManager.instance
                                 .buildFeedPresentation<NewsArticle>(
                                 contentItems: recommended,
-                                adsPool: _feedAds,
+                                adsPool: feedAdsWithoutBreakingStrip,
                                 contentKey: (article) =>
                                     '${article.contentKind}:${article.id}',
                               )
@@ -1762,7 +1771,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             SliverPadding(
                               padding: EdgeInsets.only(
                                 top: MediaQuery.of(context).padding.top +
-                                    70, // Space for floating app bar
+                                    (_breakingStripAds.isNotEmpty ? 120 : 70), // Space for floating app bar & breaking strip
                               ),
                               sliver: SliverToBoxAdapter(
                                 child: Column(
@@ -1924,7 +1933,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             top: 0,
             left: 0,
             right: 0,
-            child: _buildTopAppBar(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildTopAppBar(),
+                if (_breakingStripAds.isNotEmpty)
+                  RotatingBreakingStrip(
+                    ads: _breakingStripAds,
+                    placementZone: 'feed',
+                  ),
+              ],
+            ),
           ),
         ],
       ),

@@ -88,15 +88,48 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
       },
       child: media.length == 1
           ? _media(media.first, 0)
-          : PageView.builder(
-              controller: _controller,
-              scrollDirection: Axis.horizontal,
-              itemCount: media.length,
-              onPageChanged: (index) {
-                setState(() => _index = index);
-                widget.onPageChanged?.call(index);
-              },
-              itemBuilder: (_, index) => _media(media[index], index),
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                PageView.builder(
+                  controller: _controller,
+                  scrollDirection: Axis.horizontal,
+                  physics: const ClampingScrollPhysics(),
+                  itemCount: media.length,
+                  onPageChanged: (index) {
+                    setState(() => _index = index);
+                    widget.onPageChanged?.call(index);
+                  },
+                  itemBuilder: (_, index) => _media(media[index], index),
+                ),
+                // Without dots there is nothing telling the reader more
+                // images exist, so every one after the first went unseen.
+                Positioned(
+                  bottom: 10,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (var i = 0; i < media.length; i++)
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin:
+                                const EdgeInsets.symmetric(horizontal: 3),
+                            width: i == _index ? 18 : 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color:
+                                  i == _index ? Colors.white : Colors.white54,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
   }
