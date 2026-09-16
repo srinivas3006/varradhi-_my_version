@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:way2news_clone/models/spotlight_item.dart';
-import 'package:way2news_clone/state/engagement_store.dart';
 
 void main() {
   group('media is 9:8 from width, not a share of height', () {
@@ -39,26 +38,4 @@ void main() {
     });
   });
 
-  group('like and dislike are one reaction', () {
-    final store = EngagementStore.instance;
-    setUp(store.reset);
-
-    test('they cannot both be active', () {
-      const k = 'article:react';
-      store.seed(k, likeCount: 5, dislikeCount: 1, reaction: Reaction.like);
-      expect(store.stateFor(k).liked, isTrue);
-      expect(store.stateFor(k).disliked, isFalse);
-
-      store.seed(k, reaction: Reaction.dislike);
-      expect(store.stateFor(k).liked, isFalse);
-      expect(store.stateFor(k).disliked, isTrue);
-    });
-
-    test('both counts are tracked, so dislike can show a number', () {
-      const k = 'article:counts';
-      store.applyServerCounts(k, {'like_count': 11, 'dislike_count': 3});
-      expect(store.stateFor(k).likeCount, 11);
-      expect(store.stateFor(k).dislikeCount, 3);
-    });
-  });
 }

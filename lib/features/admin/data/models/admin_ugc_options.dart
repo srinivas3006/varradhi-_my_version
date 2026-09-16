@@ -11,10 +11,10 @@ class AdminUgcOptions {
   AdminUgcOptions._();
 
   static const List<AdminPublicationLevelOption> publicationLevels = [
-    AdminPublicationLevelOption('local', 'Local', 'Visible to the village/mandal only'),
-    AdminPublicationLevelOption('district', 'District', 'Visible across the district'),
-    AdminPublicationLevelOption('state', 'State', 'Visible statewide'),
-    AdminPublicationLevelOption('global', 'Global', 'Visible to all app users'),
+    AdminPublicationLevelOption('local', 'స్థానిక స్థాయి', 'గ్రామం/మండలం స్థాయికి మాత్రమే పరిమితం'),
+    AdminPublicationLevelOption('district', 'జిల్లా స్థాయి', 'జిల్లా వ్యాప్తంగా ప్రదర్శించబడుతుంది'),
+    AdminPublicationLevelOption('state', 'రాష్ట్ర స్థాయి', 'రాష్ట్రవ్యాప్తంగా ప్రదర్శించబడుతుంది'),
+    AdminPublicationLevelOption('global', 'సార్వత్రిక స్థాయి', 'యాప్ వినియోగదారులందరికీ కనిపిస్తుంది'),
   ];
 
   static const List<String> pushNotificationTypes = ['local', 'breaking', 'alert', 'festival', 'promotion'];

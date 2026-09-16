@@ -48,75 +48,40 @@ void main() async {
     return ErrorWidget(details.exception);
   };
 
-  // Set preferred orientations
-  await _startupStep(
-    'orientation',
-    () => SystemChrome.setPreferredOrientations([
+  // Parallelize lightweight essential initialization so the first frame renders in <100ms
+  await Future.wait([
+    SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]),
-    budget: const Duration(seconds: 2),
-  );
+    AppState.instance.init(),
+  ]);
 
-  await _startupStep(
-    'notifications',
-    () => NotificationService.instance.initEarly(
-      messengerKey: scaffoldMessengerKey,
-      navigatorKey: navigatorKey,
-    ),
-    budget: const Duration(seconds: 6),
-  );
-
-  await _startupStep(
-    'deep links',
-    () => DeepLinkService.instance.init(),
-    budget: const Duration(seconds: 3),
-  );
-
-  await _startupStep('app state', () => AppState.instance.init());
-
-  // If we already logged in previously, sync the token we just fetched
-  if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
-    ApiService.instance.updateFcmToken(AppState.instance.fcmToken!);
-  }
-
-  // Re-derive isAdmin/isContributor from the server on every cold start so
-  // a role change on the backend takes effect without needing to log out
-  // and back in. Fire-and-forget: it must not delay the first frame, and
-  // AnimatedBuilder(animation: AppState.instance) at the MaterialApp root
-  // already re-renders reactively once the flags land.
-  if (AppState.instance.isLoggedIn) {
-    unawaited(AppState.instance.refreshRolesFromServer());
-  }
-
+  // Immediately mount the application so the logo splash screen renders with zero white screen delay
   runApp(const Way2NewsCloneApp());
+
+  // Asynchronously initialize heavy background services (Firebase, FCM tokens, deep links, role sync)
+  // without blocking UI frame drawing or causing a prolonged blank launch screen
+  unawaited(_initBackgroundServices());
 }
 
-/// Runs one startup step without letting it hold back the first frame.
-///
-/// Nothing awaited before [runApp] may run unbounded. The engine paints
-/// nothing until the first frame is produced, so a single plugin call that
-/// never returns is not a slow launch — it is a permanently black app. A
-/// try/catch does not help either, because a hang is not an exception.
-///
-/// Firebase init and the deep-link platform channel are the realistic
-/// offenders: both can stall indefinitely with no network, without Play
-/// Services, or on a cold platform channel. A step that exceeds its budget is
-/// abandoned here and left running, so a late FCM token still lands — the app
-/// simply starts degraded instead of not starting at all.
-Future<void> _startupStep(
-  String name,
-  Future<void> Function() step, {
-  Duration budget = const Duration(seconds: 5),
-}) async {
+Future<void> _initBackgroundServices() async {
   try {
-    await step().timeout(budget);
-  } on TimeoutException {
-    debugPrint(
-        '[startup] "$name" exceeded ${budget.inSeconds}s; continuing without it');
-  } catch (e, stack) {
-    debugPrint('[startup] "$name" failed: $e');
-    debugPrintStack(stackTrace: stack);
+    await NotificationService.instance.initEarly(
+      messengerKey: scaffoldMessengerKey,
+      navigatorKey: navigatorKey,
+    );
+    await DeepLinkService.instance.init();
+
+    if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
+      unawaited(ApiService.instance.updateFcmToken(AppState.instance.fcmToken!).catchError((_) => {}));
+    }
+
+    if (AppState.instance.isLoggedIn) {
+      unawaited(AppState.instance.refreshRolesFromServer().catchError((_) => null));
+    }
+  } catch (e) {
+    debugPrint('[Main] Background services init error: $e');
   }
 }
 

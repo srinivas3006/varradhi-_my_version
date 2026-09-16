@@ -1,6 +1,7 @@
 // ignore_for_file: deprecated_member_use
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -47,6 +48,23 @@ class ShareService {
         '$webUrl';
   }
 
+  /// Pre-fetches the image bytes into memory so `Image.memory` paints synchronously
+  /// during off-screen screenshot capture.
+  static Future<Uint8List?> _fetchImageBytes(String url) async {
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 8);
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        return await consolidateHttpClientResponseBytes(response);
+      }
+    } catch (e) {
+      debugPrint('[ShareService] Failed to pre-fetch image bytes: $e');
+    }
+    return null;
+  }
+
   /// Captures an off-screen branded widget and shares it via the native share sheet.
   /// One-tap guarded: ignores rapid duplicate taps while processing.
   static Future<void> shareArticle(NewsArticle article) async {
@@ -66,23 +84,55 @@ class ShareService {
       final hasValidImage = normalizedUrl.isNotEmpty &&
           (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://'));
 
-      // If valid image exists, generate the branded watermark card image
+      Uint8List? imageBytes;
       if (hasValidImage) {
+        imageBytes = await _fetchImageBytes(normalizedUrl);
+      }
+
+      // If valid image exists and bytes downloaded, generate the branded watermark card image
+      if (imageBytes != null && imageBytes.isNotEmpty) {
         try {
-          final Uint8List imageBytes =
+          int naturalWidth = 1200;
+          int naturalHeight = 675;
+          try {
+            final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
+            final ui.FrameInfo frameInfo = await codec.getNextFrame();
+            naturalWidth = frameInfo.image.width;
+            naturalHeight = frameInfo.image.height;
+          } catch (decodeErr) {
+            debugPrint('[ShareService] Error decoding image dimensions: $decodeErr');
+          }
+
+          // Exact natural aspect ratio preserved — zero distortion or unwanted cropping
+          double targetWidth = naturalWidth.toDouble();
+          double targetHeight = naturalHeight.toDouble();
+          if (targetWidth > 1200) {
+            targetHeight = (targetHeight * 1200 / targetWidth).roundToDouble();
+            targetWidth = 1200;
+          } else if (targetWidth < 600 && targetWidth > 0) {
+            targetHeight = (targetHeight * 600 / targetWidth).roundToDouble();
+            targetWidth = 600;
+          }
+          if (targetHeight <= 0) targetHeight = 675;
+          if (targetWidth <= 0) targetWidth = 1200;
+
+          final Uint8List cardBytes =
               await _screenshotController.captureFromWidget(
             _WatermarkShareCard(
               article: article,
-              resolvedImageUrl: normalizedUrl,
+              imageBytes: imageBytes,
+              width: targetWidth,
+              height: targetHeight,
             ),
-            delay: const Duration(milliseconds: 150),
+            targetSize: Size(targetWidth, targetHeight),
+            delay: const Duration(milliseconds: 80),
           );
 
-          if (imageBytes.isNotEmpty) {
+          if (cardBytes.isNotEmpty) {
             final tempDir = await getTemporaryDirectory();
             final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
             final file = await File('${tempDir.path}/vaaradhi_share_$safeId.png').create();
-            await file.writeAsBytes(imageBytes);
+            await file.writeAsBytes(cardBytes);
 
             final shareText = buildShareText(article);
             await Share.shareXFiles(
@@ -116,171 +166,74 @@ class ShareService {
   }
 }
 
-/// The off-screen widget representing the exact image with bottom logo watermark banner.
-/// Uses 16:9 news standard aspect ratio with a sleek gradient bottom watermark.
+/// The off-screen widget representing the article image with ONLY the official logo watermark.
+/// Matches the exact natural size and aspect ratio of the news article image with no footer bar or extra text.
 class _WatermarkShareCard extends StatelessWidget {
   final NewsArticle article;
-  final String resolvedImageUrl;
+  final Uint8List imageBytes;
+  final double width;
+  final double height;
 
   const _WatermarkShareCard({
     required this.article,
-    required this.resolvedImageUrl,
+    required this.imageBytes,
+    required this.width,
+    required this.height,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Proportional logo watermark size based on image dimensions
+    final double logoSize = (width * 0.12).clamp(48.0, 96.0);
+    final double margin = (width * 0.035).clamp(12.0, 24.0);
+
     return Directionality(
       textDirection: TextDirection.ltr,
-      child: Container(
-        width: 1080,
-        height: 1080, // High-definition 1080x1080 social card
-        color: const Color(0xFF0F172A),
+      child: SizedBox(
+        width: width,
+        height: height,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. Full Image Background (Main visual)
-            Image.network(
-              resolvedImageUrl,
+            // 1. Article Image (Full Natural Size, No Distortion, No Crop)
+            Image.memory(
+              imageBytes,
+              width: width,
+              height: height,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) => Container(
-                color: const Color(0xFF1E293B),
-                child: const Center(
-                  child: Icon(
-                    Icons.image_not_supported_outlined,
-                    color: Colors.white54,
-                    size: 120,
-                  ),
-                ),
-              ),
             ),
 
-            // 2. Dark Vignette Gradient on bottom for high-contrast watermark readability
+            // 2. Subtle Corner Gradient for watermark contrast
             Positioned(
-              left: 0,
               right: 0,
               bottom: 0,
-              height: 240,
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+              width: logoSize * 2.2,
+              height: logoSize * 2.2,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.bottomRight,
+                    radius: 1.1,
                     colors: [
+                      Colors.black.withValues(alpha: 0.35),
                       Colors.transparent,
-                      Color(0x99000000),
-                      Color(0xEE000000),
                     ],
                   ),
                 ),
               ),
             ),
 
-            // 3. Bottom Logo Watermark Bar
+            // 3. Official Vaaradhi Logo Watermark ONLY (Bottom-Right)
             Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 28),
-                color: const Color(0xE6111827), // Sleek semi-translucent dark slate
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Official Vaaradhi Logo Asset
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.asset(
-                        'assets/images/logo.png',
-                        width: 72,
-                        height: 72,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    const SizedBox(width: 24),
-
-                    // Brand Name & Tagline
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Vaaradhi',
-                                style: TextStyle(
-                                  fontSize: 40,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  fontFamily: 'Roboto',
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              SizedBox(width: 14),
-                              Text(
-                                '• వారధి',
-                                style: TextStyle(
-                                  fontSize: 34,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFFFED915), // Brand Accent Yellow
-                                  fontFamily: 'NotoSansTelugu',
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 6),
-                          Text(
-                            'నిజమైన వార్తలకు నిలువెత్తు వారధి',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w500,
-                              color: Color(0xFFCBD5E1),
-                              fontFamily: 'NotoSansTelugu',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // App Store Download Badge CTA
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 26,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFF2300), // AppColors.primary
-                        borderRadius: BorderRadius.circular(36),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x66FF2300),
-                            blurRadius: 16,
-                            offset: Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.download_rounded,
-                            color: Colors.white,
-                            size: 32,
-                          ),
-                          SizedBox(width: 10),
-                          Text(
-                            'Get App',
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              fontFamily: 'Roboto',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              right: margin,
+              bottom: margin,
+              child: Opacity(
+                opacity: 0.92,
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  width: logoSize,
+                  height: logoSize,
+                  fit: BoxFit.contain,
                 ),
               ),
             ),

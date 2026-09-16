@@ -24,7 +24,9 @@ class NewsArticle {
   /// Sent by the backend as `dislike_count`; previously dropped on the floor,
   /// which is why the dislike button had no number beside it.
   final int dislikes;
-  final int comments;
+
+  /// Mutable: comment count is updated in place by the live comment stream.
+  int comments;
   final int shares;
   final int readTimeMinutes;
   final int viewCount;
@@ -402,8 +404,9 @@ String _resolveVideoUrl(Map<dynamic, dynamic> json) {
       mediaType: json['media_type']?.toString().toLowerCase() ?? '',
       url: mediaUrl,
       thumbnailUrl: '');
-  if (mediaUrl.isNotEmpty && (candidate.isVideo || json['type'] == 'live'))
+  if (mediaUrl.isNotEmpty && (candidate.isVideo || json['type'] == 'live')) {
     return mediaUrl;
+  }
   return '';
 }
 

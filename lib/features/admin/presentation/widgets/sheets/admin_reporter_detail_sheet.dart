@@ -127,11 +127,11 @@ class _AdminReporterDetailSheetBody extends StatelessWidget {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    _statMiniCard('Submissions', profile.submissionsCount.toString(), isDark),
+                    _statMiniCard('మొత్తం పోస్టులు', profile.submissionsCount.toString(), isDark),
                     const SizedBox(width: 8),
-                    _statMiniCard('Daily Uploads', profile.dailyUploadsCount.toString(), isDark),
+                    _statMiniCard('నేటి అప్‌లోడ్‌లు', profile.dailyUploadsCount.toString(), isDark),
                     const SizedBox(width: 8),
-                    _statMiniCard('Status', profile.status, isDark, valueColor: profile.isBlocked ? AdminColors.error : AdminColors.success),
+                    _statMiniCard('ఖాతా స్థితి', profile.isBlocked ? 'బ్లాక్ అయింది' : 'క్రియాశీలకం', isDark, valueColor: profile.isBlocked ? AdminColors.error : AdminColors.success),
                   ],
                 ),
               ],
@@ -145,7 +145,7 @@ class _AdminReporterDetailSheetBody extends StatelessWidget {
                   child: OutlinedButton(
                     onPressed: () => controller.increaseTrust(),
                     style: OutlinedButton.styleFrom(foregroundColor: AdminColors.success, side: const BorderSide(color: AdminColors.success)),
-                    child: const Text('Increase Trust (+10)'),
+                    child: const Text('విశ్వసనీయత పెంచు (+10)'),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -153,7 +153,7 @@ class _AdminReporterDetailSheetBody extends StatelessWidget {
                   child: OutlinedButton(
                     onPressed: () => controller.decreaseTrust(),
                     style: OutlinedButton.styleFrom(foregroundColor: AdminColors.warning, side: const BorderSide(color: AdminColors.warning)),
-                    child: const Text('Decrease Trust (-10)'),
+                    child: const Text('విశ్వసనీయత తగ్గించు (-10)'),
                   ),
                 ),
               ],
@@ -164,12 +164,12 @@ class _AdminReporterDetailSheetBody extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: () => controller.toggleBlock(),
                 style: ElevatedButton.styleFrom(backgroundColor: profile.isBlocked ? AdminColors.success : AdminColors.error, foregroundColor: Colors.white),
-                child: Text(profile.isBlocked ? 'Unblock Uploader' : 'Block Uploader'),
+                child: Text(profile.isBlocked ? 'యూజర్‌ను అన్‌బ్లాక్ చేయి' : 'యూజర్‌ను బ్లాక్ చేయి'),
               ),
             ),
           ],
           const SizedBox(height: 20),
-          Text('RECENT SUBMISSIONS', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
+          Text('ఇటీవలి సమర్పణలు', style: TextStyle(color: AdminColors.textSecondaryColor(isDark), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
           const SizedBox(height: 8),
           ...profile.recentSubmissions.map((s) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),

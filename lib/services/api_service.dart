@@ -858,19 +858,27 @@ class ApiService {
         await _dio.put('/api/v1/articles/$articleId/reaction/', data: {
       'reaction_type': r,
     });
-    return (response.data is Map &&
-            response.data['data'] is Map<String, dynamic>)
-        ? response.data['data'] as Map<String, dynamic>
-        : <String, dynamic>{};
+    if (response.data is Map) {
+      final map = response.data as Map;
+      if (map['data'] is Map<String, dynamic>) {
+        return map['data'] as Map<String, dynamic>;
+      }
+      return Map<String, dynamic>.from(map);
+    }
+    return <String, dynamic>{};
   }
 
   /// Remove reaction via DELETE /api/v1/articles/{article_id}/reaction/
   Future<Map<String, dynamic>> deleteArticleReaction(String articleId) async {
     final response = await _dio.delete('/api/v1/articles/$articleId/reaction/');
-    return (response.data is Map &&
-            response.data['data'] is Map<String, dynamic>)
-        ? response.data['data'] as Map<String, dynamic>
-        : <String, dynamic>{};
+    if (response.data is Map) {
+      final map = response.data as Map;
+      if (map['data'] is Map<String, dynamic>) {
+        return map['data'] as Map<String, dynamic>;
+      }
+      return Map<String, dynamic>.from(map);
+    }
+    return <String, dynamic>{};
   }
 
   // --- Comments ---

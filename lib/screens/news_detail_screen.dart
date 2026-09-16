@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
@@ -121,20 +122,25 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     });
 
     try {
-      if (AppState.instance.isLoggedIn) {
-        final res = await ApiService.instance.postArticleReaction(
-          targetId,
-          isNowLiked ? 'like' : 'none',
-        );
-        if (mounted && res.containsKey('like_count')) {
-          setState(() {
-            article.likes =
-                (res['like_count'] as num?)?.toInt() ?? article.likes;
-          });
-        }
+      final res = await ApiService.instance.postArticleReaction(
+        targetId,
+        isNowLiked ? 'like' : 'none',
+      );
+      if (mounted && res.containsKey('like_count')) {
+        setState(() {
+          article.likes =
+              (res['like_count'] as num?)?.toInt() ?? article.likes;
+        });
       }
     } catch (e) {
       debugPrint('[NewsDetailScreen] Could not sync reaction to backend: $e');
+      if (mounted) {
+        AppState.instance.setReaction(targetId, isCurrentlyLiked ? 'like' : 'none');
+        setState(() {
+          article.isLiked = isCurrentlyLiked;
+          article.likes = prevLikes;
+        });
+      }
     } finally {
       _isTogglingLike = false;
     }
@@ -736,12 +742,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       // Main Article Title (Headline)
                       Text(
                         article.title,
-                        style: TextStyle(
-                          fontSize: 22,
+                        style: GoogleFonts.notoSansTelugu(
+                          fontSize: 23,
                           fontWeight: FontWeight.w800,
-                          height: 1.3,
+                          height: 1.38,
                           color: textColor,
-                          letterSpacing: 0,
+                          letterSpacing: 0.0,
                         ),
                       ),
 
@@ -1121,94 +1127,26 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       paragraphs.add(text.trim());
     }
 
-    // Extract first grapheme cluster for the red circular drop-cap (Way2News style - article text.jpeg)
-    final firstP = paragraphs.first;
-    String firstLetter = '';
-    String restOfFirstP = firstP;
-    if (firstP.isNotEmpty) {
-      final chars = firstP.characters;
-      firstLetter = chars.first;
-      final remaining = chars.skip(1).string;
-
-      // Check if removing candidate breaks a Telugu conjunct/matra (e.g. starts with virama ్ or matra)
-      final startsWithCombiningMark = remaining.isNotEmpty &&
-          (remaining.startsWith('్') ||
-              remaining.startsWith('ం') ||
-              remaining.startsWith('ః') ||
-              RegExp(r'^[\u0C3E-\u0C4D]').hasMatch(remaining));
-
-      if (startsWithCombiningMark) {
-        // Don't break the word into an orphan syllable!
-        // Keep the full text in restOfFirstP, badge displays initial letter
-        restOfFirstP = firstP;
-      } else {
-        restOfFirstP = remaining;
-      }
-    }
+    final paragraphStyle = GoogleFonts.notoSansTelugu(
+      fontSize: 17.5,
+      height: 1.72,
+      color: textColor.withValues(alpha: 0.92),
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0.0,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (int i = 0; i < paragraphs.length; i++) ...[
-          if (i == 0 && firstLetter.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 18.0),
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    WidgetSpan(
-                      alignment: PlaceholderAlignment.middle,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        margin: const EdgeInsets.only(right: 8, bottom: 3),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFC80022),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            firstLetter,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              height: 1.0,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    TextSpan(
-                      text: restOfFirstP,
-                      style: TextStyle(
-                        fontSize: 17,
-                        height: 1.75,
-                        color: textColor.withValues(alpha: 0.92),
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                  ],
-                ),
-                textAlign: TextAlign.justify,
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: 18.0),
-              child: Text(
-                paragraphs[i],
-                textAlign: TextAlign.justify,
-                style: TextStyle(
-                  fontSize: 17,
-                  height: 1.75,
-                  color: textColor.withValues(alpha: 0.92),
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 0.1,
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 18.0),
+            child: Text(
+              paragraphs[i],
+              textAlign: TextAlign.start,
+              style: paragraphStyle,
             ),
+          ),
           // Mid-article banner ad injection after 2nd paragraph
           if (i == 1 && paragraphs.length > 2) ...[
             const Padding(

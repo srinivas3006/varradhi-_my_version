@@ -40,8 +40,9 @@ class AppState extends ChangeNotifier {
   final ThemeAndLocaleNotifier themeAndLocaleNotifier =
       ThemeAndLocaleNotifier();
 
-  // Local persistence for likes/comments until backend supports it
+  // Local persistence for likes/dislikes/comments until backend supports it
   Set<String> likedItemIds = {};
+  Set<String> dislikedItemIds = {};
   Set<String> bookmarkedItemIds = {};
   Map<String, List<String>> localComments = {};
 
@@ -291,6 +292,7 @@ class AppState extends ChangeNotifier {
         prefs.getBool('pushNotificationsEnabled') ?? true;
 
     likedItemIds = (prefs.getStringList('likedItemIds') ?? []).toSet();
+    dislikedItemIds = (prefs.getStringList('dislikedItemIds') ?? []).toSet();
     bookmarkedItemIds =
         (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
   }
@@ -344,6 +346,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool('uploadVerified', uploadVerified);
     await prefs.setInt('reporterTokens', reporterTokens);
     await prefs.setStringList('likedItemIds', likedItemIds.toList());
+    await prefs.setStringList('dislikedItemIds', dislikedItemIds.toList());
     await prefs.setStringList('bookmarkedItemIds', bookmarkedItemIds.toList());
     await prefs.setBool('locationPrompted', locationPrompted);
     await prefs.setBool('hasValidLocation', hasValidLocation);
@@ -648,9 +651,33 @@ class AppState extends ChangeNotifier {
   void toggleLike(String itemId) {
     if (itemId.isEmpty) return;
     if (likedItemIds.contains(itemId)) {
+      setReaction(itemId, 'none');
+    } else {
+      setReaction(itemId, 'like');
+    }
+  }
+
+  void toggleDislike(String itemId) {
+    if (itemId.isEmpty) return;
+    if (dislikedItemIds.contains(itemId)) {
+      setReaction(itemId, 'none');
+    } else {
+      setReaction(itemId, 'dislike');
+    }
+  }
+
+  void setReaction(String itemId, String reaction) {
+    if (itemId.isEmpty) return;
+    final r = reaction.toLowerCase();
+    if (r == 'like') {
+      likedItemIds.add(itemId);
+      dislikedItemIds.remove(itemId);
+    } else if (r == 'dislike') {
+      dislikedItemIds.add(itemId);
       likedItemIds.remove(itemId);
     } else {
-      likedItemIds.add(itemId);
+      likedItemIds.remove(itemId);
+      dislikedItemIds.remove(itemId);
     }
     notifyListeners();
     _persist();
@@ -696,8 +723,18 @@ class AppState extends ChangeNotifier {
     return likedItemIds.contains(itemId);
   }
 
+  bool isDisliked(String itemId) {
+    return dislikedItemIds.contains(itemId);
+  }
+
   bool isBookmarked(String itemId) {
     return bookmarkedItemIds.contains(itemId);
+  }
+
+  String getReaction(String itemId) {
+    if (likedItemIds.contains(itemId)) return 'like';
+    if (dislikedItemIds.contains(itemId)) return 'dislike';
+    return 'none';
   }
 
   /// Onboarding's quick phone login (skippable, used at first launch).

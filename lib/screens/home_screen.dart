@@ -131,9 +131,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _lastBackPressTime = now;
       ScaffoldMessenger.of(context).removeCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Press back again to exit'),
-          duration: Duration(milliseconds: 2000),
+        SnackBar(
+          content: Text(AppState.instance.language == 'Telugu'
+              ? 'నిష్క్రమించడానికి మళ్లీ వెనుకకు నొక్కండి'
+              : 'Press back again to exit'),
+          duration: const Duration(milliseconds: 2000),
           behavior: SnackBarBehavior.floating,
         ),
       );

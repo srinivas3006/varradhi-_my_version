@@ -46,24 +46,24 @@ class _SplashScreenState extends State<SplashScreen>
       duration: const Duration(milliseconds: 600),
     );
 
-    // Premium elastic pop for scale
-    _scaleAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+    // Smooth, instant logo visibility matching native splash screen perfectly
+    _scaleAnimation = Tween<double>(begin: 0.88, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
         curve: Curves.easeOutCubic,
       ),
     );
 
-    // Quick, smooth fade in
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+    // Fade gently from 0.85 to 1.0 so there is zero blank white frame
+    _fadeAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
         curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
       ),
     );
 
-    // Subtle slide up effect for dynamic entry
-    _slideAnimation = Tween<double>(begin: 24.0, end: 0.0).animate(
+    // Subtle gentle slide up
+    _slideAnimation = Tween<double>(begin: 12.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _controller,
         curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),

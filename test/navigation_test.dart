@@ -175,7 +175,15 @@ void main() {
       popScopeWidget.onPopInvokedWithResult?.call(false, null);
       await tester.pump();
 
-      expect(find.text('Press back again to exit'), findsOneWidget);
+      // Localized since the Telugu localization pass: assert whichever
+      // language is active rather than pinning the English copy.
+      final english = find.text('Press back again to exit');
+      final telugu = find.text('నిష్క్రమించడానికి మళ్లీ వెనుకకు నొక్కండి');
+      expect(
+        english.evaluate().length + telugu.evaluate().length,
+        1,
+        reason: 'exactly one exit SnackBar, in the active language',
+      );
       await tester.pump(const Duration(seconds: 4));
     });
 
