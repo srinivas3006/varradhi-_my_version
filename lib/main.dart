@@ -48,35 +48,41 @@ void main() async {
     return ErrorWidget(details.exception);
   };
 
-  // Set preferred orientations
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
+  // Parallelize lightweight essential initialization so the first frame renders in <100ms
+  await Future.wait([
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]),
+    AppState.instance.init(),
   ]);
 
-  await NotificationService.instance.initEarly(
-    messengerKey: scaffoldMessengerKey,
-    navigatorKey: navigatorKey,
-  );
-  await DeepLinkService.instance.init();
-
-  await AppState.instance.init();
-
-  // If we already logged in previously, sync the token we just fetched
-  if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
-    ApiService.instance.updateFcmToken(AppState.instance.fcmToken!);
-  }
-
-  // Re-derive isAdmin/isContributor from the server on every cold start so
-  // a role change on the backend takes effect without needing to log out
-  // and back in. Fire-and-forget: it must not delay the first frame, and
-  // AnimatedBuilder(animation: AppState.instance) at the MaterialApp root
-  // already re-renders reactively once the flags land.
-  if (AppState.instance.isLoggedIn) {
-    unawaited(AppState.instance.refreshRolesFromServer());
-  }
-
+  // Immediately mount the application so the logo splash screen renders with zero white screen delay
   runApp(const Way2NewsCloneApp());
+
+  // Asynchronously initialize heavy background services (Firebase, FCM tokens, deep links, role sync)
+  // without blocking UI frame drawing or causing a prolonged blank launch screen
+  unawaited(_initBackgroundServices());
+}
+
+Future<void> _initBackgroundServices() async {
+  try {
+    await NotificationService.instance.initEarly(
+      messengerKey: scaffoldMessengerKey,
+      navigatorKey: navigatorKey,
+    );
+    await DeepLinkService.instance.init();
+
+    if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
+      unawaited(ApiService.instance.updateFcmToken(AppState.instance.fcmToken!).catchError((_) => {}));
+    }
+
+    if (AppState.instance.isLoggedIn) {
+      unawaited(AppState.instance.refreshRolesFromServer().catchError((_) => null));
+    }
+  } catch (e) {
+    debugPrint('[Main] Background services init error: $e');
+  }
 }
 
 class Way2NewsCloneApp extends StatelessWidget {
