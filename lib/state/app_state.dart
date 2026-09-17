@@ -49,9 +49,44 @@ class AppState extends ChangeNotifier {
   AppState._internal();
   static final AppState instance = AppState._internal();
 
+  /// UI language: buttons, labels, tabs, settings copy.
   String language = 'Telugu';
-  String get contentLanguage =>
-      language.toLowerCase().startsWith('en') ? 'en' : 'te';
+
+  /// Language of the news itself, stored independently of [language].
+  ///
+  /// null means "All languages" and the feed request omits `lang` entirely,
+  /// which is what the backend wants for an unfiltered feed. It is not
+  /// derived from [language] any more: that made the two settings impossible
+  /// to separate, and made every fresh install send lang=te — hiding every
+  /// English article before the reader had chosen anything.
+  String? _contentLanguage;
+
+  /// 'en' | 'te', or null for all languages.
+  String? get contentLanguage => _contentLanguage;
+
+  /// Whether the reader has been asked yet.
+  ///
+  /// Separate from [_contentLanguage] being null, because null is also the
+  /// valid answer "All languages" — without this the prompt would reappear
+  /// every launch for anyone who picked All.
+  bool contentLanguagePrompted = false;
+
+  Future<void> markContentLanguagePrompted() async {
+    if (contentLanguagePrompted) return;
+    contentLanguagePrompted = true;
+    await _persist();
+  }
+
+  /// Accepts 'all' / '' as null so callers can pass the UI value straight in.
+  Future<void> setContentLanguage(String? value) async {
+    final normalized = (value == null || value.isEmpty || value == 'all')
+        ? null
+        : value.toLowerCase();
+    if (normalized == _contentLanguage) return;
+    _contentLanguage = normalized;
+    notifyListeners();
+    await _persist();
+  }
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -206,6 +241,10 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
     language = prefs.getString('language') ?? 'Telugu';
+    // Absent key means never chosen — stays null so the feed is unfiltered.
+    _contentLanguage = prefs.getString('content_language');
+    contentLanguagePrompted =
+        prefs.getBool('content_language_prompted') ?? false;
     stateName = prefs.getString('stateName') ?? stateName;
     district = prefs.getString('district') ?? district;
     city = prefs.getString('city') ?? city;
@@ -301,6 +340,13 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('hasOnboarded', hasOnboarded);
     await prefs.setString('language', language);
+    await prefs.setBool(
+        'content_language_prompted', contentLanguagePrompted);
+    if (_contentLanguage == null) {
+      await prefs.remove('content_language');
+    } else {
+      await prefs.setString('content_language', _contentLanguage!);
+    }
     await prefs.setString('stateName', stateName);
     await prefs.setString('district', district);
     await prefs.setString('city', city);

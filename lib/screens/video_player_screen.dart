@@ -41,7 +41,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     if (!source.isPlayable) return;
 
-    final ctrl = VideoPlaybackController.fromSource(source);
+    // autoPlay at construction, not play() after setState: this screen is
+    // only reached by an explicit tap, and the player surface does not exist
+    // until the next frame — so a play() here is dropped for YouTube.
+    final ctrl = VideoPlaybackController.fromSource(source, autoPlay: true);
     ctrl.setLooping(false);
     ctrl.setMuted(_isMuted);
 
@@ -54,7 +57,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       setState(() {
         _controller = ctrl;
       });
-      ctrl.play();
     } catch (e) {
       debugPrint('[VideoPlayerScreen] Playback init error: $e');
     }

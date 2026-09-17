@@ -97,15 +97,27 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
     });
 
     _playbackController?.dispose();
-    final ctrl = VideoPlaybackController.fromSource(_mediaSource!);
+
+    // autoPlay: true is safe here and is *not* feed autoplay — this method
+    // only ever runs from an explicit tap, so no controller exists until the
+    // reader asks for one.
+    //
+    // It also has to be true: play() cannot work at this point. The player
+    // surface mounts on the next frame, after the setState above, so calling
+    // playVideo() here hits a controller with nothing attached and the
+    // command is dropped — which is why the first tap appeared to do nothing
+    // and a second interaction was needed. autoPlay is honoured by the
+    // player when it becomes ready, so the tap is never lost.
+    final ctrl =
+        VideoPlaybackController.fromSource(_mediaSource!, autoPlay: true);
     _playbackController = ctrl;
 
     try {
       await ctrl.initialize();
-      if (mounted &&
-          _isPlaying &&
-          identical(ctrl, _playbackController)) {
-        ctrl.play();
+      // Rebuild so the player widget mounts with the ready controller. The
+      // identity check drops a stale init whose video was swiped past while
+      // it was still loading.
+      if (mounted && _isPlaying && identical(ctrl, _playbackController)) {
         setState(() {});
       }
     } catch (e) {

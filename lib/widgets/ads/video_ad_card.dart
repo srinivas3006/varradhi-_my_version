@@ -12,7 +12,6 @@ import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/share_service.dart';
 import 'ad_viewability_detector.dart';
 
 /// Production video ad card.
@@ -193,13 +192,6 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
     }
   }
 
-  void _handleShare() {
-    HapticFeedback.lightImpact();
-    final shareText = widget.ad.destinationUrl.isNotEmpty
-        ? '${widget.ad.title}\n${widget.ad.destinationUrl}'
-        : widget.ad.title;
-    ShareService.shareText(shareText);
-  }
 
   void _toggleMute() {
     if (_playbackController != null && _isInitialized) {
@@ -371,28 +363,6 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
                               ),
                               const SizedBox(width: 8),
                             ],
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                                child: InkWell(
-                                  onTap: _handleShare,
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(7),
-                                    decoration: BoxDecoration(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.6),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                          color: Colors.white24, width: 0.8),
-                                    ),
-                                    child: const Icon(Icons.share_rounded,
-                                        color: Colors.white, size: 16),
-                                  ),
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       ),

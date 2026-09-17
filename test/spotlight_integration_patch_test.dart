@@ -88,6 +88,9 @@ void main() {
   late HttpClientAdapter previous;
   late _FeedAdapter adapter;
   setUp(() {
+    // The first-run news-language sheet is onboarding, not the
+    // behaviour under test here.
+    AppState.instance.contentLanguagePrompted = true;
     previous = ApiClient.instance.dio.httpClientAdapter;
     adapter = _FeedAdapter();
     ApiClient.instance.dio.httpClientAdapter = adapter;

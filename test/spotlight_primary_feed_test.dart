@@ -85,6 +85,9 @@ void main() {
   final Map<String, String> mockSecureStorage = {};
 
   setUpAll(() {
+    // The first-run news-language sheet is onboarding, not the
+    // behaviour under test here.
+    AppState.instance.contentLanguagePrompted = true;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel,
             (MethodCall methodCall) async {

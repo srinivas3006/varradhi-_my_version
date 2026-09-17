@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:way2news_clone/core/network/dio_client.dart';
 import 'package:way2news_clone/main.dart';
+import 'package:way2news_clone/state/app_state.dart';
 
 class WidgetTestMockAdapter implements HttpClientAdapter {
   @override
@@ -35,6 +36,7 @@ void main() {
   final Map<String, String> mockSecureStorage = {};
 
   setUpAll(() {
+    AppState.instance.contentLanguagePrompted = true;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel,
             (MethodCall methodCall) async {

@@ -29,6 +29,8 @@ import '../repositories/feed_repository.dart';
 import '../repositories/ugc_repository.dart';
 import '../core/state/feed_state.dart';
 import 'location_selection_screen.dart';
+import 'poster_detail_screen.dart';
+import '../models/poster_images.dart';
 
 class NewsFeedTab extends StatefulWidget {
   const NewsFeedTab({super.key});
@@ -58,7 +60,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   bool _hasMore = true;
   FeedStatus _feedStatus = FeedStatus.initial;
   String? _feedError;
-  String get _feedLang => AppState.instance.contentLanguage;
+  String? get _feedLang => AppState.instance.contentLanguage;
   List<NewsArticle> _villageSection = [];
   List<NewsArticle> _mandalSection = [];
   List<NewsArticle> _districtUgc = [];
@@ -731,10 +733,25 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             itemCount: _posters.length,
             itemBuilder: (context, index) {
               final poster = _posters[index] as Map<String, dynamic>;
-              final imageUrl = poster['image_url'] ?? poster['media_url'] ?? '';
+              // Shared parser, same as the feed and detail view: the raw
+              // `a ?? b` this replaced also missed that the API sends empty
+              // strings, so a tile could render blank.
+              final images = posterImageUrls(poster);
+              final imageUrl = images.isEmpty ? '' : images.first;
               final title = poster['title'] ?? 'Greeting';
 
-              return Container(
+              // The strip had no tap handler at all — not a blocked pointer
+              // or a bad route, the callback was simply never there, so
+              // posters on Home were never openable.
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PosterDetailScreen(poster: poster),
+                  ),
+                ),
+                child: Container(
                 width: 130,
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
@@ -772,6 +789,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       color: Colors.white,
                     ),
                   ),
+                ),
                 ),
               );
             },

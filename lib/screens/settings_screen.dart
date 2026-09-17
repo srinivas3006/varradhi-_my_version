@@ -163,6 +163,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Divider(height: 1),
 
+                    // Content Language — the language of the news itself,
+                    // deliberately separate from the interface language above.
+                    ListTile(
+                      leading: const Icon(Icons.article_outlined,
+                          color: AppColors.primary),
+                      title: Text(tr('content_language'),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87)),
+                      subtitle: Text(
+                          _contentLanguageLabel(state.contentLanguage),
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : Colors.black54)),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded,
+                          size: 16),
+                      onTap: () =>
+                          _showContentLanguageDialog(context, state, isDark),
+                    ),
+                    const Divider(height: 1),
+
                     // News Category Preferences
                     ListTile(
                       leading: const Icon(Icons.tune_rounded, color: AppColors.primary),
@@ -413,6 +434,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text(tr('log_out')),
           ),
         ],
+      ),
+    );
+  }
+
+  /// null is "All Languages" — the feed then omits `lang` entirely.
+  static String _contentLanguageLabel(String? code) {
+    switch (code) {
+      case 'te':
+        return 'తెలుగు (Telugu)';
+      case 'en':
+        return 'English';
+      default:
+        return 'All Languages';
+    }
+  }
+
+  void _showContentLanguageDialog(
+      BuildContext context, AppState state, bool isDark) {
+    Widget option(BuildContext ctx, String label, String? code) => ListTile(
+          title: Text(label),
+          trailing: state.contentLanguage == code
+              ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+              : null,
+          onTap: () {
+            state.setContentLanguage(code);
+            Navigator.pop(ctx);
+          },
+        );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(tr('content_language')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            option(ctx, 'All Languages', null),
+            const Divider(height: 1),
+            option(ctx, 'తెలుగు (Telugu)', 'te'),
+            const Divider(height: 1),
+            option(ctx, 'English', 'en'),
+          ],
+        ),
       ),
     );
   }

@@ -10,6 +10,7 @@ import '../services/ad_delivery_service.dart';
 import '../core/widgets/flip_page_view.dart';
 import '../widgets/spotlight/spotlight_news_card.dart';
 import '../widgets/spotlight/spotlight_shimmer_card.dart';
+import '../widgets/spotlight/news_language_sheet.dart';
 import '../widgets/spotlight/location_prompt_sheet.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/info_card.dart';
@@ -75,6 +76,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       isLocal: widget.isLocal,
       initialStoryId: widget.initialStoryId,
     );
+    // Ask which news language before anything location-related: it decides
+    // what the very first feed request asks for.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) NewsLanguageSheet.showIfNeeded(context);
+    });
     _scheduleGentleLocationPrompt();
     // A deep link can ask for a specific story. The feed is empty at this
     // point, so jump once as soon as it arrives.

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
@@ -151,6 +152,145 @@ class ShareService {
       await Share.share(shareText);
     } catch (e) {
       debugPrint('Error sharing article: $e');
+    } finally {
+      _isSharing = false;
+    }
+  }
+
+  /// Whether a shareable/downloadable poster can be built for [article].
+  ///
+  /// Gates the Download action: a poster is an image with text on it, so
+  /// without a usable image there is nothing to generate and the control
+  /// should not be offered.
+  static bool canGeneratePoster(NewsArticle article) {
+    final url = UrlNormalizer.normalize(
+      (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
+          ? article.mediaItems.first.url
+          : article.imageUrl,
+    );
+    return url.startsWith('http://') || url.startsWith('https://');
+  }
+
+  /// Builds the branded PNG poster: image, headline, body excerpt, and the
+  /// mandatory watermark.
+  ///
+  /// Returns the written file, or null when no poster could be produced.
+  /// Works for articles and UGC alike — UGC is a NewsArticle with
+  /// contentKind 'ugc', so the only difference is which fields carry text.
+  static Future<File?> buildPosterFile(NewsArticle article) async {
+    if (!canGeneratePoster(article)) return null;
+
+    final url = UrlNormalizer.normalize(
+      (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
+          ? article.mediaItems.first.url
+          : article.imageUrl,
+    );
+    final imageBytes = await _fetchImageBytes(url);
+    if (imageBytes == null || imageBytes.isEmpty) return null;
+
+    // Image + watermark only. No headline, no body: the download is the
+    // picture, and the text travels beside it in the share sheet instead of
+    // being burned into the pixels.
+    //
+    // Natural aspect ratio preserved, capped so a huge original does not
+    // produce a huge PNG.
+    double width = 1200;
+    double height = 675;
+    try {
+      final codec = await ui.instantiateImageCodec(imageBytes);
+      final frame = await codec.getNextFrame();
+      width = frame.image.width.toDouble();
+      height = frame.image.height.toDouble();
+    } catch (e) {
+      debugPrint('[ShareService] could not decode poster dimensions: $e');
+    }
+    if (width > 1200) {
+      height = (height * 1200 / width).roundToDouble();
+      width = 1200;
+    }
+    if (width <= 0 || height <= 0) {
+      width = 1200;
+      height = 675;
+    }
+
+    final bytes = await _screenshotController.captureFromWidget(
+      _WatermarkShareCard(
+        article: article,
+        imageBytes: imageBytes,
+        width: width,
+        height: height,
+      ),
+      targetSize: Size(width, height),
+      delay: const Duration(milliseconds: 120),
+    );
+    if (bytes.isEmpty) return null;
+
+    final dir = await getTemporaryDirectory();
+    final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final file =
+        await File('${dir.path}/vaaradhi_poster_$safeId.png').create();
+    await file.writeAsBytes(bytes);
+    return file;
+  }
+
+  /// Outcome of a download, so the UI can say what actually happened rather
+  /// than guessing.
+  static const int downloadSaved = 0;
+  static const int downloadPermissionDenied = 1;
+  static const int downloadFailed = 2;
+
+  /// Writes the watermarked PNG into the device gallery.
+  ///
+  /// Android 29+ goes through MediaStore and needs no permission; 28 and
+  /// below use WRITE_EXTERNAL_STORAGE, declared with maxSdkVersion="28". iOS
+  /// needs add-only Photos access. gal.hasAccess/requestAccess handles the
+  /// difference, so this asks only when the platform actually requires it.
+  static Future<int> downloadPoster(NewsArticle article) async {
+    if (_isSharing) return downloadFailed;
+    _isSharing = true;
+    try {
+      final file = await buildPosterFile(article);
+      if (file == null) return downloadFailed;
+
+      // toAlbum makes the saved file land somewhere the reader can find it,
+      // rather than loose in the camera roll.
+      if (!await Gal.hasAccess(toAlbum: true)) {
+        if (!await Gal.requestAccess(toAlbum: true)) {
+          return downloadPermissionDenied;
+        }
+      }
+
+      await Gal.putImage(file.path, album: 'Vaaradhi');
+      return downloadSaved;
+    } on GalException catch (e) {
+      debugPrint('ShareService: gallery save failed: ${e.type}');
+      return e.type == GalExceptionType.accessDenied
+          ? downloadPermissionDenied
+          : downloadFailed;
+    } catch (e) {
+      debugPrint('ShareService: poster download failed: $e');
+      return downloadFailed;
+    } finally {
+      _isSharing = false;
+    }
+  }
+
+  /// Share: the same watermarked image, with the text sent beside it through
+  /// the native sheet so every social target receives both.
+  static Future<bool> sharePoster(NewsArticle article) async {
+    if (_isSharing) return false;
+    _isSharing = true;
+    try {
+      final file = await buildPosterFile(article);
+      if (file == null) return false;
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'image/png')],
+        text: buildShareText(article),
+      );
+      return true;
+    } catch (e) {
+      debugPrint('ShareService: poster share failed: $e');
+      return false;
     } finally {
       _isSharing = false;
     }

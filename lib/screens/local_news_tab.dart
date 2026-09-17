@@ -58,7 +58,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   bool _isLoadingMoreGlobal = false;
   String? _globalError;
   int _loadGeneration = 0;
-  String get _feedLang => AppState.instance.contentLanguage;
+  String? get _feedLang => AppState.instance.contentLanguage;
 
   late String _preferencesIdentity;
 

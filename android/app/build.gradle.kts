@@ -23,12 +23,17 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications needs java.time on older Android.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     defaultConfig {
-        applicationId = "com.vaaradhi.vaaradhi"
+        // Play Store identity. Deliberately different from `namespace`
+        // above: namespace is the Kotlin/R package and changing it would mean
+        // moving MainActivity.kt; applicationId is what Play matches on.
+        applicationId = "com.varadhi"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -73,4 +78,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

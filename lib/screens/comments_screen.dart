@@ -11,7 +11,30 @@ import 'account_login_screen.dart';
 class CommentsScreen extends StatefulWidget {
   final NewsArticle article;
 
-  const CommentsScreen({super.key, required this.article});
+  /// Renders as a sheet on the current screen rather than a pushed page:
+  /// drag handle and close button instead of a Scaffold with a back arrow.
+  /// Same state, same loading and posting logic — only the chrome differs.
+  final bool sheetMode;
+
+  const CommentsScreen({
+    super.key,
+    required this.article,
+    this.sheetMode = false,
+  });
+
+  /// Opens comments over the current screen, keeping the post behind visible.
+  static Future<void> showSheet(BuildContext context, NewsArticle article) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => FractionallySizedBox(
+        heightFactor: 0.82,
+        child: CommentsScreen(article: article, sheetMode: true),
+      ),
+    );
+  }
 
   @override
   State<CommentsScreen> createState() => _CommentsScreenState();
@@ -587,28 +610,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       return _buildLoginRequiredScreen();
     }
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        elevation: 0,
-        leading: IconButton(
-          icon:
-              Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          tr('comments_title'),
-          style: TextStyle(
-              color: Theme.of(context).textTheme.bodyLarge?.color,
-              fontWeight: FontWeight.bold),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: Theme.of(context).dividerColor, height: 1),
-        ),
-      ),
-      body: Column(
+    final body = Column(
         children: [
           Expanded(
             child: RefreshIndicator(
@@ -647,6 +649,79 @@ class _CommentsScreenState extends State<CommentsScreen> {
             ),
           ),
           _buildCommentComposer(context),
+        ],
+      );
+
+    if (widget.sheetMode) return _asSheet(context, body);
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+        leading: IconButton(
+          icon:
+              Icon(Icons.arrow_back, color: Theme.of(context).iconTheme.color),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          tr('comments_title'),
+          style: TextStyle(
+              color: Theme.of(context).textTheme.bodyLarge?.color,
+              fontWeight: FontWeight.bold),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: Theme.of(context).dividerColor, height: 1),
+        ),
+      ),
+      body: body,
+    );
+  }
+
+  /// Sheet chrome: handle, title, close. No Scaffold, so the post behind
+  /// stays on screen and the reader never leaves it.
+  Widget _asSheet(BuildContext context, Widget body) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 38,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Theme.of(context).dividerColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 6, 4),
+            child: Row(
+              children: [
+                Text(
+                  tr('comments_title'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Theme.of(context).textTheme.bodyLarge?.color,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                  tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Theme.of(context).dividerColor),
+          Expanded(child: body),
         ],
       ),
     );

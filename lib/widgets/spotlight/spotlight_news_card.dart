@@ -7,6 +7,7 @@ import '../../services/tts_service.dart';
 import '../../screens/news_detail_screen.dart';
 import '../../models/news_article.dart';
 import '../../state/app_state.dart';
+import '../../utils/share_service.dart';
 import '../../theme/app_theme.dart';
 import '../../screens/comments_screen.dart';
 import '../../services/api_service.dart';
@@ -55,6 +56,46 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   String? _detailError;
   NewsArticle? _detailArticle;
   int _detailGeneration = 0;
+
+  bool _downloadingPoster = false;
+
+  /// Generates the branded PNG poster and hands it to the share sheet, where
+  /// both platforms expose "save to device" next to every social app.
+  Future<void> _downloadPoster(NewsArticle article) async {
+    setState(() => _downloadingPoster = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await ShareService.downloadPoster(article);
+      if (!mounted) return;
+      final telugu = AppState.instance.language == 'Telugu';
+      final String message;
+      switch (result) {
+        case ShareService.downloadSaved:
+          message = telugu
+              ? 'గ్యాలరీలో సేవ్ చేయబడింది'
+              : 'Saved to your gallery';
+          break;
+        case ShareService.downloadPermissionDenied:
+          message = telugu
+              ? 'సేవ్ చేయడానికి గ్యాలరీ అనుమతి కావాలి'
+              : 'Gallery permission is needed to save';
+          break;
+        default:
+          message = telugu
+              ? 'పోస్టర్ సేవ్ చేయడం విఫలమైంది'
+              : 'Could not save the poster';
+      }
+      messenger
+        ..removeCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ));
+    } finally {
+      if (mounted) setState(() => _downloadingPoster = false);
+    }
+  }
 
   @override
   void initState() {
@@ -816,7 +857,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    final isLiked = AppState.instance.isLiked(targetId) ||
+                                    // article.isLiked carries the reader's
+                                    // existing reaction from the backend
+                                    // (is_liked_by_user / my_reaction), so a
+                                    // post liked in an earlier session shows
+                                    // as liked on first paint. The local set
+                                    // is the optimistic overlay on top of it.
+                                    final isLiked = article.isLiked ||
+                                        AppState.instance.isLiked(targetId) ||
                                         (article.id.isNotEmpty &&
                                             AppState.instance.isLiked(article.id));
                                     return _buildActionIcon(
@@ -826,8 +874,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       color: isLiked
                                           ? AppColors.primary
                                           : AppColors.textMuted,
-                                      label: _formatCount(
-                                          article.likes + (isLiked ? 1 : 0)),
+                                      // article.likes is already the
+                                      // authoritative count: the handler
+                                      // below sets it optimistically and then
+                                      // replaces it with the server's
+                                      // like_count. Adding isLiked on top
+                                      // counted the same like twice, which is
+                                      // why one tap showed 2.
+                                      label: _formatCount(article.likes),
                                       onTap: () async {
                                         final messenger = ScaffoldMessenger.of(context);
                                         HapticFeedback.lightImpact();
@@ -978,6 +1032,21 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     );
                                   },
                                 ),
+                                // Download poster. Only offered where a
+                                // poster can actually be generated — without
+                                // an image there is nothing to put text on.
+                                if (ShareService.canGeneratePoster(article))
+                                  _buildActionIcon(
+                                    icon: _downloadingPoster
+                                        ? Icons.hourglass_top_rounded
+                                        : Icons.download_rounded,
+                                    color: AppColors.textMuted,
+                                    label: '',
+                                    onTap: () {
+                                      if (_downloadingPoster) return;
+                                      _downloadPoster(article);
+                                    },
+                                  ),
                                 // Share (Center, Prominent)
                                 GestureDetector(
                                   onTap: widget.onShare,
@@ -1005,13 +1074,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       label: _formatCount(count),
                                       onTap: () {
                                         HapticFeedback.selectionClick();
-                                        Navigator.push(
+                                        // Sheet, not a pushed page: the post
+                                        // stays on screen behind it.
+                                        CommentsScreen.showSheet(
                                           context,
-                                          MaterialPageRoute(
-                                            builder: (_) => CommentsScreen(
-                                                article: _detailArticle ??
-                                                    widget.article),
-                                          ),
+                                          _detailArticle ?? widget.article,
                                         );
                                       },
                                     );

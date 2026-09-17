@@ -1079,7 +1079,11 @@ class ApiService {
     double? longitude,
   }) async {
     // Default to a fat response of 25 articles per page for rapid browsing
-    final effectiveLang = lang ?? 'te';
+    //
+    // No `?? 'te'`: null must stay null all the way to the query string.
+    // Defaulting here is what made every fresh install request Telugu-only
+    // and hide English articles before the reader had chosen anything.
+    final effectiveLang = lang;
     final effectiveState = state != null
         ? (state.isNotEmpty ? state : null)
         : (scope == 'local' ? AppState.instance.stateName : null);
@@ -1105,7 +1109,10 @@ class ApiService {
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       'page_size': effectivePageSize,
       if (scope != null && scope.isNotEmpty) 'scope': scope,
-      'lang': effectiveLang,
+      // Omitted entirely when null: no lang means all languages, which is
+      // what a reader who has not chosen one should get.
+      if (effectiveLang != null && effectiveLang.isNotEmpty)
+        'lang': effectiveLang,
       if (category != null && category != 'For You' && category != 'Trending')
         'category': category.toLowerCase(),
       if (breaking != null) 'breaking': breaking,
@@ -1685,10 +1692,11 @@ class ApiService {
     String? cursor,
     int pageSize = 20,
   }) async {
-    final effectiveLang = lang ?? 'te';
+    final effectiveLang = lang;
     final Map<String, dynamic> params = {
       'page_size': pageSize,
-      'lang': effectiveLang,
+      if (effectiveLang != null && effectiveLang.isNotEmpty)
+        'lang': effectiveLang,
     };
     if (category != null) params['category'] = category;
     if (cursor != null) params['cursor'] = cursor;
@@ -1927,10 +1935,11 @@ class ApiService {
   Future<Map<String, dynamic>?> getRandomQuote(
       {String? lang, bool forceRefresh = false}) async {
     try {
-      final effectiveLang = lang ?? 'te';
+      final effectiveLang = lang;
       final response =
           await _dio.get('/api/v1/quotes/random/', queryParameters: {
-        'lang': effectiveLang,
+        if (effectiveLang != null && effectiveLang.isNotEmpty)
+          'lang': effectiveLang,
         if (forceRefresh) 't': DateTime.now().millisecondsSinceEpoch,
       });
       return response.data['data'] as Map<String, dynamic>?;

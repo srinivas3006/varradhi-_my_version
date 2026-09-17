@@ -1,7 +1,7 @@
 name: way2news_clone
 description: VARADHI news, video, local updates, ads, and citizen journalism mobile app.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.7.0+9
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -32,6 +32,8 @@ dependencies:
   flutter_secure_storage: ^10.3.1
   visibility_detector: ^0.4.0+2
   provider: ^6.1.5+1
+  gal: ^2.3.3
+  flutter_local_notifications: ^22.3.1
 
 dev_dependencies:
   flutter_test:

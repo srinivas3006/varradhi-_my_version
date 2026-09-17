@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,6 +53,85 @@ class NotificationService {
   /// Lightweight initialization during app boot:
   /// Initializes Firebase and registers background/foreground message listeners
   /// WITHOUT prompting permissions or blocking cold startup.
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+
+  /// High importance so notifications produce a heads-up alert.
+  ///
+  /// Without an explicit channel, Android 8+ drops FCM messages into a
+  /// low-importance fallback channel — they arrive, but silently and without
+  /// a banner, which reads as "the push never came".
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'vaaradhi_news',
+    'News alerts',
+    description: 'Breaking news and updates from Vaaradhi',
+    importance: Importance.high,
+  );
+
+  /// Creates the channel and wires taps on locally-shown notifications.
+  Future<void> _initLocalNotifications() async {
+    await _localNotifications.initialize(
+      settings: const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(
+          // FCM presents these itself in the foreground on iOS; requesting
+          // here as well would double-prompt.
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
+      ),
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload == null || payload.isEmpty) return;
+        try {
+          final data = jsonDecode(payload) as Map<String, dynamic>;
+          debugPrint('[Notifications] tap on local notification');
+          handleNotificationPayload(data);
+        } catch (e) {
+          debugPrint('[Notifications] could not parse tap payload: $e');
+        }
+      },
+    );
+
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
+  }
+
+  /// Shows a foreground message in the tray.
+  ///
+  /// Neither platform displays a push while the app is open — that is the
+  /// app's job — so without this an admin testing with the app in the
+  /// foreground sees nothing at all.
+  Future<void> _showLocalNotification(RemoteMessage message) async {
+    final data = message.data;
+    final title = message.notification?.title ??
+        data['title']?.toString() ??
+        'Vaaradhi News';
+    final body =
+        message.notification?.body ?? data['body']?.toString() ?? '';
+
+    await _localNotifications.show(
+      id: message.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channel.id,
+          _channel.name,
+          channelDescription: _channel.description,
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+        iOS: const DarwinNotificationDetails(),
+      ),
+      payload: jsonEncode(data),
+    );
+  }
+
   Future<void> initEarly({
     required GlobalKey<ScaffoldMessengerState> messengerKey,
     GlobalKey<NavigatorState>? navigatorKey,
@@ -65,6 +146,7 @@ class NotificationService {
       // caps this method as a whole; these caps decide which parts still get
       // a chance when one of them stalls.
       await Firebase.initializeApp().timeout(const Duration(seconds: 4));
+      await _initLocalNotifications();
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       final messaging = FirebaseMessaging.instance;
@@ -75,6 +157,7 @@ class NotificationService {
         // recoverable — onTokenRefresh below still delivers one later.
         final token =
             await messaging.getToken().timeout(const Duration(seconds: 3));
+        debugPrint('[Notifications] token acquired: ${token != null}');
         if (token != null && token.isNotEmpty) {
           AppState.instance.fcmToken = token;
           debugPrint('[NotificationService] Early FCM token acquired: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
@@ -85,13 +168,20 @@ class NotificationService {
 
       // 1. Listen to token refreshes
       messaging.onTokenRefresh.listen((newToken) {
+        debugPrint('[Notifications] token refreshed, re-registering');
         AppState.instance.fcmToken = newToken;
-        ApiService.instance.updateFcmToken(newToken);
+        ApiService.instance.updateFcmToken(newToken).then((_) {
+          debugPrint('[Notifications] refreshed token registered');
+        }).catchError((e) {
+          debugPrint('[Notifications] token registration FAILED: $e');
+        });
       });
 
       // 2. Foreground notification handler (Deduplicate & show interactive banner)
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Foreground FCM message: ${message.messageId}');
+        debugPrint('[Notifications] foreground message ${message.messageId} '
+            'notification=${message.notification != null} '
+            'dataKeys=${message.data.keys.toList()}');
         final data = message.data;
         final notificationId =
             data['notification_id']?.toString() ?? message.messageId;
@@ -104,6 +194,10 @@ class NotificationService {
             _seenNotificationIds.remove(_seenNotificationIds.first);
           }
         }
+
+        // Show it in the tray. The in-app banner below stays as well: it is
+        // the affordance for someone already looking at the screen.
+        unawaited(_showLocalNotification(message));
 
         final title = message.notification?.title ??
             data['title']?.toString() ??
@@ -207,12 +301,21 @@ class NotificationService {
         sound: true,
       );
       debugPrint(
-          'User notification permission status: ${settings.authorizationStatus}');
+          '[Notifications] permission: ${settings.authorizationStatus}');
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        debugPrint('[Notifications] DENIED — no push will arrive on this device');
+      }
 
       final token = await messaging.getToken();
+      debugPrint('[Notifications] token after permission: ${token != null}');
       if (token != null) {
         AppState.instance.fcmToken = token;
-        await ApiService.instance.updateFcmToken(token);
+        try {
+          await ApiService.instance.updateFcmToken(token);
+          debugPrint('[Notifications] token registered with backend');
+        } catch (e) {
+          debugPrint('[Notifications] backend registration FAILED: $e');
+        }
       }
     } catch (e) {
       debugPrint('NotificationService deferred permission error: $e');

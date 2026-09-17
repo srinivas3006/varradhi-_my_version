@@ -64,6 +64,9 @@ void main() {
   });
 
   setUp(() {
+    // The first-run news-language sheet is onboarding, not the
+    // behaviour under test here.
+    AppState.instance.contentLanguagePrompted = true;
     SharedPreferences.setMockInitialValues({});
     AppState.instance.isLoggedIn = false;
     AppState.instance.authToken = null;

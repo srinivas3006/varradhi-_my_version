@@ -60,7 +60,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
     super.dispose();
   }
 
-  String get _feedLang => AppState.instance.contentLanguage;
+  String? get _feedLang => AppState.instance.contentLanguage;
 
   @override
   void initState() {

@@ -6,7 +6,7 @@ class AppConfig {
   /// Set [useRenderTestBackend] to `true` for testing with Render backend.
   /// Set [useRenderTestBackend] to `false` to switch back to AWS production backend.
   /// =========================================================================
-  static const bool useRenderTestBackend = true;
+  static const bool useRenderTestBackend = false;
 
   /// Render Testing Backend (available for test builds)
   static const String renderTestingUrl = 'https://incite-backend.onrender.com';

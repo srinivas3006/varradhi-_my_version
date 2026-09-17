@@ -6,7 +6,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
-import '../../utils/share_service.dart';
 import 'ad_viewability_detector.dart';
 import 'video_ad_card.dart';
 
@@ -118,13 +117,6 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
     }
   }
 
-  void _handleShare() {
-    HapticFeedback.lightImpact();
-    final shareText = widget.ad.destinationUrl.isNotEmpty
-        ? '${widget.ad.title}\n${widget.ad.destinationUrl}'
-        : widget.ad.title;
-    ShareService.shareText(shareText);
-  }
 
   @override
   void dispose() {
@@ -136,7 +128,6 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return AdViewabilityDetector(
       ad: widget.ad,
@@ -320,37 +311,6 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
             ),
 
             // Bottom-Right: Floating Circular White Share Button
-            Positioned(
-              bottom: bottomPadding + 32,
-              right: 20,
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: _handleShare,
-                  borderRadius: BorderRadius.circular(28),
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.share_rounded,
-                      color: Colors.black87,
-                      size: 22,
-                    ),
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),

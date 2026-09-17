@@ -895,7 +895,11 @@ class _VideoCardItemState extends State<VideoCardItem>
       return;
     }
 
-    final ctrl = VideoPlaybackController.fromSource(source);
+    // Hand the intent to the controller instead of calling play() after the
+    // setState below: the player mounts a frame later, so that play() never
+    // reached an attached YouTube surface. Focus behaviour is unchanged.
+    final ctrl =
+        VideoPlaybackController.fromSource(source, autoPlay: widget.isFocused);
     ctrl.setLooping(true);
     ctrl.setMuted(widget.isMuted);
 
@@ -910,9 +914,7 @@ class _VideoCardItemState extends State<VideoCardItem>
         _controller = ctrl;
       });
 
-      if (widget.isFocused) {
-        ctrl.play();
-      }
+
     } catch (e) {
       if (!mounted || token != _generationToken) {
         ctrl.dispose();

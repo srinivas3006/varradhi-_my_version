@@ -5,7 +5,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
-import '../../utils/share_service.dart';
 import '../../theme/app_theme.dart';
 import 'ad_viewability_detector.dart';
 import 'video_ad_card.dart';
@@ -51,12 +50,6 @@ class _NativeAdCardState extends State<NativeAdCard> {
     }
   }
 
-  void _handleShare() {
-    if (widget.ad == null) return;
-    HapticFeedback.lightImpact();
-    final shareText = '${widget.ad!.title}\n${widget.ad!.destinationUrl}';
-    ShareService.shareText(shareText);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -225,29 +218,6 @@ class _NativeAdCardState extends State<NativeAdCard> {
                     ),
 
                     // Top-Right Share Button
-                    Positioned(
-                      top: 12,
-                      right: 12,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                          child: InkWell(
-                            onTap: _handleShare,
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              padding: const EdgeInsets.all(7),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.6),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white24, width: 0.8),
-                              ),
-                              child: const Icon(Icons.share_rounded, color: Colors.white, size: 16),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
