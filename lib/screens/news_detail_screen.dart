@@ -15,6 +15,7 @@ import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
+import '../widgets/watermark/article_watermark_overlay.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'comments_screen.dart';
 
@@ -320,6 +321,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               children: [
                 ArticleMediaCarousel(
                   article: article,
+                  showWatermark: false,
                   onPageChanged: (index) =>
                       setState(() => _currentImageIndex = index),
                 ),
@@ -344,63 +346,21 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Vaaradhi Logo Watermark (Spotlight style)
-                Positioned(
-                  bottom: 44,
-                  right: 16,
-                  child: Opacity(
-                    opacity: 0.85,
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      width: 38,
-                      height: 38,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-
-                // Photographer/Desk Credit Pill (Way2News style - article text.jpeg)
-                Positioned(
-                  bottom: 44,
-                  left: 16,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.camera_alt_outlined,
-                            color: Colors.white, size: 14),
-                        const SizedBox(width: 5),
-                        Text(
-                          article.authorName.isNotEmpty &&
-                                  !article.authorName
-                                      .toLowerCase()
-                                      .contains('john')
-                              ? article.authorName
-                              : (article.source.isNotEmpty
-                                  ? article.source
-                                  : 'VARADHI Desk'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                // Non-intrusive Article Watermark Overlay (Vertical VAARADHI on left + bottom-right logo)
+                // Constrained to visible hero area (height 310) so it's not cut off by the curved sheet.
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 310,
+                  child: ArticleWatermarkOverlay(),
                 ),
 
                 // Multi-Image Index Indicator Pill (Positioned to the left of the Logo watermark so no overlap occurs)
                 if (article.imageUrls != null && article.imageUrls!.length > 1)
                   Positioned(
-                    bottom: 44,
-                    right: 64,
+                    top: 272,
+                    right: 56,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),

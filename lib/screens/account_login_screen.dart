@@ -57,9 +57,10 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
       if (sessionId != null && sessionId.isNotEmpty) {
         await AppState.instance.setSessionId(sessionId);
       }
-      if (data['installation_secret'] != null) {
-        await AppState.instance
-            .setInstallationSecret(data['installation_secret'].toString());
+      final secret = data['installation_secret']?.toString() ??
+          (data['data'] is Map ? data['data']['installation_secret']?.toString() : null);
+      if (secret != null && secret.isNotEmpty) {
+        await AppState.instance.setInstallationSecret(secret);
       }
 
       final user = data['user'] as Map<String, dynamic>?;

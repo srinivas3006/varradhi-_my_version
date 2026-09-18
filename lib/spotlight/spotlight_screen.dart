@@ -473,7 +473,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         behavior: HitTestBehavior.opaque,
         onTap: _controller.toggleOverlay,
         child: Transform.translate(
-          offset: Offset(0, dragDelta),
+          offset: const Offset(0, dragDelta),
           child: child,
         ),
       ),
@@ -866,24 +866,25 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   }
 
   Widget _buildBottomOverlay() {
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(32),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 8,
+            bottom: bottomPadding > 0 ? bottomPadding : 12,
+          ),
           decoration: BoxDecoration(
-            color: const Color(0xFF4A4A4A).withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.35),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.50),
+            border: Border(
+              top: BorderSide(
+                color: Colors.white.withValues(alpha: 0.15),
+                width: 0.5,
               ),
-            ],
+            ),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1021,15 +1022,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   ),
                 ),
 
-                // 4. Bottom Floating Capsule Overlay (< Back on left, Refresh on right)
+                // 4. Bottom Docked Control Bar Overlay (< Back on left, Refresh on right)
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 280),
                   curve: Curves.easeOutCubic,
-                  bottom: showOverlays
-                      ? MediaQuery.of(context).padding.bottom + 16
-                      : -100,
-                  left: 20,
-                  right: 20,
+                  bottom: showOverlays ? 0 : -140,
+                  left: 0,
+                  right: 0,
                   child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 220),
                     curve: Curves.easeOutCubic,

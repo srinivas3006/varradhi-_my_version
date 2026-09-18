@@ -42,6 +42,20 @@ class ApiService {
     }
   }
 
+
+  String? _extractInstallationSecret(dynamic responseData) {
+    if (responseData is Map<String, dynamic>) {
+      if (responseData['installation_secret'] != null) {
+        return responseData['installation_secret'].toString();
+      }
+      if (responseData['data'] is Map<String, dynamic> &&
+          responseData['data']['installation_secret'] != null) {
+        return responseData['data']['installation_secret'].toString();
+      }
+    }
+    return null;
+  }
+
   // --- Auth ---
   Future<Map<String, dynamic>> login(String email, String password,
       {String? fcmToken}) async {
@@ -59,8 +73,8 @@ class ApiService {
       }
     }
 
-    // 2. Recommended backend flow: If installation_secret is missing,
-    // ensure guest registration is performed first so backend generates and returns installation_secret.
+    // 2. If installation_secret is missing, ensure guest registration is performed first
+    // so backend generates and returns installation_secret before logging in.
     if (AppState.instance.installationSecret == null ||
         AppState.instance.installationSecret!.isEmpty) {
       try {
@@ -76,7 +90,7 @@ class ApiService {
           'password': password,
           'device_id': AppState.instance.deviceId,
           'device_name': 'Mobile Device',
-          'device_type': 'android',
+          'device_type': deviceType,
           'app_version': '1.0.0',
           if (token != null && token.isNotEmpty) 'fcm_token': token,
           if (AppState.instance.installationSecret != null &&
@@ -87,35 +101,16 @@ class ApiService {
     try {
       final response =
           await _dio.post('/api/v1/auth/login/', data: buildPayload());
-      final data = response.data['data'] as Map<String, dynamic>;
-      if (data['installation_secret'] != null) {
-        await AppState.instance
-            .setInstallationSecret(data['installation_secret'].toString());
+      final data = (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data as Map<String, dynamic>);
+      final secret = _extractInstallationSecret(response.data);
+      if (secret != null && secret.isNotEmpty) {
+        await AppState.instance.setInstallationSecret(secret);
       }
       return data;
     } on DioException catch (dioErr) {
-      final respStr = dioErr.response?.data?.toString() ?? '';
-      final isInstallationError = dioErr.response?.statusCode == 403 ||
-          respStr.toLowerCase().contains('installation');
-
-      if (isInstallationError) {
-        debugPrint(
-            '[ApiService] 403 Installation credential required/mismatched. Regenerating device ID and re-registering guest device...');
-        // The backend expects the installation_secret matching this device_id,
-        // but this client lost or does not have that secret.
-        // As per backend contract: Generate fresh device_id, register guest-device to obtain a new installation_secret, and retry login.
-        await AppState.instance.regenerateDeviceId();
-        await registerGuestDevice(fcmToken: token);
-
-        final retryResponse =
-            await _dio.post('/api/v1/auth/login/', data: buildPayload());
-        final data = retryResponse.data['data'] as Map<String, dynamic>;
-        if (data['installation_secret'] != null) {
-          await AppState.instance
-              .setInstallationSecret(data['installation_secret'].toString());
-        }
-        return data;
-      }
+      debugPrint(
+          '[ApiService] Login failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
       rethrow;
     }
   }
@@ -150,7 +145,7 @@ class ApiService {
           await _dio.post('/api/v1/notifications/guest-device/', data: {
         'device_id': devId,
         'device_name': 'Mobile Device',
-        'device_type': 'android',
+        'device_type': deviceType,
         'app_version': '1.0.0',
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
@@ -176,55 +171,17 @@ class ApiService {
         },
       });
 
-      final data = response.data['data'] as Map<String, dynamic>?;
-      if (data != null && data['installation_secret'] != null) {
-        await AppState.instance
-            .setInstallationSecret(data['installation_secret'].toString());
+      final secretReturned = _extractInstallationSecret(response.data);
+      if (secretReturned != null && secretReturned.isNotEmpty) {
+        await AppState.instance.setInstallationSecret(secretReturned);
       }
-      return data;
+      return (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data is Map<String, dynamic>
+              ? response.data as Map<String, dynamic>
+              : null);
     } on DioException catch (dioErr) {
-      final respStr = dioErr.response?.data?.toString() ?? '';
-      if (dioErr.response?.statusCode == 403 ||
-          respStr.toLowerCase().contains('installation') ||
-          respStr.toLowerCase().contains('upgrade')) {
-        await AppState.instance.setInstallationSecret(null);
-        try {
-          final retryResp =
-              await _dio.post('/api/v1/notifications/guest-device/', data: {
-            'device_id': devId,
-            'device_name': 'Mobile Device',
-            'device_type': 'android',
-            'app_version': '1.0.0',
-            'fcm_token': token,
-            'state': AppState.instance.stateName,
-            'district': AppState.instance.district,
-            'subdistrict': AppState.instance.subdistrict,
-            'village': AppState.instance.village,
-            'country': AppState.instance.country,
-            'preferences': {
-              'enabled': true,
-              'content_language': lang,
-              'articles': true,
-              'posters': true,
-              'quotes': true,
-              'ugc': true,
-              'breaking_news': true,
-              'local_news': true,
-              'quiet_hours_start': '22:00:00',
-              'quiet_hours_end': '06:00:00',
-              'timezone': 'Asia/Kolkata',
-              'max_per_hour': 5,
-              'max_per_day': 25,
-            },
-          });
-          final data = retryResp.data['data'] as Map<String, dynamic>?;
-          if (data != null && data['installation_secret'] != null) {
-            await AppState.instance
-                .setInstallationSecret(data['installation_secret'].toString());
-          }
-          return data;
-        } catch (_) {}
-      }
+      debugPrint(
+          '[ApiService] registerGuestDevice failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
       return null;
     } catch (_) {
       return null;
@@ -283,7 +240,12 @@ class ApiService {
 
   Future<Map<String, dynamic>> register(Map<String, dynamic> data) async {
     final response = await _dio.post('/api/v1/auth/register/', data: data);
-    return response.data['data'] as Map<String, dynamic>;
+    final secret = _extractInstallationSecret(response.data);
+    if (secret != null && secret.isNotEmpty) {
+      await AppState.instance.setInstallationSecret(secret);
+    }
+    return (response.data['data'] as Map<String, dynamic>?) ??
+        (response.data as Map<String, dynamic>);
   }
 
   /// Initiates account deletion for Play Store compliance

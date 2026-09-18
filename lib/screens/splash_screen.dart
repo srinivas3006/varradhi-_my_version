@@ -33,40 +33,21 @@ class _SplashScreenState extends State<SplashScreen>
   late final AnimationController _controller;
   bool _starting = false;
   bool _navigated = false;
-  late final Animation<double> _scaleAnimation;
   late final Animation<double> _fadeAnimation;
-  late final Animation<double> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
-    // 600ms allows the elastic animation to settle smoothly without blocking first useful frame
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 500),
     );
 
-    // Smooth, instant logo visibility matching native splash screen perfectly
-    _scaleAnimation = Tween<double>(begin: 0.88, end: 1.0).animate(
+    // Clean, elegant fade-in without awkward size expansion jumps
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
         curve: Curves.easeOutCubic,
-      ),
-    );
-
-    // Fade gently from 0.85 to 1.0 so there is zero blank white frame
-    _fadeAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
-      ),
-    );
-
-    // Subtle gentle slide up
-    _slideAnimation = Tween<double>(begin: 12.0, end: 0.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.7, curve: Curves.easeOutCubic),
       ),
     );
 
@@ -97,6 +78,7 @@ class _SplashScreenState extends State<SplashScreen>
             .registerGuestDevice(
               deviceId: state.deviceId,
               fcmToken: state.fcmToken,
+              installationSecret: state.installationSecret,
             )
             .catchError((_) => null),
       );
@@ -183,39 +165,32 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Clean, distraction-free background
+      backgroundColor: Colors.white,
       body: Center(
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Transform.translate(
-              offset: Offset(0, _slideAnimation.value),
-              child: Transform.scale(
-                scale: _scaleAnimation.value,
-                child: Opacity(
-                  opacity: _fadeAnimation.value,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.15),
-                          blurRadius: 40,
-                          spreadRadius: 10,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
-                    ),
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      width: 220,
-                      height: 220,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.16),
+                  blurRadius: 36,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 8),
                 ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 150,
+                height: 150,
+                fit: BoxFit.contain,
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );

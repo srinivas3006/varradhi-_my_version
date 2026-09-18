@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
 import '../core/utils/url_normalizer.dart';
+import '../widgets/watermark/article_watermark_overlay.dart';
 
 class ShareService {
   static final ScreenshotController _screenshotController =
@@ -323,61 +324,20 @@ class _WatermarkShareCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Proportional logo watermark size based on image dimensions
-    final double logoSize = (width * 0.12).clamp(48.0, 96.0);
-    final double margin = (width * 0.035).clamp(12.0, 24.0);
-
     return Directionality(
       textDirection: TextDirection.ltr,
       child: SizedBox(
         width: width,
         height: height,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 1. Article Image (Full Natural Size, No Distortion, No Crop)
-            Image.memory(
-              imageBytes,
-              width: width,
-              height: height,
-              fit: BoxFit.cover,
-            ),
-
-            // 2. Subtle Corner Gradient for watermark contrast
-            Positioned(
-              right: 0,
-              bottom: 0,
-              width: logoSize * 2.2,
-              height: logoSize * 2.2,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.bottomRight,
-                    radius: 1.1,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.35),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            // 3. Official Vaaradhi Logo Watermark ONLY (Bottom-Right)
-            Positioned(
-              right: margin,
-              bottom: margin,
-              child: Opacity(
-                opacity: 0.92,
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  width: logoSize,
-                  height: logoSize,
-                  fit: BoxFit.contain,
-                ),
-              ),
-            ),
-          ],
+        child: ArticleWatermarkOverlay(
+          width: width,
+          height: height,
+          child: Image.memory(
+            imageBytes,
+            width: width,
+            height: height,
+            fit: BoxFit.cover,
+          ),
         ),
       ),
     );

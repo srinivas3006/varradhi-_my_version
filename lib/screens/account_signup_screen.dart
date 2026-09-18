@@ -69,6 +69,9 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         'device_type': ApiService.deviceType,
         if (AppState.instance.fcmToken != null)
           'fcm_token': AppState.instance.fcmToken,
+        if (AppState.instance.installationSecret != null &&
+            AppState.instance.installationSecret!.isNotEmpty)
+          'installation_secret': AppState.instance.installationSecret,
       });
 
       // Auto-login from returned access & refresh tokens
@@ -82,6 +85,10 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         final sessionId = data['session_id']?.toString() ?? data['session']?['id']?.toString();
         if (sessionId != null && sessionId.isNotEmpty) {
           await AppState.instance.setSessionId(sessionId);
+        }
+        final secret = data['installation_secret']?.toString();
+        if (secret != null && secret.isNotEmpty) {
+          await AppState.instance.setInstallationSecret(secret);
         }
 
         final user = data['user'] as Map<String, dynamic>?;

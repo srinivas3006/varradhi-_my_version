@@ -32,6 +32,22 @@ import 'location_selection_screen.dart';
 import 'poster_detail_screen.dart';
 import '../models/poster_images.dart';
 
+enum HeroCardKind { liveStream, breakingArticle }
+
+class HeroCardItem {
+  final HeroCardKind kind;
+  final LiveNews? liveStream;
+  final NewsArticle? article;
+
+  const HeroCardItem.live(this.liveStream)
+      : kind = HeroCardKind.liveStream,
+        article = null;
+
+  const HeroCardItem.article(this.article)
+      : kind = HeroCardKind.breakingArticle,
+        liveStream = null;
+}
+
 class NewsFeedTab extends StatefulWidget {
   const NewsFeedTab({super.key});
 
@@ -931,13 +947,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
 
 
-  Widget _buildBreakingNewsSection(List<NewsArticle> breakingNews) {
-    if (breakingNews.isEmpty) return const SizedBox.shrink();
+  Widget _buildBreakingNewsSection(List<HeroCardItem> heroItems) {
+    if (heroItems.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final borderColor = isDark
         ? Colors.white.withValues(alpha: 0.1)
         : Colors.black.withValues(alpha: 0.05);
+    final clampedIndex = _currentBreakingIndex.clamp(0, heroItems.length - 1);
 
     return Column(
       children: [
@@ -948,33 +965,65 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             onPageChanged: (index) {
               setState(() => _currentBreakingIndex = index);
             },
-            itemCount: breakingNews.length,
+            itemCount: heroItems.length,
             itemBuilder: (context, index) {
-              final article = breakingNews[index];
+              final item = heroItems[index];
+              final isLive = item.kind == HeroCardKind.liveStream &&
+                  item.liveStream != null;
+              final stream = item.liveStream;
+              final article = item.article;
+
+              final imageUrl = isLive
+                  ? (stream?.thumbnailUrl ?? '')
+                  : (article?.imageUrl ?? '');
+              final title = isLive
+                  ? (stream?.title ?? '')
+                  : (article?.title ?? '');
+              final subtitle = isLive
+                  ? (stream?.channelName.isNotEmpty == true
+                      ? 'లైవ్ ప్రసారం • ${stream!.channelName}'
+                      : 'లైవ్ ప్రసారం • YouTube Live')
+                  : 'Updated ${article?.timeAgo ?? ''}';
+
               return GestureDetector(
                 onTap: () {
-                  AppNavigator.pushSafe(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => NewsDetailScreen(
-                            article: article, slug: article.slug)),
-                  );
+                  if (isLive) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const LiveNewsScreen()),
+                    );
+                  } else if (article != null) {
+                    AppNavigator.pushSafe(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => NewsDetailScreen(
+                              article: article, slug: article.slug)),
+                    );
+                  }
                 },
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: borderColor),
+                    border: Border.all(
+                      color: isLive
+                          ? Colors.red.withValues(alpha: 0.4)
+                          : borderColor,
+                      width: isLive ? 1.5 : 1.0,
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.12),
+                        color: isLive
+                            ? Colors.red.withValues(alpha: 0.2)
+                            : Colors.black.withValues(alpha: 0.12),
                         blurRadius: 16,
                         offset: const Offset(0, 8),
                       ),
                     ],
-                    image: article.imageUrl.isNotEmpty
+                    image: imageUrl.isNotEmpty
                         ? DecorationImage(
-                            image: CachedNetworkImageProvider(article.imageUrl,
+                            image: CachedNetworkImageProvider(imageUrl,
                                 maxWidth: 800),
                             fit: BoxFit.cover,
                           )
@@ -986,17 +1035,50 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.4),
-                          Colors.black.withValues(alpha: 0.9),
-                        ],
+                        colors: isLive
+                            ? [
+                                Colors.black.withValues(alpha: 0.2),
+                                Colors.black.withValues(alpha: 0.55),
+                                Colors.black.withValues(alpha: 0.95),
+                              ]
+                            : [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.4),
+                                Colors.black.withValues(alpha: 0.9),
+                              ],
                         stops: const [0.4, 0.7, 1.0],
                       ),
                     ),
                     padding: const EdgeInsets.all(20),
                     child: Stack(
                       children: [
+                        if (isLive)
+                          Center(
+                            child: Container(
+                              width: 54,
+                              height: 54,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.35),
+                                  width: 1.5,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 34,
+                              ),
+                            ),
+                          ),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1005,38 +1087,85 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: BackdropFilter(
-                                    filter: dart_ui.ImageFilter.blur(
-                                        sigmaX: 8, sigmaY: 8),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 6),
-                                      color:
-                                          Colors.orange.withValues(alpha: 0.3),
-                                      child: const Text(
-                                        'BREAKING',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 1.2,
-                                          color: Colors.white,
+                                if (isLive)
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: BackdropFilter(
+                                      filter: dart_ui.ImageFilter.blur(
+                                          sigmaX: 8, sigmaY: 8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [
+                                              Color(0xFFDC2626),
+                                              Color(0xFFB91C1C),
+                                            ],
+                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.red
+                                                  .withValues(alpha: 0.5),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              width: 7,
+                                              height: 7,
+                                              decoration: const BoxDecoration(
+                                                color: Colors.white,
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            const Text(
+                                              'LIVE',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w900,
+                                                letterSpacing: 1.2,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: BackdropFilter(
+                                      filter: dart_ui.ImageFilter.blur(
+                                          sigmaX: 8, sigmaY: 8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        color: Colors.orange
+                                            .withValues(alpha: 0.3),
+                                        child: const Text(
+                                          'BREAKING',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 1.2,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) =>
-                                              const LiveNewsScreen()),
-                                    );
-                                  },
-                                  child: ClipRRect(
+                                if (isLive &&
+                                    stream?.channelName.isNotEmpty == true)
+                                  ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
                                     child: BackdropFilter(
                                       filter: dart_ui.ImageFilter.blur(
@@ -1045,47 +1174,65 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 10, vertical: 6),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFF10B981)
-                                              .withValues(alpha: 0.3),
-                                          border: Border.all(
-                                              color: const Color(0xFF10B981)
-                                                  .withValues(alpha: 0.5)),
+                                          color: Colors.white
+                                              .withValues(alpha: 0.2),
                                           borderRadius:
                                               BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.3),
+                                          ),
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Container(
-                                              width: 6,
-                                              height: 6,
-                                              decoration: const BoxDecoration(
-                                                color: Color(0xFF34D399),
-                                                shape: BoxShape.circle,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              'LIVE • ${breakingNews.length}',
-                                              style: const TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w800,
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ],
+                                        child: Text(
+                                          stream!.channelName,
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                else if (!isLive &&
+                                    article?.category.isNotEmpty == true)
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: BackdropFilter(
+                                      filter: dart_ui.ImageFilter.blur(
+                                          sigmaX: 8, sigmaY: 8),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.2),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          article!.category.toUpperCase(),
+                                          style: const TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.5,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  article.title,
+                                  title,
                                   maxLines: 3,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -1098,11 +1245,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                 ),
                                 const SizedBox(height: 10),
                                 Text(
-                                  'Updated ${article.timeAgo}',
+                                  subtitle,
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w500,
-                                    color: Colors.white.withValues(alpha: 0.8),
+                                    color:
+                                        Colors.white.withValues(alpha: 0.8),
                                   ),
                                 ),
                               ],
@@ -1122,7 +1270,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     horizontal: 12, vertical: 6),
                                 color: Colors.white.withValues(alpha: 0.15),
                                 child: Text(
-                                  '${(index + 1).toString().padLeft(2, '0')} / ${breakingNews.length.toString().padLeft(2, '0')}',
+                                  '${(index + 1).toString().padLeft(2, '0')} / ${heroItems.length.toString().padLeft(2, '0')}',
                                   style: const TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w800,
@@ -1146,8 +1294,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         // Pagination Dots
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(breakingNews.length, (index) {
-            final isActive = index == _currentBreakingIndex;
+          children: List.generate(heroItems.length, (index) {
+            final isActive = index == clampedIndex;
             return AnimatedContainer(
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeOutCubic,
@@ -1472,156 +1620,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  Widget _buildLiveSection() {
-    final activeStreams = _liveNewsList.where((s) => s.isLiveActive).toList();
-
-    // 1. LIVE ACTIVE: Show live card
-    if (activeStreams.isNotEmpty) {
-      final stream = activeStreams.first;
-      return Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        child: InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const LiveNewsScreen()),
-            );
-          },
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  const Color(0xFFDC2626).withValues(alpha: 0.9),
-                  Colors.black.withValues(alpha: 0.95),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: Colors.red.withValues(alpha: 0.5), width: 1.2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.red.withValues(alpha: 0.25),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: stream.thumbnailUrl.isNotEmpty
-                          ? CachedNetworkImage(
-                              imageUrl: stream.thumbnailUrl,
-                              width: 86,
-                              height: 62,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              width: 86,
-                              height: 62,
-                              color: Colors.white12,
-                              child: const Icon(Icons.live_tv_rounded,
-                                  color: Colors.white, size: 28),
-                            ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.play_arrow_rounded,
-                          color: Colors.white, size: 20),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.fiber_manual_record,
-                                    color: Colors.white, size: 8),
-                                SizedBox(width: 3),
-                                Text(
-                                  'LIVE',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w900,
-                                    color: Colors.white,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (stream.channelName.isNotEmpty) ...[
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                stream.channelName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white70,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        stream.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          height: 1.25,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(Icons.arrow_forward_ios_rounded,
-                    color: Colors.white54, size: 14),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 2. NO LIVE ACTIVE: Hide section completely. Does not glow up or occupy space.
-    return const SizedBox.shrink();
-  }
-
   @override
   Widget build(BuildContext context) {
     final selectedState = AppState.instance.stateName;
@@ -1655,6 +1653,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       ...globalSection.map((article) => article.id),
     };
     final hasHomeContent = _articles.isNotEmpty ||
+        _liveNewsList.any((s) => s.isLiveActive) ||
         _villageSection.isNotEmpty ||
         _mandalSection.isNotEmpty ||
         _districtUgc.isNotEmpty ||
@@ -1669,6 +1668,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final recommended = recommendedSource
         .where((article) => !sectionIds.contains(article.id))
         .toList();
+    final activeStreams = _liveNewsList.where((s) => s.isLiveActive).toList();
+    final heroItems = [
+      ...activeStreams.map((s) => HeroCardItem.live(s)),
+      ...breakingNews.map((a) => HeroCardItem.article(a)),
+    ];
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -1797,10 +1801,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     RepaintBoundary(
                                       child: _buildCategorySelector(),
                                     ),
-                                    _buildLiveSection(),
                                     RepaintBoundary(
                                       child: _buildBreakingNewsSection(
-                                          breakingNews),
+                                          heroItems),
                                     ),
                                     if (selectedVillage.isNotEmpty)
                                       _buildLocationSection(

@@ -15,6 +15,7 @@ import '../../repositories/news_article_repository.dart';
 import '../news_article_video_player.dart';
 import '../article_media_carousel.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
+import '../watermark/article_watermark_overlay.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
   final NewsArticle article;
@@ -367,19 +368,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 ),
                               ),
                             ),
-                          // Logo Watermark (Always positioned in Bottom-Right of Media Zone)
-                          Positioned(
-                            bottom: 28,
-                            right: 16,
-                            child: Opacity(
-                              opacity: 0.88,
-                              child: Image.asset(
-                                'assets/images/logo.png',
-                                width: 42,
-                                height: 42,
-                                fit: BoxFit.contain,
-                              ),
-                            ),
+                          // Non-intrusive Vaaradhi Watermark (Bottom-Right Logo + Left Vertical Text)
+                          const Positioned.fill(
+                            child: ArticleWatermarkOverlay(),
                           ),
                         ],
                       ),

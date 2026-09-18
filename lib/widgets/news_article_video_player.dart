@@ -296,53 +296,31 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
             ),
           ),
 
-          // YouTube Style Signature Play Button
+          // Simple White Play Button Symbol
           Center(
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _startPlayback,
-                borderRadius: BorderRadius.circular(18),
-                splashColor: Colors.white24,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF0000), // Iconic YouTube red
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                      BoxShadow(
-                        color: const Color(0xFFFF0000).withValues(alpha: 0.35),
-                        blurRadius: 20,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+            child: Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 2),
                   ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        color: Colors.white,
-                        size: 30,
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        'Watch Video',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
-                  ),
+                ],
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 38,
                 ),
               ),
             ),

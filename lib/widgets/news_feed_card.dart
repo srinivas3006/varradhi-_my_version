@@ -7,9 +7,10 @@ import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../localization/app_translations.dart';
-import 'reaction_buttons.dart';
 import '../services/api_service.dart';
+import 'reaction_buttons.dart';
 import 'news_article_video_player.dart';
+import 'watermark/article_watermark_overlay.dart';
 
 class NewsFeedCard extends StatefulWidget {
   final NewsArticle article;
@@ -537,50 +538,18 @@ class _NewsFeedCardState extends State<NewsFeedCard>
       );
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CachedNetworkImage(
-          imageUrl: url,
-          fit: BoxFit.cover,
-          memCacheWidth: 800,
-          placeholder: (context, url) => Container(color: AppColors.chipBg),
-          errorWidget: (context, url, error) => Container(
-            color: AppColors.chipBg,
-            child: const Icon(Icons.image_not_supported_outlined,
-                color: AppColors.textMuted, size: 40),
-          ),
+    return ArticleWatermarkOverlay(
+      child: CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        memCacheWidth: 800,
+        placeholder: (context, url) => Container(color: AppColors.chipBg),
+        errorWidget: (context, url, error) => Container(
+          color: AppColors.chipBg,
+          child: const Icon(Icons.image_not_supported_outlined,
+              color: AppColors.textMuted, size: 40),
         ),
-
-        // Vaaradhi Watermark Badge (Bottom-Right)
-        Positioned(
-          bottom: 8,
-          right: 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.85),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.bolt_rounded, color: Colors.white, size: 12),
-                SizedBox(width: 3),
-                Text(
-                  'Vaaradhi',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 

@@ -145,8 +145,16 @@ class AppState extends ChangeNotifier {
         await _secureStorage.delete(key: _installationSecretKey);
       }
     } catch (e) {
-      debugPrint('[AppState] Failed to persist installation secret: $e');
+      debugPrint('[AppState] Failed to persist installation secret in secure storage: $e');
     }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (secret != null && secret.isNotEmpty) {
+        await prefs.setString(_installationSecretKey, secret);
+      } else {
+        await prefs.remove(_installationSecretKey);
+      }
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -164,14 +172,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Regenerates a fresh device ID and clears old installation secret.
-  /// Used to recover cleanly when the backend rejects mismatched credentials.
+  /// Preserves the stable device ID. Backend enforces that the same FCM token
+  /// cannot be registered under a new device_id.
   Future<String> regenerateDeviceId() async {
-    final newId =
-        'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
-    await setDeviceId(newId);
-    await setInstallationSecret(null);
-    return newId;
+    debugPrint('[AppState] Preserving stable deviceId: $deviceId');
+    return deviceId;
   }
 
   Future<void> setSessionId(String? id) async {
@@ -279,33 +284,41 @@ class AppState extends ChangeNotifier {
     if (deviceId.isEmpty) {
       deviceId =
           'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
-      await prefs.setString('deviceId', deviceId);
+    }
+    // Always ensure deviceId is synced to both storages
+    await prefs.setString('deviceId', deviceId);
+    try {
+      await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+    } catch (_) {}
+
+    // Read installationSecret from secure storage first, fallback to shared_preferences
+    try {
+      installationSecret =
+          await _secureStorage.read(key: _installationSecretKey);
+    } catch (_) {
+      installationSecret = null;
+    }
+    if (installationSecret == null || installationSecret!.isEmpty) {
+      installationSecret = prefs.getString(_installationSecretKey);
+    }
+    if (installationSecret != null && installationSecret!.isNotEmpty) {
+      await prefs.setString(_installationSecretKey, installationSecret!);
       try {
-        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
-      } catch (_) {}
-    } else {
-      await prefs.setString('deviceId', deviceId);
-      try {
-        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+        await _secureStorage.write(
+            key: _installationSecretKey, value: installationSecret!);
       } catch (_) {}
     }
 
-    // Auth tokens come from secure storage, not shared_preferences.
+    // Auth tokens come from secure storage
     try {
       authToken = await _secureStorage.read(key: _authTokenKey);
       refreshToken = await _secureStorage.read(key: _refreshTokenKey);
-      installationSecret =
-          await _secureStorage.read(key: _installationSecretKey);
       sessionId = await _secureStorage.read(key: _sessionIdKey);
     } catch (e) {
       debugPrint(
-          '[AppState] Secure storage read failed (keystore reset or corrupted): $e');
-      try {
-        await _secureStorage.deleteAll();
-      } catch (_) {}
+          '[AppState] Secure storage auth read failed (keystore reset or corrupted): $e');
       authToken = null;
       refreshToken = null;
-      installationSecret = null;
       sessionId = null;
     }
 
