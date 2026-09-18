@@ -7,6 +7,7 @@ import 'account_login_screen.dart';
 import 'preferences_screen.dart';
 import 'notification_settings_screen.dart';
 import 'cms_page_screen.dart';
+import 'account_deletion_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,11 +18,12 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _nameController = TextEditingController();
-  double _fontSize = 16.0;
+  double _fontSize = 19.0;
 
   @override
   void initState() {
     super.initState();
+    _fontSize = AppState.instance.readingFontSize;
     _nameController.text = AppState.instance.userName;
   }
 
@@ -222,15 +224,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           Slider(
-                            value: _fontSize,
-                            min: 12,
-                            max: 24,
+                            value: _fontSize.clamp(14.0, 26.0),
+                            min: 14,
+                            max: 26,
                             divisions: 12,
                             activeColor: AppColors.primary,
                             onChanged: (val) {
                               setState(() => _fontSize = val);
                             },
                             onChangeEnd: (val) {
+                              AppState.instance.setReadingFontSize(val);
                               _updateProfile(fontSize: val);
                             },
                           ),
@@ -305,15 +308,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ListTile(
                         leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
                         title: Text(
-                          state.language == 'Telugu' ? 'ఖాతా శాశ్వతంగా తొలగించండి' : 'Delete Account Permanently',
+                          state.language == 'Telugu' ? 'ఖాతా తొలగింపు (Delete Account)' : 'Delete Account Permanently',
                           style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.red),
                         ),
                         subtitle: Text(
-                          state.language == 'Telugu' ? 'డేటా మరియు ప్రొఫైల్ తొలగించబడుతుంది' : 'Erase all personal data and profile',
+                          state.language == 'Telugu' ? 'ఖాతా మరియు వ్యక్తిగత డేటా తొలగింపు అభ్యర్థన' : 'Request account and personal data deletion',
                           style: TextStyle(fontSize: 11, color: isDark ? Colors.white54 : Colors.black54),
                         ),
+                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.red),
                         onTap: () {
-                          _showDeleteAccountDialog(context, state, isDark);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const AccountDeletionScreen()),
+                          );
                         },
                       ),
                     ],
@@ -520,52 +527,4 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showDeleteAccountDialog(BuildContext context, AppState state, bool isDark) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          state.language == 'Telugu' ? 'ఖాతా తొలగించాలా?' : 'Delete Account?',
-          style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          state.language == 'Telugu'
-              ? 'మీ ఖాతా, బుక్‌మార్క్‌లు, పోస్ట్‌లు మరియు ప్రొఫైల్ వివరాలు శాశ్వతంగా తొలగించబడతాయి. ఈ చర్యను రద్దు చేయడం సాధ్యం కాదు.'
-              : 'Your account, bookmarks, posts, and profile data will be permanently deleted. This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(tr('cancel')),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final success = await state.deleteAccount();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      state.language == 'Telugu'
-                          ? (success ? 'ఖాతా విజయవంతంగా తొలగించబడింది.' : 'స్థానిక ఖాతా డేటా తొలగించబడింది.')
-                          : (success ? 'Account deleted successfully.' : 'Local account data cleared.'),
-                    ),
-                  ),
-                );
-              }
-            },
-            child: Text(
-              state.language == 'Telugu' ? 'తొలగించు' : 'Delete',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

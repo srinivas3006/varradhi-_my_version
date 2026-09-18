@@ -15,6 +15,7 @@ import '../models/ad_banner.dart';
 import '../models/reporter_post.dart';
 import '../models/poll.dart';
 import '../models/app_notification.dart';
+import '../models/account_deletion_request.dart';
 import 'dio_client.dart';
 import 'location_service.dart';
 import '../state/app_state.dart';
@@ -248,24 +249,95 @@ class ApiService {
         (response.data as Map<String, dynamic>);
   }
 
-  /// Initiates account deletion for Play Store compliance
-  Future<bool> deleteAccount() async {
-    for (final endpoint in const [
-      '/api/v1/auth/delete-account/',
-      '/api/v1/auth/me/',
-    ]) {
-      try {
-        final response = await _dio.delete(endpoint);
-        if (response.statusCode == 200 || response.statusCode == 204) {
-          return true;
-        }
-      } catch (_) {
-        // Try the next supported backend contract below.
-      }
-    }
+  // --- Account Deletion Flow (Play Store Compliance & Backend Contract) ---
+
+  /// 1. Check deletion request status: GET /api/v1/auth/account/deletion-request/
+  /// Returns the user's most recent request. If 404, returns null ("no request").
+  Future<AccountDeletionRequest?> getAccountDeletionRequest() async {
     try {
-      final fallback = await _dio.post('/api/v1/auth/account/delete/');
-      return fallback.statusCode == 200 || fallback.statusCode == 204;
+      final response = await _dio.get('/api/v1/auth/account/deletion-request/');
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data['data'] as Map<String, dynamic>?;
+        if (data != null) {
+          return AccountDeletionRequest.fromJson(data);
+        }
+      }
+      return null;
+    } on DioException catch (dioErr) {
+      if (dioErr.response?.statusCode == 404) {
+        // 404 indicates user has never raised a request. Treat as null, not an error.
+        return null;
+      }
+      debugPrint('[ApiService] getAccountDeletionRequest failed: $dioErr');
+      rethrow;
+    } catch (e) {
+      debugPrint('[ApiService] getAccountDeletionRequest unexpected error: $e');
+      return null;
+    }
+  }
+
+  /// 2. Raise a deletion request: POST /api/v1/auth/account/deletion-request/
+  Future<AccountDeletionRequest> requestAccountDeletion({
+    String reason = 'other',
+    String? notes,
+    bool confirm = true,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/api/v1/auth/account/deletion-request/',
+        data: {
+          'reason': reason,
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          'confirm': confirm,
+        },
+      );
+      final data = (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data as Map<String, dynamic>);
+      return AccountDeletionRequest.fromJson(data);
+    } on DioException catch (dioErr) {
+      final errData = dioErr.response?.data;
+      String message = 'ఖాతా తొలగింపు అభ్యర్థన సమర్పించడం విఫలమైంది.';
+      if (errData is Map<String, dynamic>) {
+        final errors = errData['errors'];
+        if (errors is Map<String, dynamic>) {
+          if (errors['message'] != null) {
+            message = errors['message'].toString();
+          } else if (errors['details'] is Map) {
+            final details = errors['details'] as Map;
+            if (details['detail'] != null) {
+              message = details['detail'].toString();
+            }
+          }
+        }
+      }
+      throw ApiException(message, dioErr.response?.statusCode);
+    }
+  }
+
+  /// 3. Cancel a pending deletion request: DELETE /api/v1/auth/account/deletion-request/
+  Future<bool> cancelAccountDeletionRequest() async {
+    try {
+      final response =
+          await _dio.delete('/api/v1/auth/account/deletion-request/');
+      return response.statusCode == 200 || response.statusCode == 204;
+    } on DioException catch (dioErr) {
+      final errData = dioErr.response?.data;
+      String message = 'అభ్యర్థన రద్దు చేయడం విఫలమైంది.';
+      if (errData is Map<String, dynamic> && errData['errors'] is Map) {
+        final errors = errData['errors'] as Map;
+        if (errors['message'] != null) {
+          message = errors['message'].toString();
+        }
+      }
+      throw ApiException(message, dioErr.response?.statusCode);
+    }
+  }
+
+  /// Backwards compatibility stub: attempts requestAccountDeletion
+  Future<bool> deleteAccount() async {
+    try {
+      await requestAccountDeletion(confirm: true);
+      return true;
     } catch (_) {
       return false;
     }

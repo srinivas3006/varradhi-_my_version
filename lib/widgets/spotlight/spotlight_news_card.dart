@@ -633,19 +633,23 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 ],
                                 Text(
                                   article.timeAgo,
-                                  style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.textMuted,
-                                      fontWeight: FontWeight.w600),
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark
+                                          ? AppColors.readingMetaDark
+                                          : AppColors.readingMetaLight,
+                                      fontWeight: FontWeight.w400),
                                 ),
                                 if (widget.pageCount > 0) ...[
                                   const Spacer(),
                                   Text(
                                     '${widget.pageIndex + 1} of ${widget.pageCount} Pages',
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.textMuted,
-                                        fontWeight: FontWeight.w600),
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: isDark
+                                            ? AppColors.readingMetaDark
+                                            : AppColors.readingMetaLight,
+                                        fontWeight: FontWeight.w400),
                                   ),
                                 ],
                               ],
@@ -663,10 +667,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.notoSansTelugu(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? Colors.white : Colors.black87,
-                            height: 1.38,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: isDark
+                                ? AppColors.readingTitleDark
+                                : AppColors.readingTitleLight,
+                            height: 1.35,
                             letterSpacing: 0.0,
                           ),
                         ),
@@ -715,13 +721,16 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             return LayoutBuilder(
                               builder: (context, constraints) {
                                 final textStyle = GoogleFonts.notoSansTelugu(
-                                  fontSize: 16.5,
+                                  fontSize:
+                                      AppState.instance.readingFontSize > 0
+                                          ? AppState.instance.readingFontSize
+                                          : 19.0,
                                   color: isDark
-                                      ? Colors.white.withValues(alpha: 0.88)
-                                      : const Color(0xFF2C2C2E),
-                                  height: 1.68,
+                                      ? AppColors.readingBodyDark
+                                      : AppColors.readingBodyLight,
+                                  height: 1.88,
                                   fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.0,
+                                  letterSpacing: 0.2,
                                 );
 
                                 const double reservedForButton = 44.0;
@@ -864,7 +873,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           : Icons.thumb_up_alt_outlined,
                                       color: isLiked
                                           ? AppColors.primary
-                                          : AppColors.textMuted,
+                                          : (isDark
+                                              ? AppColors.readingMetaDark
+                                              : const Color(0xFF6B7280)),
                                       // article.likes is already the
                                       // authoritative count: the handler
                                       // below sets it optimistically and then
@@ -945,7 +956,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           : Icons.thumb_down_alt_outlined,
                                       color: isDisliked
                                           ? Colors.redAccent
-                                          : AppColors.textMuted,
+                                          : (isDark
+                                              ? AppColors.readingMetaDark
+                                              : const Color(0xFF6B7280)),
                                       label: '',
                                       onTap: () async {
                                         final messenger = ScaffoldMessenger.of(context);
@@ -1031,7 +1044,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     icon: _downloadingPoster
                                         ? Icons.hourglass_top_rounded
                                         : Icons.download_rounded,
-                                    color: AppColors.textMuted,
+                                    color: isDark
+                                        ? AppColors.readingMetaDark
+                                        : const Color(0xFF6B7280),
                                     label: '',
                                     onTap: () {
                                       if (_downloadingPoster) return;
@@ -1061,7 +1076,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             article.id, article.comments);
                                     return _buildActionIcon(
                                       icon: Icons.chat_bubble_outline_rounded,
-                                      color: AppColors.textMuted,
+                                      color: isDark
+                                          ? AppColors.readingMetaDark
+                                          : const Color(0xFF6B7280),
                                       label: _formatCount(count),
                                       onTap: () {
                                         HapticFeedback.selectionClick();
@@ -1093,7 +1110,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           : Icons.bookmark_border_rounded,
                                       color: isSaved
                                           ? AppColors.primary
-                                          : AppColors.textMuted,
+                                          : (isDark
+                                              ? AppColors.readingMetaDark
+                                              : const Color(0xFF6B7280)),
                                       label: '',
                                       onTap: () async {
                                         HapticFeedback.lightImpact();

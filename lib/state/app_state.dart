@@ -195,6 +195,17 @@ class AppState extends ChangeNotifier {
 
   ThemeMode themeMode = ThemeMode.light;
 
+  /// User preferred font size for reading Telugu and article bodies (defaults to 19.0 px).
+  double readingFontSize = 19.0;
+
+  Future<void> setReadingFontSize(double size) async {
+    final clamped = size.clamp(14.0, 26.0);
+    if ((clamped - readingFontSize).abs() < 0.1) return;
+    readingFontSize = clamped;
+    notifyListeners();
+    await _persist();
+  }
+
   List<String> preferredCategories = [];
   bool hasPromptedPreferences = false;
 
@@ -271,6 +282,7 @@ class AppState extends ChangeNotifier {
     isReporter = prefs.getBool('isReporter') ?? false;
     uploadVerified = prefs.getBool('uploadVerified') ?? false;
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
+    readingFontSize = prefs.getDouble('readingFontSize') ?? 19.0;
 
     // Read deviceId from secure storage first, fallback to shared_preferences
     try {
@@ -410,6 +422,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool('locationPrompted', locationPrompted);
     await prefs.setBool('hasValidLocation', hasValidLocation);
     await prefs.setBool('pushNotificationsEnabled', pushNotificationsEnabled);
+    await prefs.setDouble('readingFontSize', readingFontSize);
     // Deliberately no authToken here — see setAuthToken/_clearAuthToken.
   }
 
