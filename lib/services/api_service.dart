@@ -21,6 +21,18 @@ import '../state/app_state.dart';
 import '../core/utils/date_parser.dart';
 import '../core/errors/app_exception.dart';
 
+/// Outcome of an account-deletion attempt.
+///
+/// Only [deleted] means the server account is gone. Everything else leaves it
+/// possibly intact, so the local session must survive for a retry.
+enum AccountDeletionResult {
+  deleted,
+  unauthorized,
+  networkFailure,
+  serverError,
+  unknown,
+}
+
 class ApiService {
   ApiService._internal();
   static final ApiService instance = ApiService._internal();
@@ -286,28 +298,74 @@ class ApiService {
     return response.data['data'] as Map<String, dynamic>;
   }
 
-  /// Initiates account deletion for Play Store compliance
-  Future<bool> deleteAccount() async {
+  /// Initiates account deletion for Play Store compliance.
+  ///
+  /// Returns *why* it ended rather than a bool: the caller has to know
+  /// whether the server account is gone before it destroys the local session,
+  /// and "request failed" is not the same claim as "account still exists".
+  /// Endpoints and their order are unchanged.
+  Future<AccountDeletionResult> deleteAccount() async {
+    AccountDeletionResult worst = AccountDeletionResult.unknown;
+
+    // Keeps the most informative failure seen so far, so a network error on
+    // the last attempt does not mask a 401 from an earlier one.
+    void record(AccountDeletionResult r) {
+      const rank = {
+        AccountDeletionResult.unknown: 0,
+        AccountDeletionResult.networkFailure: 1,
+        AccountDeletionResult.serverError: 2,
+        AccountDeletionResult.unauthorized: 3,
+      };
+      if ((rank[r] ?? 0) > (rank[worst] ?? 0)) worst = r;
+    }
+
+    Future<AccountDeletionResult?> attempt(
+        Future<Response<dynamic>> Function() send) async {
+      try {
+        final response = await send();
+        final code = response.statusCode ?? 0;
+        if (code == 200 || code == 204) return AccountDeletionResult.deleted;
+        record(_classifyStatus(code));
+        return null;
+      } on DioException catch (e) {
+        final code = e.response?.statusCode;
+        record(code != null
+            ? _classifyStatus(code)
+            : (_isNetworkError(e)
+                ? AccountDeletionResult.networkFailure
+                : AccountDeletionResult.unknown));
+        return null;
+      } catch (_) {
+        record(AccountDeletionResult.unknown);
+        return null;
+      }
+    }
+
     for (final endpoint in const [
       '/api/v1/auth/delete-account/',
       '/api/v1/auth/me/',
     ]) {
-      try {
-        final response = await _dio.delete(endpoint);
-        if (response.statusCode == 200 || response.statusCode == 204) {
-          return true;
-        }
-      } catch (_) {
-        // Try the next supported backend contract below.
+      final r = await attempt(() => _dio.delete(endpoint));
+      if (r == AccountDeletionResult.deleted) {
+        return AccountDeletionResult.deleted;
       }
     }
-    try {
-      final fallback = await _dio.post('/api/v1/auth/account/delete/');
-      return fallback.statusCode == 200 || fallback.statusCode == 204;
-    } catch (_) {
-      return false;
-    }
+
+    final r = await attempt(() => _dio.post('/api/v1/auth/account/delete/'));
+    return r ?? worst;
   }
+
+  static AccountDeletionResult _classifyStatus(int code) {
+    if (code == 401 || code == 403) return AccountDeletionResult.unauthorized;
+    if (code >= 500) return AccountDeletionResult.serverError;
+    return AccountDeletionResult.unknown;
+  }
+
+  static bool _isNetworkError(DioException e) =>
+      e.type == DioExceptionType.connectionError ||
+      e.type == DioExceptionType.connectionTimeout ||
+      e.type == DioExceptionType.sendTimeout ||
+      e.type == DioExceptionType.receiveTimeout;
 
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     final response = await _dio.post('/api/v1/auth/token/refresh/', data: {

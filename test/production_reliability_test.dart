@@ -231,7 +231,7 @@ void main() {
 
       final deleted = await ApiService.instance.deleteAccount();
 
-      expect(deleted, isTrue);
+      expect(deleted, AccountDeletionResult.deleted);
       expect(
           requestedPaths,
           equals([

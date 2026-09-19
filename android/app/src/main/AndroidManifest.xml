@@ -4,10 +4,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-        <!-- Saving downloaded posters to the gallery. Capped at API 28:
-         29+ writes through MediaStore and needs no permission. -->
+        <!-- Saving downloaded posters to the gallery. Write-only and capped:
+         gal uses this when SDK_INT <= 29 and writes through MediaStore above
+         that. maxSdkVersion must match gal's own bound (29), not 28, or the
+         save fails on Android 10. No photo/video READ permission is needed:
+         downloading writes a file we generated, it never reads the library. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+        android:maxSdkVersion="29" />
 
 <application
         android:label="VARADHI"

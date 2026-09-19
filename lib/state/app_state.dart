@@ -886,12 +886,20 @@ class AppState extends ChangeNotifier {
     unawaited(NotificationService.instance.registerAsGuest());
   }
 
-  /// Permanently deletes user account from server and clears all local session data.
-  Future<bool> deleteAccount() async {
-    final success = await ApiService.instance.deleteAccount();
-    await _clearLocalSession();
-    unawaited(NotificationService.instance.registerAsGuest());
-    return success;
+  /// Permanently deletes the user account on the server, then clears the
+  /// local session.
+  ///
+  /// The local session is cleared only on [AccountDeletionResult.deleted].
+  /// Clearing it unconditionally — as this used to — destroyed the auth token
+  /// the retry needs, logging the reader out of an account that still exists
+  /// on the server with no way to try again.
+  Future<AccountDeletionResult> deleteAccount() async {
+    final result = await ApiService.instance.deleteAccount();
+    if (result == AccountDeletionResult.deleted) {
+      await _clearLocalSession();
+      unawaited(NotificationService.instance.registerAsGuest());
+    }
+    return result;
   }
 
   Future<void> logoutAllDevices() async {

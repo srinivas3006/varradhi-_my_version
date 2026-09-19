@@ -10,6 +10,8 @@ import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'state/app_state.dart';
 import 'theme/app_theme.dart';
+import 'package:image_picker_android/image_picker_android.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
@@ -17,6 +19,19 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Use the Android system photo picker for every ImagePicker in the app.
+  //
+  // Without this, image_picker falls back to an ACTION_GET_CONTENT intent,
+  // which is the legacy broad-library path Play's Photo and Video Permissions
+  // policy pushes apps off. This is a global on the platform implementation,
+  // so it covers the call sites that construct ImagePicker() directly as well
+  // as MediaPickerHelper. The picker returns only what the user selected, so
+  // no READ_MEDIA_IMAGES/READ_MEDIA_VIDEO is needed.
+  final picker = ImagePickerPlatform.instance;
+  if (picker is ImagePickerAndroid) {
+    picker.useAndroidPhotoPicker = true;
+  }
 
   // Global Flutter framework error handling
   FlutterError.onError = (details) {

@@ -547,18 +547,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              final success = await state.deleteAccount();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      state.language == 'Telugu'
-                          ? (success ? 'ఖాతా విజయవంతంగా తొలగించబడింది.' : 'స్థానిక ఖాతా డేటా తొలగించబడింది.')
-                          : (success ? 'Account deleted successfully.' : 'Local account data cleared.'),
-                    ),
-                  ),
-                );
+              final result = await state.deleteAccount();
+              if (!context.mounted) return;
+
+              final telugu = state.language == 'Telugu';
+              if (result == AccountDeletionResult.deleted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(telugu
+                      ? 'ఖాతా విజయవంతంగా తొలగించబడింది.'
+                      : 'Account deleted successfully.'),
+                ));
+                return;
               }
+
+              // Not deleted. Say so plainly and offer a retry — the session is
+              // still intact precisely so the retry can work.
+              final String message;
+              switch (result) {
+                case AccountDeletionResult.unauthorized:
+                  message = telugu
+                      ? 'సెషన్ గడువు ముగిసింది. మళ్లీ సైన్ ఇన్ చేసి ప్రయత్నించండి.'
+                      : 'Your session expired. Please sign in again and retry.';
+                  break;
+                case AccountDeletionResult.networkFailure:
+                  message = telugu
+                      ? 'నెట్‌వర్క్ అందుబాటులో లేదు. ఖాతా తొలగించబడలేదు.'
+                      : 'No network. Your account was not deleted.';
+                  break;
+                case AccountDeletionResult.serverError:
+                  message = telugu
+                      ? 'సర్వర్ లోపం. ఖాతా తొలగించబడలేదు.'
+                      : 'Server error. Your account was not deleted.';
+                  break;
+                default:
+                  message = telugu
+                      ? 'ఖాతా తొలగించడం పూర్తి కాలేదు.'
+                      : 'Account deletion could not be completed.';
+              }
+
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(message),
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry',
+                  onPressed: () =>
+                      _showDeleteAccountDialog(context, state, isDark),
+                ),
+              ));
             },
             child: Text(
               state.language == 'Telugu' ? 'తొలగించు' : 'Delete',
