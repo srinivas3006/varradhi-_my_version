@@ -25,8 +25,10 @@ class AdminReporterProfileController extends ChangeNotifier {
         status = AdminLoadStatus.loaded;
         notifyListeners();
         return;
-      } catch (_) {
-        // fall through to the local fallback below
+      } catch (e) {
+        // Deliberate: fall through to the local fallback below. Logged so a
+        // profile silently built from the submission is traceable.
+        debugPrint('[AdminReporterProfile] fetch failed, using fallback: $e');
       }
     }
 

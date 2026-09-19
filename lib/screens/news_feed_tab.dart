@@ -31,6 +31,9 @@ import '../core/state/feed_state.dart';
 import 'location_selection_screen.dart';
 import 'poster_detail_screen.dart';
 import '../models/poster_images.dart';
+import '../models/video_item.dart';
+import '../repositories/video_repository.dart';
+import 'video_player_screen.dart';
 
 enum HeroCardKind { liveStream, breakingArticle }
 
@@ -64,6 +67,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   String? _selectedCategory;
   Poll? _poll;
   List<dynamic> _posters = [];
+
+  /// Regular videos for the Home carousel, from /articles/video-feed/.
+  /// Thumbnails only — nothing here creates a player or autoplays.
+  /// Shorts live in the Video tab, which reads /shorts-feed/.
+  List<VideoItem> _homeVideos = [];
   List<AdBanner> _feedAds = [];
 
   /// The ticker strip's own pool. It holds a fixed place above the feed and
@@ -142,6 +150,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         _loadRecommendations();
         _loadPoll();
         _loadPosters();
+        _loadHomeVideos();
         _loadLiveNews();
         _loadDailyQuote();
       });
@@ -513,6 +522,20 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     } catch (_) {}
   }
 
+  Future<void> _loadHomeVideos() async {
+    try {
+      final response = await VideoRepository.instance.getVideoFeed();
+      if (!mounted) return;
+      // isShort is the single classification both surfaces use, so a
+      // mis-tagged Short cannot leak into the carousel.
+      final videos =
+          (response.data ?? []).where((v) => !v.isShort).toList();
+      if (videos.isNotEmpty) setState(() => _homeVideos = videos);
+    } catch (e) {
+      debugPrint('[NewsFeedTab] home video load failed: $e');
+    }
+  }
+
   Future<void> _loadPosters() async {
     final queryIdentity = _feedLocationKey;
     try {
@@ -610,6 +633,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     _loadRecommendations();
     _loadPoll();
     _loadPosters();
+    _loadHomeVideos();
     _loadLiveNews();
     _loadFeedAds(forceRefresh: true);
     _loadDailyQuote(forceRefresh: true);
@@ -699,6 +723,144 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
           );
         },
       ),
+    );
+  }
+
+  /// Horizontal carousel of regular videos. Thumbnails only — no controller
+  /// is created and nothing plays until the reader taps through.
+  ///
+  /// 16:9 cards, not the 9:16 the Shorts carousel used: full videos are
+  /// landscape and would letterbox badly in a portrait card.
+  ///
+  /// Hidden entirely when empty, rather than showing a section with nothing
+  /// in it.
+  Widget _buildHomeVideosStrip() {
+    if (_homeVideos.isEmpty) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.05);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFEF4444), Color(0xFFB91C1C)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Videos',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          // 16:9 at 200 wide, plus room for the title beneath.
+          height: 176,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: _homeVideos.length,
+            itemBuilder: (context, index) {
+              final video = _homeVideos[index];
+              final thumb = video.thumbnailUrl;
+
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  final url = video.youtubeUrl ?? video.videoUrl;
+                  if (url == null || url.isEmpty) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => VideoPlayerScreen(
+                        videoUrl: url,
+                        title: video.title,
+                        thumbnailUrl: video.thumbnailUrl,
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 200,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: borderColor),
+                            color: isDark
+                                ? const Color(0xFF1A1A1A)
+                                : const Color(0xFFF3F4F6),
+                            image: (thumb != null && thumb.isNotEmpty)
+                                ? DecorationImage(
+                                    image: CachedNetworkImageProvider(thumb,
+                                        maxWidth: 400),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                          ),
+                          child: Align(
+                            alignment: Alignment.bottomLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: Container(
+                                padding: const EdgeInsets.all(5),
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.play_arrow_rounded,
+                                    color: Colors.white, size: 16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Expanded(
+                        child: Text(
+                          video.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            height: 1.3,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1894,6 +2056,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       if (_posters.isNotEmpty) ...[
                                         const SizedBox(height: 16),
                                         _buildPostersStrip(),
+                                      ],
+                                      if (_homeVideos.isNotEmpty) ...[
+                                        const SizedBox(height: 16),
+                                        _buildHomeVideosStrip(),
                                       ],
                                     ],
                                     const SizedBox(height: 16),

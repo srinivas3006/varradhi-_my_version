@@ -60,6 +60,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
   bool _downloadingPoster = false;
 
+  /// Guards against a double-tap firing two toggles that cancel out.
+  bool _bookmarkInFlight = false;
+
   /// Generates the branded PNG poster and hands it to the share sheet, where
   /// both platforms expose "save to device" next to every social app.
   Future<void> _downloadPoster(NewsArticle article) async {
@@ -944,10 +947,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    final isDisliked = AppState.instance.isDisliked(targetId) ||
+                                    // Backend state first, local set as the
+                                    // optimistic overlay — same shape as the
+                                    // like button above. The handler keeps
+                                    // both in step so an un-dislike cannot
+                                    // leave the model field stale and true.
+                                    final isDisliked = article.isDisliked ||
+                                        AppState.instance.isDisliked(targetId) ||
                                         (article.id.isNotEmpty &&
                                             AppState.instance.isDisliked(article.id));
-                                    final isLiked = AppState.instance.isLiked(targetId) ||
+                                    final isLiked = article.isLiked ||
+                                        AppState.instance.isLiked(targetId) ||
                                         (article.id.isNotEmpty &&
                                             AppState.instance.isLiked(article.id));
                                     return _buildActionIcon(
@@ -971,6 +981,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                         AppState.instance.setReaction(targetId, nextReaction);
                                         final prevLikes = article.likes;
                                         setState(() {
+                                          article.isDisliked =
+                                              (nextReaction == 'dislike');
                                           if (wasLiked) {
                                             article.isLiked = false;
                                             article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
@@ -991,6 +1003,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                         } catch (e) {
                                           debugPrint('[SpotlightNewsCard] Dislike sync failed: $e');
                                           if (mounted) {
+                                            setState(() =>
+                                                article.isDisliked = wasDisliked);
                                             if (wasLiked) {
                                               AppState.instance.setReaction(targetId, 'like');
                                               setState(() {
@@ -1099,7 +1113,13 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    final isSaved = AppState.instance
+                                    // article.isBookmarked is the reader's
+                                    // saved state from the backend; the local
+                                    // set is the optimistic overlay. Reading
+                                    // only the set meant a bookmark made in
+                                    // an earlier session never showed.
+                                    final isSaved = article.isBookmarked ||
+                                        AppState.instance
                                             .isBookmarked(targetId) ||
                                         (widget.article.id.isNotEmpty &&
                                             AppState.instance.isBookmarked(
@@ -1115,31 +1135,66 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               : const Color(0xFF6B7280)),
                                       label: '',
                                       onTap: () async {
+                                        if (_bookmarkInFlight) return;
+                                        _bookmarkInFlight = true;
                                         HapticFeedback.lightImpact();
+
+                                        final messenger =
+                                            ScaffoldMessenger.of(context);
+                                        final telugu =
+                                            AppState.instance.language ==
+                                                'Telugu';
                                         final nowSaved = !isSaved;
+
+                                        // Optimistic: flip both the model
+                                        // field and the local set so they
+                                        // cannot disagree.
                                         AppState.instance
                                             .toggleBookmark(targetId);
+                                        setState(() =>
+                                            article.isBookmarked = nowSaved);
+
+                                        var failed = false;
                                         if (AppState.instance.isLoggedIn) {
-                                          ApiService.instance
-                                              .toggleBookmark(targetId)
-                                              .catchError((_) => false);
+                                          try {
+                                            await ApiService.instance
+                                                .toggleBookmark(targetId);
+                                          } catch (e) {
+                                            // Roll back rather than claim a
+                                            // save the server never made.
+                                            // Swallowing this left the icon
+                                            // filled and the bookmark absent
+                                            // on the next feed load.
+                                            debugPrint(
+                                                '[SpotlightNewsCard] Bookmark sync failed: $e');
+                                            failed = true;
+                                            AppState.instance
+                                                .toggleBookmark(targetId);
+                                            if (mounted) {
+                                              setState(() => article
+                                                  .isBookmarked = !nowSaved);
+                                            }
+                                          }
                                         }
-                                        ScaffoldMessenger.of(context)
-                                            .removeCurrentSnackBar();
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
+                                        _bookmarkInFlight = false;
+                                        if (!mounted) return;
+
+                                        messenger.removeCurrentSnackBar();
+                                        messenger.showSnackBar(
                                           SnackBar(
-                                            content: Text(nowSaved
-                                                ? (AppState.instance.language ==
-                                                        'Telugu'
-                                                    ? 'వార్త సేవ్ చేయబడింది'
-                                                    : 'Article saved to bookmarks')
-                                                : (AppState.instance.language ==
-                                                        'Telugu'
-                                                    ? 'బుక్‌మార్క్ తీసివేయబడింది'
-                                                    : 'Bookmark removed')),
+                                            content: Text(failed
+                                                ? (telugu
+                                                    ? 'బుక్‌మార్క్ సేవ్ చేయలేకపోయాము.'
+                                                    : 'Could not save the bookmark.')
+                                                : nowSaved
+                                                    ? (telugu
+                                                        ? 'వార్త సేవ్ చేయబడింది'
+                                                        : 'Article saved to bookmarks')
+                                                    : (telugu
+                                                        ? 'బుక్‌మార్క్ తీసివేయబడింది'
+                                                        : 'Bookmark removed')),
                                             duration: const Duration(
-                                                milliseconds: 1200),
+                                                milliseconds: 1400),
                                             behavior: SnackBarBehavior.floating,
                                           ),
                                         );

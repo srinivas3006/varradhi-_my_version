@@ -156,8 +156,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (targetId.isEmpty) return;
 
     HapticFeedback.lightImpact();
-    final wasBookmarked = AppState.instance.isBookmarked(targetId);
+    final wasBookmarked =
+        article.isBookmarked || AppState.instance.isBookmarked(targetId);
     AppState.instance.toggleBookmark(targetId);
+    if (mounted) setState(() => article.isBookmarked = !wasBookmarked);
 
     try {
       await ApiService.instance.toggleBookmark(targetId);
@@ -165,6 +167,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       if (AppState.instance.isBookmarked(targetId) != wasBookmarked) {
         AppState.instance.toggleBookmark(targetId);
       }
+      if (mounted) setState(() => article.isBookmarked = wasBookmarked);
       debugPrint('Error syncing article bookmark: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -468,7 +471,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                         builder: (context, _) {
                           final targetId =
                               article.id.isNotEmpty ? article.id : article.slug;
-                          final isBookmarked =
+                          // Backend saved-state first, local set as the
+                          // optimistic overlay — matching how isLiked is
+                          // read. Reading only the set meant a bookmark from
+                          // an earlier session never showed here.
+                          final isBookmarked = article.isBookmarked ||
                               AppState.instance.isBookmarked(targetId);
                           return GestureDetector(
                             onTap: _toggleBookmark,

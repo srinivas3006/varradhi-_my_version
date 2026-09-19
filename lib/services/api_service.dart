@@ -358,15 +358,6 @@ class ApiService {
     }
   }
 
-  /// Backwards compatibility stub: attempts requestAccountDeletion
-  Future<bool> deleteAccount() async {
-    try {
-      await requestAccountDeletion(confirm: true);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
 
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     final response = await _dio.post('/api/v1/auth/token/refresh/', data: {

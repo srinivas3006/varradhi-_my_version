@@ -8,6 +8,7 @@ import 'preferences_screen.dart';
 import 'notification_settings_screen.dart';
 import 'cms_page_screen.dart';
 import 'account_deletion_screen.dart';
+import 'package:dio/dio.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -40,12 +41,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (name != null) payload['full_name'] = name;
     if (theme != null) payload['theme'] = theme;
-    if (fontSize != null) payload['font_size'] = fontSize.round();
+    if (fontSize != null) {
+      payload['font_size'] = fontSize.round().clamp(12, 24);
+    }
 
     try {
       await ApiService.instance.updateProfile(payload);
-    } catch (_) {
-      // Backend error fallback
+    } on DioException catch (e) {
+      // The backend reports field errors under errors.details; swallowing
+      // them left the reader believing a rejected change had saved.
+      final data = e.response?.data;
+      String? detail;
+      if (data is Map && data['errors'] is Map) {
+        final errors = data['errors'] as Map;
+        if (errors['details'] is Map) {
+          final details = errors['details'] as Map;
+          final first = details.values.first;
+          detail = first is List && first.isNotEmpty
+              ? first.first.toString()
+              : first?.toString();
+        }
+        detail ??= errors['message']?.toString();
+      }
+      debugPrint('[Settings] profile update failed: ${detail ?? e}');
+      if (mounted && detail != null) {
+        ScaffoldMessenger.of(context)
+          ..removeCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(detail),
+            behavior: SnackBarBehavior.floating,
+          ));
+      }
+    } catch (e) {
+      debugPrint('[Settings] profile update failed: $e');
     }
   }
 
@@ -224,9 +252,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           Slider(
-                            value: _fontSize.clamp(14.0, 26.0),
-                            min: 14,
-                            max: 26,
+                            // 12-24 is what PATCH /auth/me/ accepts. The
+                            // slider used to reach 26, so the top two stops
+                            // were rejected with a 400 the app swallowed —
+                            // the size changed locally and never saved.
+                            value: _fontSize.clamp(12.0, 24.0),
+                            min: 12,
+                            max: 24,
                             divisions: 12,
                             activeColor: AppColors.primary,
                             onChanged: (val) {

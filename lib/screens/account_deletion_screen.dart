@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../localization/app_translations.dart';
 import '../models/account_deletion_request.dart';
+import '../core/errors/app_exception.dart';
 import '../services/api_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -163,6 +164,46 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           ),
         ),
       );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+
+      // 400 "already pending": the server and this screen simply disagree
+      // about what exists. Re-read the status and show the pending card
+      // rather than a failure the reader cannot act on.
+      final alreadyPending = e.statusCode == 400 &&
+          e.message.toLowerCase().contains('already pending');
+      if (alreadyPending) {
+        await _fetchDeletionStatus();
+        return;
+      }
+
+      final String message;
+      if (e.statusCode == 429) {
+        // Rate limited at 10/hour. Say so and stop — no automatic retry.
+        message = isTelugu
+            ? 'చాలా ప్రయత్నాలు. కొంత సేపటి తర్వాత మళ్లీ ప్రయత్నించండి.'
+            : 'Too many attempts. Please try again later.';
+      } else if (e.statusCode == 401) {
+        message = isTelugu
+            ? 'సెషన్ గడువు ముగిసింది. మళ్లీ సైన్ ఇన్ చేయండి.'
+            : 'Your session expired. Please sign in again.';
+      } else if (e.statusCode == 403) {
+        message = isTelugu
+            ? 'ఈ చర్యకు అనుమతి లేదు.'
+            : 'You are not permitted to make this request.';
+      } else if ((e.statusCode ?? 0) >= 500) {
+        message = isTelugu
+            ? 'సర్వర్ లోపం. అభ్యర్థన సమర్పించబడలేదు.'
+            : 'Server error. Your request was not submitted.';
+      } else {
+        message = e.message;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: Colors.red[800],
+        content: Text(message),
+      ));
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSubmitting = false);
@@ -245,6 +286,33 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
     }
   }
 
+  /// One labelled paragraph of the deletion notice: bold lead-in, then body.
+  Widget _deletionNote({
+    required bool isDark,
+    required String label,
+    required String body,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: label,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            TextSpan(text: body),
+          ],
+        ),
+        style: TextStyle(
+          fontSize: 13,
+          height: 1.5,
+          color: isDark ? Colors.white70 : Colors.black87,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -253,7 +321,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          isTelugu ? 'ఖాతా తొలగింపు' : 'Account Deletion',
+          isTelugu ? 'ఖాతా తొలగింపు అభ్యర్థన' : 'Request Account Deletion',
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 19),
         ),
         centerTitle: false,
@@ -397,22 +465,37 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
                 children: [
                   const Icon(Icons.info_outline_rounded, size: 20, color: AppColors.primary),
                   const SizedBox(width: 8),
-                  Text(
-                    isTelugu ? 'తదుపరి ఏమి జరుగుతుంది?' : 'What happens next?',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  Expanded(
+                    child: Text(
+                      isTelugu
+                          ? 'ఈ అభ్యర్థనను సమర్పించడం ద్వారా ఖాతా తొలగింపు ప్రక్రియ ప్రారంభమవుతుంది. గమనించండి:'
+                          : 'Submitting this request will initiate the account deletion process. Please note:',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                isTelugu
-                    ? '• మా అడ్మిన్ బృందం మీ ఖాతాకు సంబంధించిన రివార్డ్ చెల్లింపులు, కాయిన్స్ మరియు ప్రచురించిన కంటెంట్‌ను తనిఖీ చేస్తుంది.\n• అడ్మిన్ ఆమోదించే వరకు మీ ఖాతా అలాగే ఉంటుంది మరియు మీరు యాప్‌ను సాధారణంగా ఉపయోగించవచ్చు.\n• మీరు మనస్సు మార్చుకుంటే, అడ్మిన్ సమీక్షించేలోపు ఎప్పుడైనా ఈ అభ్యర్థనను రద్దు చేసుకోవచ్చు.'
-                    : '• An administrator will review your account to settle any pending reward payouts, unredeemed coins, or published submissions.\n• You stay logged in and the app works normally until an admin approves your request.\n• If you change your mind, you can withdraw this deletion request at any time before it is reviewed.',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
+              const SizedBox(height: 10),
+              _deletionNote(
+                isDark: isDark,
+                label: isTelugu ? 'సమీక్ష ప్రక్రియ: ' : 'Review Process: ',
+                body: isTelugu
+                    ? 'అడ్మిన్ మీ అభ్యర్థనను సమీక్షించి ఆమోదించే వరకు మీ ఖాతా యాక్టివ్‌గానే ఉంటుంది. ఆమోదానికి ముందు ఎప్పుడైనా స్థితిని చూడవచ్చు లేదా అభ్యర్థనను రద్దు చేయవచ్చు.'
+                    : 'Your account will remain active while an administrator reviews and approves your request. You can check your status or cancel the request at any time before approval.',
+              ),
+              _deletionNote(
+                isDark: isDark,
+                label: isTelugu ? 'డేటా తొలగింపు: ' : 'Data Deletion: ',
+                body: isTelugu
+                    ? 'ఆమోదం పొందిన తర్వాత, మీ వ్యక్తిగత ప్రొఫైల్ సమాచారం శాశ్వతంగా తొలగించబడుతుంది మరియు మీరు లాగ్ అవుట్ చేయబడతారు.'
+                    : 'Once approved, your personal profile information will be permanently deleted and you will be logged out.',
+              ),
+              _deletionNote(
+                isDark: isDark,
+                label: isTelugu ? 'నిలుపుకునే డేటా: ' : 'Retained Data: ',
+                body: isTelugu
+                    ? 'చట్టపరమైన, ఆర్థిక మరియు ఆడిట్ అవసరాల కోసం కొన్ని రికార్డులు (వాలెట్/చెల్లింపుల చరిత్ర, ప్రచురించిన కంటెంట్ మరియు వ్యాఖ్యలతో సహా) తొలగించబడవు, కానీ అవి మీతో అనుసంధానం కాకుండా పూర్తిగా అనామకం చేయబడతాయి.'
+                    : 'For legal, financial, and audit purposes, certain records (including wallet/payout history, published content, and comments) will not be deleted, but will be completely anonymized so they can no longer be linked to you.',
               ),
             ],
           ),
@@ -675,8 +758,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           controlAffinity: ListTileControlAffinity.leading,
           title: Text(
             isTelugu
-                ? 'ఈ అభ్యర్థన అడ్మిన్ సమీక్షకు లోబడి ఉంటుందని, ఆమోదం పొందిన తర్వాత నా ఖాతా మరియు వ్యక్తిగత డేటా శాశ్వతంగా తొలగించబడుతుందని నేను అర్థం చేసుకున్నాను.'
-                : 'I understand this request is subject to review and upon approval my account and personal data will be permanently anonymised and purged.',
+                ? 'ఆమోదం పొందిన తర్వాత ఖాతా తొలగింపు శాశ్వతమని నేను అర్థం చేసుకున్నాను.'
+                : 'I understand that account deletion is permanent once approved.',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,

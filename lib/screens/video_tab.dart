@@ -35,9 +35,7 @@ class _VideoTabState extends State<VideoTab> {
   final List<VideoItem> _videos = [];
   bool _isLoading = true;
   String? _shortsCursor;
-  String? _videoCursor;
   bool _hasMoreShorts = true;
-  bool _hasMoreVideos = true;
   bool _fetching = false;
   late String _language;
   String get _queryIdentity => [
@@ -130,9 +128,7 @@ class _VideoTabState extends State<VideoTab> {
     setState(() {
       _isLoading = _videos.isEmpty;
       _shortsCursor = null;
-      _videoCursor = null;
       _hasMoreShorts = true;
-      _hasMoreVideos = true;
       _hasMore = true;
     });
     await _loadVideos(refresh: true);
@@ -146,7 +142,8 @@ class _VideoTabState extends State<VideoTab> {
     String? failure;
     bool succeeded = false;
     try {
-      // Each collection owns its cursor; they are never interchangeable.
+      // Shorts only. Regular videos live in the Home carousel, which reads
+      // /video-feed/ separately.
       if (_hasMoreShorts) {
         try {
           final response = await VideoRepository.instance.getShortsFeed(
@@ -163,27 +160,16 @@ class _VideoTabState extends State<VideoTab> {
         }
       }
       if (!mounted || generation != _generation) return;
-      if (_hasMoreVideos) {
-        try {
-          final response = await VideoRepository.instance.getVideoFeed(
-            cursor: _videoCursor,
-          );
-          if (!mounted || generation != _generation) return;
-          if (response.hasErrors) throw Exception(response.errorMessage);
-          fetched.addAll(response.data ?? []);
-          _videoCursor = response.nextCursor;
-          _hasMoreVideos = _videoCursor != null;
-          succeeded = true;
-        } catch (e) {
-          failure = e.toString();
-        }
-      }
-      if (!mounted || generation != _generation) return;
       setState(() {
         if (refresh && succeeded) _videos.clear();
         final seen = _videos.map((video) => video.id).toSet();
-        _videos.addAll(fetched.where((video) => seen.add(video.id)));
-        _hasMore = _hasMoreShorts || _hasMoreVideos;
+        // isShort is the one classification both surfaces use. Filtering
+        // here as well as at the endpoint means a regular video cannot leak
+        // in through pagination or refresh.
+        _videos.addAll(fetched
+            .where((video) => video.isShort)
+            .where((video) => seen.add(video.id)));
+        _hasMore = _hasMoreShorts;
       });
       if (failure != null) {
         ScaffoldMessenger.of(context).showSnackBar(

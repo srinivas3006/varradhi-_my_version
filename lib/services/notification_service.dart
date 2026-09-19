@@ -160,7 +160,24 @@ class NotificationService {
         debugPrint('[Notifications] token acquired: ${token != null}');
         if (token != null && token.isNotEmpty) {
           AppState.instance.fcmToken = token;
-          debugPrint('[NotificationService] Early FCM token acquired: ${token.substring(0, token.length > 10 ? 10 : token.length)}...');
+
+          // Register it the moment we have it. Storing the token locally was
+          // not enough: nothing sent it to the backend for a guest, so the
+          // device had no record to target and guests received nothing.
+          //
+          // Splash also calls registerGuestDevice, but it races this method —
+          // Firebase may not be initialised yet, getToken() throws, and that
+          // call silently returns null. Registering here is the point where
+          // the token is known to exist.
+          //
+          // updateFcmToken already picks the right contract: guest-device for
+          // a guest, token handoff for a signed-in reader.
+          unawaited(ApiService.instance.updateFcmToken(token).then((_) {
+            debugPrint('[Notifications] token registered '
+                '(${AppState.instance.isLoggedIn ? 'authenticated' : 'guest'})');
+          }).catchError((e) {
+            debugPrint('[Notifications] token registration FAILED: $e');
+          }));
         }
       } catch (e) {
         debugPrint('[NotificationService] Early FCM token fetch deferred: $e');

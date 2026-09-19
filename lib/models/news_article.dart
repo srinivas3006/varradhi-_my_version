@@ -48,6 +48,13 @@ class NewsArticle {
   final List<MediaItem> mediaItems;
   final String contentKind;
   bool isLiked;
+
+  /// The reader's existing dislike, as the backend reports it.
+  ///
+  /// Without this field a dislike made in an earlier session or on another
+  /// device had nowhere to land, so the button always painted un-disliked no
+  /// matter what the server said.
+  bool isDisliked;
   bool isBookmarked;
 
   NewsArticle({
@@ -84,6 +91,7 @@ class NewsArticle {
     this.mediaItems = const [],
     this.contentKind = 'article',
     this.isLiked = false,
+    this.isDisliked = false,
     this.isBookmarked = false,
   });
 
@@ -222,6 +230,10 @@ class NewsArticle {
           json['is_liked'] == true ||
           json['my_reaction'] == 'like' ||
           json['reaction_type'] == 'like',
+      isDisliked: json['is_disliked_by_user'] == true ||
+          json['is_disliked'] == true ||
+          json['my_reaction'] == 'dislike' ||
+          json['reaction_type'] == 'dislike',
       isBookmarked: json['is_bookmarked_by_user'] == true ||
           json['is_bookmarked'] == true,
       hasMore: json['has_more'] == true ||
@@ -397,6 +409,7 @@ class NewsArticle {
       'video_url': videoUrl,
       'has_more': hasMore,
       'is_liked_by_user': isLiked,
+      'is_disliked_by_user': isDisliked,
       'is_bookmarked_by_user': isBookmarked,
       'feed_item_type': contentKind,
       'media_items': mediaItems.map((item) => item.toJson()).toList(),

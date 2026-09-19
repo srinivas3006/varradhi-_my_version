@@ -50,6 +50,69 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
     await showAdminRejectDialog(context, onReject: (notes) => _controller.reject(notes: notes));
   }
 
+  /// Blocks or unblocks the uploader behind this submission.
+  ///
+  /// Blocking is confirmed first — it stops a person contributing, not just
+  /// this one item. Unblocking is immediate.
+  Future<void> _toggleUploaderBlock(bool currentlyBlocked) async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (!currentlyBlocked) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('అప్‌లోడర్‌ను బ్లాక్ చేయాలా?',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          content: const Text(
+              'ఈ వ్యక్తి కొత్త వార్తలను సమర్పించలేరు. దీన్ని తర్వాత మార్చవచ్చు.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('రద్దు')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AdminColors.error,
+                  foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('బ్లాక్ చేయి'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
+    try {
+      if (currentlyBlocked) {
+        await _controller.unblockUploader();
+      } else {
+        await _controller.blockUploader();
+      }
+      if (!mounted) return;
+      messenger
+        ..removeCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(currentlyBlocked
+              ? 'అప్‌లోడర్ అన్‌బ్లాక్ చేయబడ్డారు'
+              : 'అప్‌లోడర్ బ్లాక్ చేయబడ్డారు'),
+          behavior: SnackBarBehavior.floating,
+        ));
+    } catch (e) {
+      // The controller only updates its model after a successful call, so
+      // there is nothing to roll back — but the moderator still has to know
+      // the block did not take.
+      if (!mounted) return;
+      messenger
+        ..removeCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(currentlyBlocked
+              ? 'అన్‌బ్లాక్ విఫలమైంది: $e'
+              : 'బ్లాక్ విఫలమైంది: $e'),
+          behavior: SnackBarBehavior.floating,
+        ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -246,6 +309,23 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
       content = Row(
         children: [
           TextButton(onPressed: () => showAdminReporterDetailSheet(context, userId: s.reporterUserId, fallbackFrom: s), child: const Text('రిపోర్టర్ ప్రొఫైల్')),
+          // Blocking a repeat offender was implemented on the controller and
+          // the API but never reachable — trust could only be nudged +/-10.
+          IconButton(
+            onPressed: () => _toggleUploaderBlock(s.uploaderBlocked),
+            tooltip: s.uploaderBlocked
+                ? 'అప్‌లోడర్‌ను అన్‌బ్లాక్ చేయండి'
+                : 'అప్‌లోడర్‌ను బ్లాక్ చేయండి',
+            icon: Icon(
+              s.uploaderBlocked
+                  ? Icons.lock_open_rounded
+                  : Icons.block_rounded,
+              color: s.uploaderBlocked
+                  ? AdminColors.success
+                  : AdminColors.error,
+              size: 20,
+            ),
+          ),
           const Spacer(),
           OutlinedButton(
             onPressed: _controller.decreaseTrust,

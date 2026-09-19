@@ -52,6 +52,14 @@ class AppState extends ChangeNotifier {
   /// UI language: buttons, labels, tabs, settings copy.
   String language = 'Telugu';
 
+  /// The UI language as the backend's two-letter code.
+  ///
+  /// This is what `preferred_language` on the profile stores — the interface
+  /// language follows the account across devices. Content language stays
+  /// local and is deliberately not synced.
+  String get uiLanguageCode =>
+      language.toLowerCase().startsWith('en') ? 'en' : 'te';
+
   /// Language of the news itself, stored independently of [language].
   ///
   /// null means "All languages" and the feed request omits `lang` entirely,
@@ -199,7 +207,9 @@ class AppState extends ChangeNotifier {
   double readingFontSize = 19.0;
 
   Future<void> setReadingFontSize(double size) async {
-    final clamped = size.clamp(14.0, 26.0);
+    // 12-24 matches what PATCH /auth/me/ accepts, so a size stored here is
+    // always one the server will keep.
+    final clamped = size.clamp(12.0, 24.0);
     if ((clamped - readingFontSize).abs() < 0.1) return;
     readingFontSize = clamped;
     notifyListeners();
@@ -492,6 +502,44 @@ class AppState extends ChangeNotifier {
       }
       if (me['phone'] != null) userPhone = me['phone'].toString();
       if (me['id'] != null) userId = me['id'].toString();
+      // Apply the account's saved interface language. Without this the
+      // field was write-only: a returning reader on a new device got the
+      // default language regardless of what they had chosen.
+      final serverLang = (me['preferred_language'] ??
+              me['preferredLanguage'] ??
+              (me['profile'] is Map ? me['profile']['preferred_language'] : null))
+          ?.toString()
+          .toLowerCase()
+          .trim();
+      if (serverLang != null && serverLang.isNotEmpty) {
+        final resolved = serverLang.startsWith('en') ? 'English' : 'Telugu';
+        if (resolved != language) {
+          language = resolved;
+          themeAndLocaleNotifier.notify();
+        }
+      }
+
+      // Theme and reading size are profile fields too; reading them back
+      // makes the account's preferences follow the reader to a new device.
+      final serverTheme = me['theme']?.toString().toLowerCase().trim();
+      if (serverTheme != null && serverTheme.isNotEmpty) {
+        final resolved = switch (serverTheme) {
+          'light' => ThemeMode.light,
+          'dark' => ThemeMode.dark,
+          _ => ThemeMode.system,
+        };
+        if (resolved != themeMode) {
+          themeMode = resolved;
+          themeAndLocaleNotifier.notify();
+        }
+      }
+
+      final serverFont = me['font_size'];
+      if (serverFont != null) {
+        final parsed = double.tryParse(serverFont.toString());
+        if (parsed != null) await setReadingFontSize(parsed);
+      }
+
       if (me['is_reporter'] == true) isReporter = true;
       if (me['tokens'] != null) {
         reporterTokens =
@@ -563,7 +611,11 @@ class AppState extends ChangeNotifier {
     themeAndLocaleNotifier.notify();
     notifyListeners();
     _persist();
-    _syncProfileToBackend(preferredLanguage: contentLanguage);
+    // The UI language is what changed, so that is what gets patched. This
+    // used to send contentLanguage, which is a different setting entirely —
+    // and since that is null by default, the patch dropped the field and
+    // sent nothing at all.
+    _syncProfileToBackend(preferredLanguage: uiLanguageCode);
   }
 
   void setThemeMode(ThemeMode mode) {

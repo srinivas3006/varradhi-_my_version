@@ -216,38 +216,6 @@ void main() {
     });
   });
 
-  group('Release Readiness: Account Deletion Contract', () {
-    test('deleteAccount submits through the deletion-request contract',
-        () async {
-      final requestedPaths = <String>[];
-      ApiClient.instance.dio.httpClientAdapter =
-          ReleaseMockAdapter((options) async {
-        requestedPaths.add('${options.method} ${options.path}');
-        if (options.method == 'POST' &&
-            options.path == '/api/v1/auth/account/deletion-request/') {
-          return ReleaseMockAdapter.jsonResponse({
-            'data': {
-              'id': 1,
-              'status': 'pending',
-              'reason': 'other',
-              'created_at': '2026-01-01T00:00:00Z',
-            }
-          }, 201);
-        }
-        return ReleaseMockAdapter.jsonResponse({
-          'errors': {'message': 'Not found'}
-        }, 404);
-      });
-
-      final deleted = await ApiService.instance.deleteAccount();
-
-      expect(deleted, isTrue);
-      expect(
-          requestedPaths,
-          equals(['POST /api/v1/auth/account/deletion-request/']),
-          reason: 'deletion now goes through the deletion-request contract');
-    });
-  });
 
   group('Step 9 Reliability: UGC Upload & Cancellation Propagation (P0-01)',
       () {

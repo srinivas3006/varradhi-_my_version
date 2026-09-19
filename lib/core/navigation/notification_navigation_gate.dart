@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/widgets.dart';
 import '../../models/notification_target.dart';
 
@@ -14,6 +15,11 @@ class NotificationNavigationGate {
   bool _isNavigationReady = false;
   bool _isDispatching = false;
 
+  /// Kept from [onNavigationReady] so a target arriving *after* the tree is
+  /// ready can still be dispatched.
+  BuildContext? _readyContext;
+  Future<void> Function(NotificationTarget, BuildContext)? _dispatcher;
+
   String? _lastDispatchedKey;
   DateTime? _lastDispatchedTime;
   static const Duration _dedupWindow = Duration(seconds: 2);
@@ -23,9 +29,38 @@ class NotificationNavigationGate {
   bool get isNavigationReady => _isNavigationReady;
   bool get isDispatching => _isDispatching;
 
-  /// Sets the pending target during cold launch.
+  /// Holds a target until the navigation tree is ready, or dispatches it
+  /// immediately if it already is.
+  ///
+  /// The immediate path matters on cold start: getInitialMessage() is awaited
+  /// inside the background init that runs after runApp, so the target
+  /// routinely arrives *after* HomeScreen has already called
+  /// onNavigationReady and found nothing pending. Storing it and waiting for
+  /// a second onNavigationReady that never comes is why a tapped
+  /// notification left the reader sitting on Home.
   void setPendingTarget(NotificationTarget target) {
-    if (target.type == NotificationTargetType.unknown) return;
+    if (target.type == NotificationTargetType.unknown) {
+      debugPrint('[NotificationGate] target unknown, nothing to navigate to');
+      return;
+    }
+
+    final context = _readyContext;
+    final dispatch = _dispatcher;
+    if (_isNavigationReady && dispatch != null && context != null && context.mounted) {
+      debugPrint('[NotificationGate] navigation already ready, '
+          'dispatching ${target.type.name} immediately');
+      _pendingTarget = null;
+      // Dispatched directly, not via addPostFrameCallback: the tree is
+      // already built (that is what _isNavigationReady means), and this is
+      // called from an async messaging callback rather than during a build,
+      // so there is no frame to wait for — and waiting for one that is never
+      // scheduled is how the target got stranded in the first place.
+      unawaited(dispatch(target, context));
+      return;
+    }
+
+    debugPrint('[NotificationGate] holding ${target.type.name} '
+        'until navigation is ready');
     _pendingTarget = target;
   }
 
@@ -72,8 +107,12 @@ class NotificationNavigationGate {
     Future<void> Function(NotificationTarget target, BuildContext context) onDispatch,
   ) {
     _isNavigationReady = true;
+    _readyContext = context;
+    _dispatcher = onDispatch;
 
     final target = consumePendingTarget();
+    debugPrint('[NotificationGate] navigation ready; '
+        'pending=${target?.type.name ?? 'none'}');
     if (target != null && context.mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (context.mounted) {
@@ -91,5 +130,7 @@ class NotificationNavigationGate {
     _isDispatching = false;
     _lastDispatchedKey = null;
     _lastDispatchedTime = null;
+    _readyContext = null;
+    _dispatcher = null;
   }
 }

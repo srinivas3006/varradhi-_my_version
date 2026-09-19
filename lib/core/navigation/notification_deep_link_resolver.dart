@@ -153,7 +153,17 @@ class NotificationDeepLinkResolver {
     }
 
     // 2. Fall back to structured backend payload fields
-    final contentType = data['content_type']?.toString().toLowerCase();
+    //
+    // `content_type` is only one of the spellings the backend uses. Reading
+    // it alone meant a payload keyed `type` or `entity_type` resolved to
+    // unknown, the gate discarded it, and the tap left the reader on Home —
+    // which is what "notifications always open Home" actually was.
+    final contentType = (data['content_type'] ??
+            data['type'] ??
+            data['entity_type'] ??
+            data['notification_type'])
+        ?.toString()
+        .toLowerCase();
     final contentSlug = data['content_slug']?.toString() ?? data['slug']?.toString();
     final contentId = data['content_id']?.toString() ?? data['article_id']?.toString() ?? data['id']?.toString();
     final categorySlug = data['category_slug']?.toString() ?? data['category']?.toString();
@@ -178,6 +188,10 @@ class NotificationDeepLinkResolver {
         contentType == 'news' ||
         contentType == 'quote' ||
         contentType == 'breaking' ||
+        // No dedicated video target exists; a video notification opens the
+        // story that carries it. 'ugc' is deliberately NOT here — it has its
+        // own branch below, and listing it here shadowed that.
+        contentType == 'video' ||
         (contentSlug != null && contentSlug.isNotEmpty && contentType == null)) {
       final slug = (contentSlug != null && contentSlug.isNotEmpty)
           ? contentSlug

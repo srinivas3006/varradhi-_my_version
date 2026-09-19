@@ -73,7 +73,9 @@ class _AdminLogsTabState extends State<AdminLogsTab> {
         isLoading: true,
       );
     }
-    if (c.status == AdminLoadStatus.error) {
+    // Only take over the screen when there is nothing loaded. A failure
+    // while paginating must not discard the rows already on screen.
+    if (c.status == AdminLoadStatus.error && c.items.isEmpty) {
       return AdminStatusState(
         icon: Icons.wifi_off_rounded,
         title: 'లాగ్‌లు రాలేదు',
@@ -98,6 +100,29 @@ class _AdminLogsTabState extends State<AdminLogsTab> {
         itemCount: items.length + (c.hasMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index >= items.length) {
+            if (c.status == AdminLoadStatus.error) {
+              // Auto-retry is off after a failure, so this is the moderator's
+              // way to ask for the next page again.
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'మరిన్ని లోడ్ చేయడం విఫలమైంది',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: c.retryLoadMore,
+                        child: const Text('మళ్లీ ప్రయత్నించండి'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 20),
               child: Center(child: CircularProgressIndicator()),

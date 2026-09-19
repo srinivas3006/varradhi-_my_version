@@ -102,7 +102,10 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
     if (c.status == AdminLoadStatus.loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (c.status == AdminLoadStatus.error) {
+    // Only take over the screen when there is nothing loaded. A failure while
+    // paginating must not discard the pages the moderator is already working
+    // through — that footer case is handled in the list below.
+    if (c.status == AdminLoadStatus.error && c.items.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -126,6 +129,30 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
         itemCount: items.length + (c.hasMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index >= items.length) {
+            if (c.status == AdminLoadStatus.error) {
+              // Auto-retry is off after a failure, so this is the moderator's
+              // way to ask for the next page again.
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'మరిన్ని లోడ్ చేయడం విఫలమైంది',
+                        style: TextStyle(
+                            color: AdminColors.textSecondaryColor(isDark)),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: c.retryLoadMore,
+                        child: const Text('మళ్లీ ప్రయత్నించండి'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
             return const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Center(child: CircularProgressIndicator()));
           }
           final item = items[index];

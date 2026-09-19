@@ -21,6 +21,7 @@ class _AdminRejectDialog extends StatefulWidget {
 class _AdminRejectDialogState extends State<_AdminRejectDialog> {
   late final TextEditingController _notesController = TextEditingController(text: 'నిర్ధారించబడని లేదా నకిలీ కంటెంట్.');
   bool _submitting = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -33,8 +34,15 @@ class _AdminRejectDialogState extends State<_AdminRejectDialog> {
     try {
       await widget.onReject(_notesController.text.trim());
       if (mounted) Navigator.of(context).pop(true);
-    } catch (_) {
-      if (mounted) setState(() => _submitting = false);
+    } catch (e) {
+      // Resetting the spinner alone told the moderator nothing: the button
+      // simply became clickable again, with no way to tell a failed reject
+      // from a slow one.
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.toString().replaceAll('Exception: ', '');
+      });
     }
   }
 
@@ -42,10 +50,23 @@ class _AdminRejectDialogState extends State<_AdminRejectDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('వార్తను తిరస్కరించండి', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-      content: TextField(
-        controller: _notesController,
-        maxLines: 2,
-        decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'తిరస్కరణకు కారణం'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _notesController,
+            maxLines: 2,
+            decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'తిరస్కరణకు కారణం'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12.5),
+            ),
+          ],
+        ],
       ),
       actions: [
         TextButton(onPressed: _submitting ? null : () => Navigator.of(context).pop(false), child: const Text('రద్దు చేయి')),

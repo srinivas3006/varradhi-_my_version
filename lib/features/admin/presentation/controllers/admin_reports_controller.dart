@@ -49,6 +49,9 @@ class AdminReportsController extends ChangeNotifier {
 
   Future<void> loadMore() async {
     if (_isFetching || !_hasMore || _nextCursor == null) return;
+    // After a failure the scroll listener keeps arriving. Wait for an
+    // explicit retryLoadMore() rather than re-requesting on every scroll.
+    if (_status == AdminLoadStatus.error) return;
     _isFetching = true;
     _status = AdminLoadStatus.loadingMore;
     notifyListeners();
@@ -61,12 +64,26 @@ class AdminReportsController extends ChangeNotifier {
       _nextCursor = response.next;
       _hasMore = response.hasMore;
       _status = AdminLoadStatus.loaded;
-    } catch (_) {
-      _status = AdminLoadStatus.loaded;
+    } catch (e) {
+      // Reporting `loaded` claimed the page had arrived. The cursor was never
+      // advanced and _hasMore stayed true, so the scroll listener re-fired
+      // loadMore on every scroll — repeated silent requests against a failing
+      // endpoint, while the list simply stopped growing.
+      _errorMessage = e.toString();
+      _status = AdminLoadStatus.error;
     } finally {
       _isFetching = false;
       notifyListeners();
     }
+  }
+
+  /// Retries the page that failed, after [loadMore] surfaced an error.
+  Future<void> retryLoadMore() async {
+    if (_status != AdminLoadStatus.error) return;
+    _errorMessage = null;
+    _status = AdminLoadStatus.loaded;
+    notifyListeners();
+    await loadMore();
   }
 
   Future<void> refresh() => loadInitial();
