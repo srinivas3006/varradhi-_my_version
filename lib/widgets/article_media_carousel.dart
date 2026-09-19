@@ -4,6 +4,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../models/news_article.dart';
 import '../theme/app_theme.dart';
 import 'news_article_video_player.dart';
+import 'watermark/article_watermark_overlay.dart';
 
 /// The detail screen's horizontal media pager, shared with Spotlight and UGC.
 /// The parent owns geometry; this widget owns only its internal media index.
@@ -14,6 +15,7 @@ class ArticleMediaCarousel extends StatefulWidget {
   final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
   final BoxFit fit;
+  final bool showWatermark;
   const ArticleMediaCarousel(
       {super.key,
       required this.article,
@@ -21,7 +23,8 @@ class ArticleMediaCarousel extends StatefulWidget {
       this.onPageChanged,
       this.onTap,
       this.onDoubleTap,
-      this.fit = BoxFit.cover});
+      this.fit = BoxFit.cover,
+      this.showWatermark = true});
   @override
   State<ArticleMediaCarousel> createState() => _ArticleMediaCarouselState();
 }
@@ -59,27 +62,32 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
         fit: widget.fit,
       );
     }
+    final imageWidget = CachedNetworkImage(
+      imageUrl: item.url,
+      fit: widget.fit,
+      placeholder: (_, __) => Container(color: AppColors.chipBg),
+      errorWidget: (_, __, ___) => Container(
+          color: AppColors.chipBg,
+          child: const Center(
+              child: Icon(Icons.image_not_supported_outlined,
+                  color: AppColors.textMuted, size: 40))),
+    );
+
     return GestureDetector(
       onTap: widget.onTap,
       onDoubleTap: widget.onDoubleTap,
-      child: CachedNetworkImage(
-        imageUrl: item.url,
-        fit: widget.fit,
-        placeholder: (_, __) => Container(color: AppColors.chipBg),
-        errorWidget: (_, __, ___) => Container(
-            color: AppColors.chipBg,
-            child: const Center(
-                child: Icon(Icons.image_not_supported_outlined,
-                    color: AppColors.textMuted, size: 40))),
-      ),
+      child: widget.showWatermark
+          ? ArticleWatermarkOverlay(child: imageWidget)
+          : imageWidget,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final media = widget.article.orderedMedia;
-    if (media.isEmpty)
+    if (media.isEmpty) {
       return const Center(child: Icon(Icons.image_not_supported_outlined));
+    }
     return VisibilityDetector(
       key: _visibilityKey,
       onVisibilityChanged: (info) {

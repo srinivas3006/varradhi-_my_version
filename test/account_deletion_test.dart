@@ -1,190 +1,129 @@
-import 'dart:convert';
-
-import 'package:dio/dio.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/services/api_service.dart';
-import 'package:way2news_clone/state/app_state.dart';
-
-/// Replays a scripted outcome per request path.
-class _DeleteAdapter implements HttpClientAdapter {
-  _DeleteAdapter(this.handler);
-  final Future<ResponseBody> Function(RequestOptions o) handler;
-
-  @override
-  Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? _,
-          Future<void>? __) =>
-      handler(o);
-
-  @override
-  void close({bool force = false}) {}
-}
-
-ResponseBody _json(int status) => ResponseBody.fromString(
-      jsonEncode({'detail': 'ok'}),
-      status,
-      headers: {
-        Headers.contentTypeHeader: [Headers.jsonContentType],
-      },
-    );
-
-final Map<String, String> secureStore = {};
-
-void serve(Future<ResponseBody> Function(RequestOptions) h) {
-  ApiClient.instance.dio.httpClientAdapter = _DeleteAdapter(h);
-}
+import 'package:way2news_clone/models/account_deletion_request.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  group('AccountDeletionRequest Model Tests', () {
+    test('Correctly parses backend response 201 (pending deletion request)', () {
+      final json = {
+        "id": "07bfabc8-ac6b-49e3-bbc7-078fd930f720",
+        "status": "pending",
+        "reason": "privacy",
+        "notes": "Remove my data",
+        "created_at": "2026-09-18T12:07:41.515918+05:30",
+        "reviewed_at": null,
+        "executed_at": null
+      };
 
-  // Clearing the session writes to secure storage, which has no
-  // implementation under flutter test.
+      final req = AccountDeletionRequest.fromJson(json);
 
-  setUpAll(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(
-      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-      (call) async {
-        final key = call.arguments?['key'] as String?;
-        switch (call.method) {
-          case 'read':
-            return secureStore[key];
-          case 'write':
-            final v = call.arguments?['value'] as String?;
-            if (key != null && v != null) secureStore[key] = v;
-            return null;
-          case 'delete':
-            secureStore.remove(key);
-            return null;
-          case 'deleteAll':
-            secureStore.clear();
-            return null;
-        }
-        return null;
-      },
-    );
-  });
-
-  setUp(() async {
-    SharedPreferences.setMockInitialValues({});
-    AppState.instance.isLoggedIn = true;
-    AppState.instance.authToken = 'token-123';
-  });
-
-
-
-  group('1. successful DELETE', () {
-    test('first endpoint succeeds', () async {
-      serve((o) async => _json(204));
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.deleted);
-    });
-  });
-
-  group('2. DELETE fails, POST fallback succeeds', () {
-    test('falls through to the POST contract', () async {
-      serve((o) async =>
-          o.method == 'POST' ? _json(200) : _json(404));
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.deleted);
-    });
-  });
-
-  group('3. DELETE fails and POST fails', () {
-    test('reports server error, not success', () async {
-      serve((o) async => _json(500));
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.serverError);
-    });
-  });
-
-  group('4. network failure', () {
-    test('is distinguished from a server rejection', () async {
-      serve((o) async => throw DioException(
-            requestOptions: o,
-            type: DioExceptionType.connectionError,
-          ));
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.networkFailure);
-    });
-  });
-
-  group('5. unauthorized / expired session', () {
-    test('401 surfaces as unauthorized', () async {
-      serve((o) async => _json(401));
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.unauthorized);
+      expect(req.id, equals('07bfabc8-ac6b-49e3-bbc7-078fd930f720'));
+      expect(req.status, equals('pending'));
+      expect(req.isPending, isTrue);
+      expect(req.isApproved, isFalse);
+      expect(req.isRejected, isFalse);
+      expect(req.isCancelled, isFalse);
+      expect(req.reason, equals('privacy'));
+      expect(req.notes, equals('Remove my data'));
+      expect(req.createdAt, isNotNull);
+      expect(req.reviewedAt, isNull);
+      expect(req.executedAt, isNull);
     });
 
-    test('an auth rejection outranks a later network error', () async {
-      serve((o) async {
-        if (o.method == 'DELETE') return _json(403);
-        throw DioException(
-            requestOptions: o, type: DioExceptionType.connectionError);
-      });
-      expect(await ApiService.instance.deleteAccount(),
-          AccountDeletionResult.unauthorized,
-          reason: 'the most informative failure must not be masked');
-    });
-  });
+    test('Correctly parses approved deletion request', () {
+      final json = {
+        "id": "07bfabc8-ac6b-49e3-bbc7-078fd930f720",
+        "status": "approved",
+        "reason": "no_longer_used",
+        "created_at": "2026-09-18T12:07:41.515918+05:30",
+        "reviewed_at": "2026-09-18T12:30:00.000000+05:30",
+        "executed_at": "2026-09-18T12:30:05.000000+05:30"
+      };
 
-  group('the session survives a failed deletion so retry is possible', () {
-    test('failure keeps the user logged in and keeps the token', () async {
-      serve((o) async => _json(500));
-      final result = await AppState.instance.deleteAccount();
+      final req = AccountDeletionRequest.fromJson(json);
 
-      expect(result, isNot(AccountDeletionResult.deleted));
-      expect(AppState.instance.isLoggedIn, isTrue,
-          reason: 'clearing the session would destroy the retry path');
-      expect(AppState.instance.authToken, 'token-123');
+      expect(req.isPending, isFalse);
+      expect(req.isApproved, isTrue);
+      expect(req.isRejected, isFalse);
+      expect(req.isCancelled, isFalse);
+      expect(req.reviewedAt, isNotNull);
+      expect(req.executedAt, isNotNull);
     });
 
-    test('success clears the session', () async {
-      serve((o) async => _json(204));
-      final result = await AppState.instance.deleteAccount();
+    test('Correctly parses rejected deletion request', () {
+      final json = {
+        "id": "07bfabc8-ac6b-49e3-bbc7-078fd930f720",
+        "status": "rejected",
+        "reason": "other",
+        "created_at": "2026-09-18T12:07:41.515918+05:30",
+        "admin_notes": "Contacted user, resolved."
+      };
 
-      expect(result, AccountDeletionResult.deleted);
-      expect(AppState.instance.isLoggedIn, isFalse);
-    });
-  });
+      final req = AccountDeletionRequest.fromJson(json);
 
-  group('persisted session matches the deletion outcome across a restart', () {
-    test('failure leaves the persisted auth state intact', () async {
-      SharedPreferences.setMockInitialValues({'isLoggedIn': true});
-      secureStore['authToken'] = 'token-123';
-      AppState.instance.isLoggedIn = true;
-      AppState.instance.authToken = 'token-123';
-
-      serve((o) async => _json(503));
-      final result = await AppState.instance.deleteAccount();
-      expect(result, AccountDeletionResult.serverError);
-
-      // _clearLocalSession never ran, so neither store was written.
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool('isLoggedIn'), isTrue,
-          reason: 'a restart must find the user still authenticated');
-      expect(secureStore['authToken'], 'token-123',
-          reason: 'the token the retry needs must survive');
+      expect(req.isPending, isFalse);
+      expect(req.isApproved, isFalse);
+      expect(req.isRejected, isTrue);
+      expect(req.isCancelled, isFalse);
+      expect(req.adminNotes, equals('Contacted user, resolved.'));
     });
 
-    test('success removes the persisted auth state', () async {
-      SharedPreferences.setMockInitialValues({'isLoggedIn': true});
-      secureStore['authToken'] = 'token-123';
-      secureStore['refreshToken'] = 'refresh-123';
-      AppState.instance.isLoggedIn = true;
-      AppState.instance.authToken = 'token-123';
+    test('Correctly parses cancelled deletion request', () {
+      final json = {
+        "id": "07bfabc8-ac6b-49e3-bbc7-078fd930f720",
+        "status": "cancelled",
+        "reason": "privacy",
+        "created_at": "2026-09-18T12:07:41.515918+05:30"
+      };
 
-      serve((o) async => _json(204));
-      expect(await AppState.instance.deleteAccount(),
-          AccountDeletionResult.deleted);
+      final req = AccountDeletionRequest.fromJson(json);
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool('isLoggedIn'), isFalse);
-      expect(secureStore['authToken'], isNull,
-          reason: 'a restart must not restore a deleted account');
-      expect(secureStore['refreshToken'], isNull);
+      expect(req.isPending, isFalse);
+      expect(req.isApproved, isFalse);
+      expect(req.isRejected, isFalse);
+      expect(req.isCancelled, isTrue);
+    });
+
+    test('Provides bilingual reason labels', () {
+      expect(
+        AccountDeletionRequest.getReasonLabel('privacy', isTelugu: false),
+        contains('Privacy'),
+      );
+      expect(
+        AccountDeletionRequest.getReasonLabel('privacy', isTelugu: true),
+        contains('గోప్యత'),
+      );
+
+      expect(
+        AccountDeletionRequest.getReasonLabel('no_longer_used', isTelugu: false),
+        contains('no longer use'),
+      );
+      expect(
+        AccountDeletionRequest.getReasonLabel('no_longer_used', isTelugu: true),
+        contains('ఉపయోగించడం లేదు'),
+      );
+
+      // Unknown code falls back to other
+      expect(
+        AccountDeletionRequest.getReasonLabel('unknown_xyz', isTelugu: false),
+        equals('Other'),
+      );
+    });
+
+    test('Serializes to JSON accurately', () {
+      final req = AccountDeletionRequest(
+        id: 'del-123',
+        status: 'pending',
+        reason: 'privacy',
+        notes: 'Please delete my data',
+        createdAt: DateTime(2026, 9, 18, 12, 0, 0),
+      );
+
+      final map = req.toJson();
+      expect(map['id'], equals('del-123'));
+      expect(map['status'], equals('pending'));
+      expect(map['reason'], equals('privacy'));
+      expect(map['notes'], equals('Please delete my data'));
+      expect(map['created_at'], isNotNull);
     });
   });
 }

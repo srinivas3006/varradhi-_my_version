@@ -134,6 +134,7 @@ class NewsArticle {
             '';
     final rawVid =
         extractString(['video_url', 'youtube_url', 'youtube_video_id']);
+    final resolvedVideoUrl = _resolveVideoUrl(json);
 
     if (rawImgUrl.isEmpty && rawVid.isNotEmpty) {
       final ytThumb = UrlNormalizer.extractYoutubeThumbnail(rawVid) ??
@@ -143,9 +144,15 @@ class NewsArticle {
       }
     }
 
-    final normalizedImgUrl = UrlNormalizer.normalize(rawImgUrl);
+    if (rawImgUrl.isEmpty && resolvedVideoUrl.isNotEmpty) {
+      final ytThumb = UrlNormalizer.extractYoutubeThumbnail(resolvedVideoUrl) ??
+          _youtubeThumbnailFromId(resolvedVideoUrl);
+      if (ytThumb != null) {
+        rawImgUrl = ytThumb;
+      }
+    }
 
-    final resolvedVideoUrl = _resolveVideoUrl(json);
+    final normalizedImgUrl = UrlNormalizer.normalize(rawImgUrl);
 
     // Safe list of media items
     List<MediaItem> parsedMediaItems = [];
@@ -270,27 +277,59 @@ class NewsArticle {
   /// One parent record owns this ordered media list; it is never a feed list.
   List<MediaItem> get orderedMedia {
     final effectiveVid = effectiveVideoUrl;
+    String resolveFallbackThumb([String url = '']) {
+      final targetUrl = url.isNotEmpty ? url : effectiveVid;
+      final ytThumb = UrlNormalizer.extractYoutubeThumbnail(targetUrl) ??
+          _youtubeThumbnailFromId(targetUrl);
+      if (ytThumb != null && ytThumb.isNotEmpty) return ytThumb;
+      if (imageUrl.isNotEmpty) return imageUrl;
+      if (imageUrls != null && imageUrls!.isNotEmpty) {
+        final firstValid = imageUrls!.firstWhere(
+          (u) => u.isNotEmpty,
+          orElse: () => '',
+        );
+        if (firstValid.isNotEmpty) return firstValid;
+      }
+      return '';
+    }
+
     if (mediaItems.isNotEmpty) {
+      final enrichedMedia = mediaItems.map((item) {
+        if (item.isVideo && item.thumbnailUrl.isEmpty) {
+          final fallback = resolveFallbackThumb(item.url);
+          if (fallback.isNotEmpty) {
+            return MediaItem(
+              mediaType: item.mediaType,
+              url: item.url,
+              thumbnailUrl: fallback,
+              sortOrder: item.sortOrder,
+              isPrimary: item.isPrimary,
+            );
+          }
+        }
+        return item;
+      }).toList();
+
       if (effectiveVid.isNotEmpty &&
-          !mediaItems.any((m) => m.isVideo || m.url == effectiveVid)) {
+          !enrichedMedia.any((m) => m.isVideo || m.url == effectiveVid)) {
         return [
           MediaItem(
             mediaType: 'video',
             url: effectiveVid,
-            thumbnailUrl: imageUrl,
+            thumbnailUrl: resolveFallbackThumb(effectiveVid),
             isPrimary: true,
           ),
-          ...mediaItems,
+          ...enrichedMedia,
         ];
       }
-      return mediaItems;
+      return enrichedMedia;
     }
     final result = <MediaItem>[];
     if (effectiveVid.isNotEmpty) {
       result.add(MediaItem(
         mediaType: 'video',
         url: effectiveVid,
-        thumbnailUrl: imageUrl,
+        thumbnailUrl: resolveFallbackThumb(effectiveVid),
         isPrimary: true,
       ));
     }
@@ -523,23 +562,25 @@ class MediaItem {
             rawType.contains('video'))
         ? 'video'
         : (rawType.isNotEmpty ? rawType : 'image');
-    final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
-      json['youtube_video_id']?.toString() ?? json['youtube_url']?.toString(),
-    );
-    final youtubeUrl = youtubeVideoId == null
-        ? ''
-        : 'https://www.youtube.com/watch?v=$youtubeVideoId';
     final rawUrl = (json['url'] ??
             json['media_url'] ??
             json['file_url'] ??
             json['video_url'] ??
             json['image_url'])
         ?.toString();
+    final youtubeVideoId = MediaResolver.extractYoutubeVideoId(
+      json['youtube_video_id']?.toString() ??
+          json['youtube_url']?.toString() ??
+          rawUrl,
+    );
+    final youtubeUrl = youtubeVideoId == null
+        ? ''
+        : 'https://www.youtube.com/watch?v=$youtubeVideoId';
     final urlStr = rawUrl == null || rawUrl.trim().isEmpty
         ? youtubeUrl
         : UrlNormalizer.normalize(rawUrl);
     final youtubeThumb = youtubeVideoId == null
-        ? ''
+        ? (UrlNormalizer.extractYoutubeThumbnail(rawUrl ?? '') ?? '')
         : 'https://i.ytimg.com/vi/$youtubeVideoId/hqdefault.jpg';
     final thumbStr = UrlNormalizer.normalize(
       json['thumbnail_url']?.toString(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/navigation/auth_guard.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 
 enum Reaction { like, dislike, none }
 
@@ -97,7 +98,13 @@ class _ReactionButtonsState extends State<ReactionButtons> {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final inactiveIconColor =
+        isDark ? AppColors.iconMutedDark : AppColors.textMuted;
+    final textColor =
+        isDark ? AppColors.textSecondaryDark : AppColors.textDark;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -105,12 +112,16 @@ class _ReactionButtonsState extends State<ReactionButtons> {
           onPressed: _syncing ? null : () => _onTap(Reaction.like),
           icon: Icon(
             _reaction == Reaction.like ? Icons.favorite : Icons.favorite_border,
-            color: _reaction == Reaction.like ? color : null,
+            color:
+                _reaction == Reaction.like ? AppColors.heartRed : inactiveIconColor,
             size: 20,
           ),
         ),
         Text('$_likes',
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: textColor)),
         const SizedBox(width: 8),
         IconButton(
           onPressed: _syncing ? null : () => _onTap(Reaction.dislike),
@@ -118,12 +129,17 @@ class _ReactionButtonsState extends State<ReactionButtons> {
             _reaction == Reaction.dislike
                 ? Icons.thumb_down
                 : Icons.thumb_down_outlined,
-            color: _reaction == Reaction.dislike ? color : null,
+            color: _reaction == Reaction.dislike
+                ? primaryColor
+                : inactiveIconColor,
             size: 20,
           ),
         ),
         Text('$_dislikes',
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: textColor)),
       ],
     );
   }

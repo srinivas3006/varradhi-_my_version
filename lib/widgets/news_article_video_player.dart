@@ -6,6 +6,7 @@ import '../core/media/media_resolver.dart';
 import '../core/media/media_source.dart';
 import '../core/media/video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
+import '../core/utils/url_normalizer.dart';
 import '../models/news_article.dart';
 import '../screens/video_player_screen.dart';
 import '../theme/app_theme.dart';
@@ -62,19 +63,56 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
     }
   }
 
+  String _resolvePreviewUrl() {
+    // 1. Explicit media item thumbnail if present
+    final mediaThumb = widget.media?.thumbnailUrl.trim() ?? '';
+    if (mediaThumb.isNotEmpty) return mediaThumb;
+
+    // 2. MediaSource resolved thumbnail (handles YouTube URLs / IDs automatically)
+    final sourceThumb = _mediaSource?.thumbnailUrl.trim() ?? '';
+    if (sourceThumb.isNotEmpty) return sourceThumb;
+
+    // 3. YouTube extraction from media url or article video url
+    final vidUrl = (widget.media?.url.trim().isNotEmpty == true)
+        ? widget.media!.url.trim()
+        : widget.article.effectiveVideoUrl.trim();
+    final ytThumb = UrlNormalizer.extractYoutubeThumbnail(vidUrl);
+    if (ytThumb != null && ytThumb.isNotEmpty) return ytThumb;
+
+    final ytId = MediaResolver.extractYoutubeVideoId(vidUrl);
+    if (ytId != null && ytId.isNotEmpty) {
+      return 'https://i.ytimg.com/vi/$ytId/hqdefault.jpg';
+    }
+
+    // 4. Primary article image URL
+    if (widget.article.imageUrl.trim().isNotEmpty) {
+      return widget.article.imageUrl.trim();
+    }
+
+    // 5. Any image URL in article.imageUrls
+    if (widget.article.imageUrls != null &&
+        widget.article.imageUrls!.isNotEmpty) {
+      final firstValid = widget.article.imageUrls!.firstWhere(
+        (u) => u.trim().isNotEmpty,
+        orElse: () => '',
+      );
+      if (firstValid.isNotEmpty) return firstValid.trim();
+    }
+
+    // 6. Any mediaItem with a thumbnail or image in article.mediaItems
+    for (final m in widget.article.mediaItems) {
+      if (m.thumbnailUrl.trim().isNotEmpty) return m.thumbnailUrl.trim();
+      if (!m.isVideo && m.url.trim().isNotEmpty) return m.url.trim();
+    }
+    return '';
+  }
+
   void _resolveMediaSource() {
     final effectiveVid = (widget.media?.url.isNotEmpty == true)
         ? widget.media!.url
         : widget.article.effectiveVideoUrl;
 
-    final previewUrl = (widget.media?.thumbnailUrl.isNotEmpty == true)
-        ? widget.media!.thumbnailUrl
-        : (widget.article.imageUrl.isNotEmpty
-            ? widget.article.imageUrl
-            : (widget.article.imageUrls != null &&
-                    widget.article.imageUrls!.isNotEmpty
-                ? widget.article.imageUrls!.first
-                : ''));
+    final previewUrl = _resolvePreviewUrl();
 
     _mediaSource = MediaResolver.resolve(
       videoUrl: effectiveVid,
@@ -151,7 +189,10 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
 
     final oldVid = oldWidget.media?.url ?? oldWidget.article.effectiveVideoUrl;
     final newVid = widget.media?.url ?? widget.article.effectiveVideoUrl;
-    if (oldVid != newVid) {
+    final oldThumb =
+        oldWidget.media?.thumbnailUrl ?? oldWidget.article.imageUrl;
+    final newThumb = widget.media?.thumbnailUrl ?? widget.article.imageUrl;
+    if (oldVid != newVid || oldThumb != newThumb) {
       _stopPlayback();
       _resolveMediaSource();
     }
@@ -183,14 +224,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
 
   @override
   Widget build(BuildContext context) {
-    final article = widget.article;
-    final previewUrl = widget.media != null
-        ? widget.media!.thumbnailUrl
-        : article.imageUrl.isNotEmpty
-            ? article.imageUrl
-            : (article.imageUrls != null && article.imageUrls!.isNotEmpty
-                ? article.imageUrls!.first
-                : '');
+    final previewUrl = _resolvePreviewUrl();
 
     return Container(
       height: widget.height,
@@ -279,7 +313,13 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
               ),
             )
           else
-            Container(color: Colors.black),
+            Container(
+              color: AppColors.cardDark,
+              child: const Center(
+                child: Icon(Icons.videocam_outlined,
+                    color: AppColors.textMuted, size: 48),
+              ),
+            ),
 
           // Vignette shading
           Container(
@@ -296,53 +336,31 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
             ),
           ),
 
-          // YouTube Style Signature Play Button
+          // Simple White Play Button Symbol
           Center(
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _startPlayback,
-                borderRadius: BorderRadius.circular(18),
-                splashColor: Colors.white24,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF0000), // Iconic YouTube red
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                      BoxShadow(
-                        color: const Color(0xFFFF0000).withValues(alpha: 0.35),
-                        blurRadius: 20,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+            child: Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 2),
                   ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        color: Colors.white,
-                        size: 30,
-                      ),
-                      SizedBox(width: 6),
-                      Text(
-                        'Watch Video',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
-                  ),
+                ],
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 38,
                 ),
               ),
             ),

@@ -15,6 +15,7 @@ import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
+import '../widgets/watermark/article_watermark_overlay.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'comments_screen.dart';
 
@@ -301,12 +302,16 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBgColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = isDark ? Colors.white : AppColors.textDark;
-    final mutedTextColor = isDark ? Colors.white60 : AppColors.textMuted;
+    final cardBgColor = isDark ? AppColors.cardDarkNavy : Colors.white;
+    final titleColor =
+        isDark ? AppColors.readingTitleDark : AppColors.readingTitleLight;
+    final bodyColor =
+        isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
+    final mutedTextColor =
+        isDark ? AppColors.readingMetaDark : AppColors.readingMetaLight;
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.black : const Color(0xFFF4F6F8),
+      backgroundColor: isDark ? AppColors.backgroundDark : const Color(0xFFF8FAFC),
       body: Stack(
         children: [
           // 1. Full Hero Media Background (Top Section)
@@ -320,6 +325,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               children: [
                 ArticleMediaCarousel(
                   article: article,
+                  showWatermark: false,
                   onPageChanged: (index) =>
                       setState(() => _currentImageIndex = index),
                 ),
@@ -344,63 +350,21 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Vaaradhi Logo Watermark (Spotlight style)
-                Positioned(
-                  bottom: 44,
-                  right: 16,
-                  child: Opacity(
-                    opacity: 0.85,
-                    child: Image.asset(
-                      'assets/images/logo.png',
-                      width: 38,
-                      height: 38,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-
-                // Photographer/Desk Credit Pill (Way2News style - article text.jpeg)
-                Positioned(
-                  bottom: 44,
-                  left: 16,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.camera_alt_outlined,
-                            color: Colors.white, size: 14),
-                        const SizedBox(width: 5),
-                        Text(
-                          article.authorName.isNotEmpty &&
-                                  !article.authorName
-                                      .toLowerCase()
-                                      .contains('john')
-                              ? article.authorName
-                              : (article.source.isNotEmpty
-                                  ? article.source
-                                  : 'VARADHI Desk'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                // Non-intrusive Article Watermark Overlay (Vertical VAARADHI on left + bottom-right logo)
+                // Constrained to visible hero area (height 310) so it's not cut off by the curved sheet.
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 310,
+                  child: ArticleWatermarkOverlay(),
                 ),
 
                 // Multi-Image Index Indicator Pill (Positioned to the left of the Logo watermark so no overlap occurs)
                 if (article.imageUrls != null && article.imageUrls!.length > 1)
                   Positioned(
-                    bottom: 44,
-                    right: 64,
+                    top: 272,
+                    right: 56,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
@@ -743,10 +707,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Text(
                         article.title,
                         style: GoogleFonts.notoSansTelugu(
-                          fontSize: 23,
-                          fontWeight: FontWeight.w800,
-                          height: 1.38,
-                          color: textColor,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                          color: titleColor,
                           letterSpacing: 0.0,
                         ),
                       ),
@@ -757,27 +721,29 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Row(
                         children: [
                           Icon(Icons.access_time_rounded,
-                              size: 14, color: mutedTextColor),
-                          const SizedBox(width: 4),
+                              size: 15, color: mutedTextColor),
+                          const SizedBox(width: 5),
                           Text(
                             article.timeAgo,
                             style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 13.5,
                                 color: mutedTextColor,
-                                fontWeight: FontWeight.w500),
+                                fontWeight: FontWeight.w400),
                           ),
-                          const SizedBox(width: 12),
-                          Text('•', style: TextStyle(color: mutedTextColor)),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
+                          Text('•',
+                              style: TextStyle(
+                                  color: mutedTextColor, fontSize: 14)),
+                          const SizedBox(width: 10),
                           Icon(Icons.menu_book_rounded,
-                              size: 14, color: mutedTextColor),
-                          const SizedBox(width: 4),
+                              size: 15, color: mutedTextColor),
+                          const SizedBox(width: 5),
                           Text(
                             '${article.readTimeMinutes} నిమిషాల పఠనం',
                             style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 13.5,
                                 color: mutedTextColor,
-                                fontWeight: FontWeight.w500),
+                                fontWeight: FontWeight.w400),
                           ),
                         ],
                       ),
@@ -787,16 +753,17 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       // Article engagement or UGC moderation actions.
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                            horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : Colors.black.withValues(alpha: 0.03),
-                          borderRadius: BorderRadius.circular(20),
+                              ? AppColors.surfaceElevatedDark
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(24),
                           border: Border.all(
                               color: isDark
-                                  ? Colors.white10
-                                  : Colors.black.withValues(alpha: 0.05)),
+                                  ? AppColors.borderDark
+                                  : const Color(0xFFE5E7EB),
+                              width: 0.8),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -805,12 +772,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                   Row(
                                     children: [
                                       const Icon(Icons.campaign_outlined,
-                                          color: AppColors.primary, size: 20),
+                                          color: AppColors.primary, size: 22),
                                       const SizedBox(width: 8),
                                       Text(
                                         tr('citizen_report'),
                                         style: const TextStyle(
-                                            fontSize: 13,
+                                            fontSize: 14,
                                             fontWeight: FontWeight.w700),
                                       ),
                                     ],
@@ -839,7 +806,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                         borderRadius: BorderRadius.circular(16),
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
-                                              horizontal: 20, vertical: 8),
+                                              horizontal: 16, vertical: 6),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
@@ -858,20 +825,24 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                                           .favorite_outline_rounded,
                                                   key: ValueKey(isLiked),
                                                   color: isLiked
-                                                      ? AppColors.primary
-                                                      : mutedTextColor,
-                                                  size: 20,
+                                                      ? AppColors.heartRed
+                                                      : (isDark
+                                                          ? AppColors.iconMutedDark
+                                                          : const Color(0xFF9CA3AF)),
+                                                  size: 24,
                                                 ),
                                               ),
                                               const SizedBox(width: 8),
                                               Text(
                                                 '${article.likes}',
                                                 style: TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 15.5,
+                                                  fontWeight: FontWeight.w600,
                                                   color: isLiked
-                                                      ? AppColors.primary
-                                                      : textColor,
+                                                      ? AppColors.heartRed
+                                                      : (isDark
+                                                          ? AppColors.textLight
+                                                          : AppColors.readingTitleLight),
                                                 ),
                                               ),
                                             ],
@@ -883,10 +854,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                                   Container(
                                       width: 1,
-                                      height: 20,
+                                      height: 22,
                                       color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12),
+                                          ? AppColors.borderDark
+                                          : const Color(0xFFE5E7EB)),
 
                                   // Comments Metric Pill
                                   AnimatedBuilder(
@@ -911,22 +882,26 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                         borderRadius: BorderRadius.circular(16),
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
-                                              horizontal: 20, vertical: 8),
+                                              horizontal: 16, vertical: 6),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
                                               Icon(
                                                   Icons
                                                       .chat_bubble_outline_rounded,
-                                                  color: mutedTextColor,
-                                                  size: 20),
+                                                  color: isDark
+                                                      ? AppColors.iconMutedDark
+                                                      : const Color(0xFF9CA3AF),
+                                                  size: 24),
                                               const SizedBox(width: 8),
                                               Text(
                                                 '$count',
                                                 style: TextStyle(
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: textColor),
+                                                    fontSize: 15.5,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDark
+                                                        ? AppColors.textLight
+                                                        : AppColors.readingTitleLight),
                                               ),
                                             ],
                                           ),
@@ -968,25 +943,34 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                               ),
                               const SizedBox(height: 12),
                               if (article.summary.isNotEmpty)
-                                Text(
-                                  article.summary,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    height: 1.7,
-                                    color: textColor.withValues(alpha: 0.85),
+                                AnimatedBuilder(
+                                  animation: AppState.instance,
+                                  builder: (context, _) => Text(
+                                    article.summary,
+                                    style: GoogleFonts.notoSansTelugu(
+                                      fontSize:
+                                          AppState.instance.readingFontSize,
+                                      height: 1.90,
+                                      letterSpacing: 0.2,
+                                      color: bodyColor,
+                                      fontWeight: FontWeight.w400,
+                                    ),
                                   ),
                                 ),
                             ],
                           ),
                         )
                       else
-                        _buildWay2NewsBodyText(
-                          article.body.isNotEmpty
-                              ? article.body
-                              : (article.summary.isNotEmpty
-                                  ? article.summary
-                                  : ''),
-                          textColor,
+                        AnimatedBuilder(
+                          animation: AppState.instance,
+                          builder: (context, _) => _buildWay2NewsBodyText(
+                            article.body.isNotEmpty
+                                ? article.body
+                                : (article.summary.isNotEmpty
+                                    ? article.summary
+                                    : ''),
+                            bodyColor,
+                          ),
                         ),
 
                       const SizedBox(height: 24),
@@ -1096,11 +1080,14 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     );
   }
 
-  Widget _buildWay2NewsBodyText(String text, Color textColor) {
+  Widget _buildWay2NewsBodyText(String text, Color bodyColor) {
     if (text.isEmpty) {
       return Text(
         tr('no_content'),
-        style: TextStyle(fontSize: 16, color: textColor.withValues(alpha: 0.7)),
+        style: GoogleFonts.notoSansTelugu(
+          fontSize: AppState.instance.readingFontSize,
+          color: bodyColor.withValues(alpha: 0.7),
+        ),
       );
     }
 
@@ -1128,11 +1115,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
 
     final paragraphStyle = GoogleFonts.notoSansTelugu(
-      fontSize: 17.5,
-      height: 1.72,
-      color: textColor.withValues(alpha: 0.92),
+      fontSize: AppState.instance.readingFontSize,
+      height: 1.90,
+      color: bodyColor,
       fontWeight: FontWeight.w400,
-      letterSpacing: 0.0,
+      letterSpacing: 0.2,
     );
 
     return Column(
@@ -1140,7 +1127,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       children: [
         for (int i = 0; i < paragraphs.length; i++) ...[
           Padding(
-            padding: const EdgeInsets.only(bottom: 18.0),
+            padding: const EdgeInsets.only(bottom: 16.0),
             child: Text(
               paragraphs[i],
               textAlign: TextAlign.start,

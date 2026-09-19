@@ -49,8 +49,11 @@ void main() {
   group('the watermark cannot be omitted', () {
     final source =
         File('lib/utils/share_service.dart').readAsStringSync();
+    // The watermark now lives in its own widget, which both the share card
+    // and the download poster render. The guard follows it there.
     final card =
-        source.substring(source.indexOf('class _WatermarkShareCard'));
+        File('lib/widgets/watermark/article_watermark_overlay.dart')
+            .readAsStringSync();
 
     test('the downloaded image carries no article text', () {
       // Download is the picture plus the watermark; the text travels beside
@@ -71,6 +74,10 @@ void main() {
               reason: 'watermark must not be conditional: $line');
         }
       }
+    });
+
+    test('the share card still renders the watermark overlay', () {
+      expect(source, contains('ArticleWatermarkOverlay'));
     });
 
     test('the generated file is a .png', () {

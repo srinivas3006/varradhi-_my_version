@@ -205,24 +205,34 @@ void main() {
       final result = await ApiService.instance.login('admin@example.com', 'pass123');
 
       expect(result['access'], equals('new-access-token'));
-      expect(loginAttempts, equals(2));
-      // Second attempt regenerated a fresh device ID
+      expect(loginAttempts, equals(2),
+          reason: 'a 403 must be recovered from, not surfaced to the reader');
+
+      // device_id is deliberately stable now: recovery re-registers the guest
+      // device to obtain a fresh installation_secret for the SAME id, rather
+      // than minting a new identity on every credential mismatch.
       expect(requestedDeviceIds[0], equals('device-stale-1'));
-      expect(requestedDeviceIds[1], isNot(equals('device-stale-1')));
-      expect(requestedDeviceIds[1], startsWith('dev_'));
+      expect(requestedDeviceIds[1], equals('device-stale-1'));
     });
   });
 
   group('Release Readiness: Account Deletion Contract', () {
-    test('deleteAccount falls back across supported backend contracts',
+    test('deleteAccount submits through the deletion-request contract',
         () async {
       final requestedPaths = <String>[];
       ApiClient.instance.dio.httpClientAdapter =
           ReleaseMockAdapter((options) async {
         requestedPaths.add('${options.method} ${options.path}');
         if (options.method == 'POST' &&
-            options.path == '/api/v1/auth/account/delete/') {
-          return ReleaseMockAdapter.jsonResponse({'data': {}}, 204);
+            options.path == '/api/v1/auth/account/deletion-request/') {
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {
+              'id': 1,
+              'status': 'pending',
+              'reason': 'other',
+              'created_at': '2026-01-01T00:00:00Z',
+            }
+          }, 201);
         }
         return ReleaseMockAdapter.jsonResponse({
           'errors': {'message': 'Not found'}
@@ -231,14 +241,11 @@ void main() {
 
       final deleted = await ApiService.instance.deleteAccount();
 
-      expect(deleted, AccountDeletionResult.deleted);
+      expect(deleted, isTrue);
       expect(
           requestedPaths,
-          equals([
-            'DELETE /api/v1/auth/delete-account/',
-            'DELETE /api/v1/auth/me/',
-            'POST /api/v1/auth/account/delete/',
-          ]));
+          equals(['POST /api/v1/auth/account/deletion-request/']),
+          reason: 'deletion now goes through the deletion-request contract');
     });
   });
 

@@ -49,8 +49,7 @@ class YouTubePlaybackController extends VideoPlaybackController {
           enableCaption: false,
           enableJavaScript: true,
           playsInline: true,
-          origin: 'https://www.youtube.com',
-          privacyEnhancedMode: false,
+          privacyEnhancedMode: true,
           strictRelatedVideos: false,
         ),
       );
@@ -78,7 +77,9 @@ class YouTubePlaybackController extends VideoPlaybackController {
 
     if (ctrlValue.hasError) {
       debugPrint('[YouTubePlaybackController] YouTube error: ${ctrlValue.error}');
-      final isRestricted = ctrlValue.error == YoutubeError.notEmbeddable;
+      final isRestricted = ctrlValue.error == YoutubeError.notEmbeddable ||
+          ctrlValue.error == YoutubeError.sameAsNotEmbeddable ||
+          ctrlValue.error == YoutubeError.sameAsNotEmbeddable2;
       value = value.copyWith(
         status: PlaybackStatus.error,
         errorMessage: isRestricted

@@ -7,9 +7,10 @@ import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../localization/app_translations.dart';
-import 'reaction_buttons.dart';
 import '../services/api_service.dart';
+import 'reaction_buttons.dart';
 import 'news_article_video_player.dart';
+import 'watermark/article_watermark_overlay.dart';
 
 class NewsFeedCard extends StatefulWidget {
   final NewsArticle article;
@@ -100,11 +101,12 @@ class _NewsFeedCardState extends State<NewsFeedCard>
 
   void _handleComment() {
     HapticFeedback.selectionClick();
-    requireAuth(context, widget.onComment);
+    widget.onComment();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final article = widget.article;
     final hasMultipleImages =
         article.imageUrls != null && article.imageUrls!.length > 1;
@@ -114,11 +116,14 @@ class _NewsFeedCardState extends State<NewsFeedCard>
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? AppColors.cardDarkNavy : Colors.white,
         borderRadius: BorderRadius.circular(18),
+        border: isDark
+            ? Border.all(color: AppColors.borderDark, width: 0.8)
+            : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -315,39 +320,58 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                       ],
                       CircleAvatar(
                         radius: 10,
-                        backgroundColor: AppColors.chipBg,
+                        backgroundColor: isDark
+                            ? AppColors.surfaceElevatedDark
+                            : AppColors.chipBg,
                         child: Text(
                           article.source.isNotEmpty ? article.source[0] : '?',
-                          style: const TextStyle(
-                              fontSize: 10, color: AppColors.textDark),
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: isDark
+                                  ? AppColors.textLight
+                                  : AppColors.textDark),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         article.district ?? article.state ?? article.source,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textDark,
+                          color: isDark
+                              ? AppColors.textLight
+                              : AppColors.textDark,
                         ),
                       ),
                       const SizedBox(width: 6),
-                      const Text('·',
-                          style: TextStyle(color: AppColors.textMuted)),
+                      Text('·',
+                          style: TextStyle(
+                              color: isDark
+                                  ? AppColors.readingMetaDark
+                                  : AppColors.readingMetaLight)),
                       const SizedBox(width: 6),
                       Text(
                         article.timeAgo,
-                        style: const TextStyle(
-                            fontSize: 12, color: AppColors.textMuted),
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: isDark
+                                ? AppColors.readingMetaDark
+                                : AppColors.readingMetaLight),
                       ),
                       const Spacer(),
-                      const Icon(Icons.visibility,
-                          size: 12, color: AppColors.textMuted),
+                      Icon(Icons.visibility,
+                          size: 13,
+                          color: isDark
+                              ? AppColors.readingMetaDark
+                              : AppColors.readingMetaLight),
                       const SizedBox(width: 4),
                       Text(
                         '${article.viewCount}',
-                        style: const TextStyle(
-                            fontSize: 11.5, color: AppColors.textMuted),
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? AppColors.readingMetaDark
+                                : AppColors.readingMetaLight),
                       ),
                     ],
                   ),
@@ -357,9 +381,11 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.notoSansTelugu(
-                      fontSize: 16.0,
+                      fontSize: 17.0,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textDark,
+                      color: isDark
+                          ? AppColors.readingTitleDark
+                          : AppColors.readingTitleLight,
                       height: 1.35,
                       letterSpacing: 0.0,
                     ),
@@ -373,11 +399,13 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                             : article.body.trim();
 
                         final textStyle = GoogleFonts.notoSansTelugu(
-                          fontSize: 13.5,
-                          color: AppColors.textMuted,
-                          height: 1.55,
+                          fontSize: 14.5,
+                          color: isDark
+                              ? AppColors.textSecondaryDark
+                              : AppColors.readingBodyLight,
+                          height: 1.68,
                           fontWeight: FontWeight.w400,
-                          letterSpacing: 0.0,
+                          letterSpacing: 0.15,
                         );
 
                         final double lineHeight =
@@ -448,7 +476,10 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                       },
                     ),
                   ),
-                  const Divider(height: 16),
+                  Divider(
+                    height: 16,
+                    color: isDark ? AppColors.borderDark : null,
+                  ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -516,7 +547,8 @@ class _NewsFeedCardState extends State<NewsFeedCard>
         : (article.imageUrls != null && article.imageUrls!.isNotEmpty
             ? article.imageUrls!.first
             : '');
-    final shouldShowVideoCard = article.isVideo && article.videoUrl.isNotEmpty;
+    final shouldShowVideoCard =
+        article.isVideo && article.effectiveVideoUrl.isNotEmpty;
 
     if (shouldShowVideoCard) {
       return NewsArticleVideoPlayer(
@@ -529,58 +561,31 @@ class _NewsFeedCardState extends State<NewsFeedCard>
   }
 
   Widget _buildImage(String url) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final placeholderColor =
+        isDark ? AppColors.surfaceElevatedDark : AppColors.chipBg;
+    final iconColor = isDark ? AppColors.iconMutedDark : AppColors.textMuted;
+
     if (url.isEmpty) {
       return Container(
-        color: AppColors.chipBg,
-        child: const Icon(Icons.image_not_supported_outlined,
-            color: AppColors.textMuted, size: 40),
+        color: placeholderColor,
+        child: Icon(Icons.image_not_supported_outlined,
+            color: iconColor, size: 40),
       );
     }
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CachedNetworkImage(
-          imageUrl: url,
-          fit: BoxFit.cover,
-          memCacheWidth: 800,
-          placeholder: (context, url) => Container(color: AppColors.chipBg),
-          errorWidget: (context, url, error) => Container(
-            color: AppColors.chipBg,
-            child: const Icon(Icons.image_not_supported_outlined,
-                color: AppColors.textMuted, size: 40),
-          ),
+    return ArticleWatermarkOverlay(
+      child: CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        memCacheWidth: 800,
+        placeholder: (context, url) => Container(color: placeholderColor),
+        errorWidget: (context, url, error) => Container(
+          color: placeholderColor,
+          child: Icon(Icons.image_not_supported_outlined,
+              color: iconColor, size: 40),
         ),
-
-        // Vaaradhi Watermark Badge (Bottom-Right)
-        Positioned(
-          bottom: 8,
-          right: 8,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.85),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.bolt_rounded, color: Colors.white, size: 12),
-                SizedBox(width: 3),
-                Text(
-                  'Vaaradhi',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -608,21 +613,27 @@ class _NewsFeedCardState extends State<NewsFeedCard>
     required VoidCallback onTap,
     bool active = false,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultIconColor =
+        isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280);
+    final defaultTextColor =
+        isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280);
+
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Row(
         children: [
           Icon(icon,
-              size: 19,
-              color: active ? AppColors.primary : AppColors.textMuted),
+              size: 21,
+              color: active ? AppColors.primary : defaultIconColor),
           const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
-              fontSize: 12.5,
-              color: active ? AppColors.primary : AppColors.textMuted,
-              fontWeight: FontWeight.w500,
+              fontSize: 13.5,
+              color: active ? AppColors.primary : defaultTextColor,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

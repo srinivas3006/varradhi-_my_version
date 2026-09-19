@@ -145,8 +145,16 @@ class AppState extends ChangeNotifier {
         await _secureStorage.delete(key: _installationSecretKey);
       }
     } catch (e) {
-      debugPrint('[AppState] Failed to persist installation secret: $e');
+      debugPrint('[AppState] Failed to persist installation secret in secure storage: $e');
     }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (secret != null && secret.isNotEmpty) {
+        await prefs.setString(_installationSecretKey, secret);
+      } else {
+        await prefs.remove(_installationSecretKey);
+      }
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -164,14 +172,11 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Regenerates a fresh device ID and clears old installation secret.
-  /// Used to recover cleanly when the backend rejects mismatched credentials.
+  /// Preserves the stable device ID. Backend enforces that the same FCM token
+  /// cannot be registered under a new device_id.
   Future<String> regenerateDeviceId() async {
-    final newId =
-        'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
-    await setDeviceId(newId);
-    await setInstallationSecret(null);
-    return newId;
+    debugPrint('[AppState] Preserving stable deviceId: $deviceId');
+    return deviceId;
   }
 
   Future<void> setSessionId(String? id) async {
@@ -189,6 +194,17 @@ class AppState extends ChangeNotifier {
   }
 
   ThemeMode themeMode = ThemeMode.light;
+
+  /// User preferred font size for reading Telugu and article bodies (defaults to 19.0 px).
+  double readingFontSize = 19.0;
+
+  Future<void> setReadingFontSize(double size) async {
+    final clamped = size.clamp(14.0, 26.0);
+    if ((clamped - readingFontSize).abs() < 0.1) return;
+    readingFontSize = clamped;
+    notifyListeners();
+    await _persist();
+  }
 
   List<String> preferredCategories = [];
   bool hasPromptedPreferences = false;
@@ -266,6 +282,7 @@ class AppState extends ChangeNotifier {
     isReporter = prefs.getBool('isReporter') ?? false;
     uploadVerified = prefs.getBool('uploadVerified') ?? false;
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
+    readingFontSize = prefs.getDouble('readingFontSize') ?? 19.0;
 
     // Read deviceId from secure storage first, fallback to shared_preferences
     try {
@@ -279,33 +296,41 @@ class AppState extends ChangeNotifier {
     if (deviceId.isEmpty) {
       deviceId =
           'dev_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecondsSinceEpoch % 100000)}';
-      await prefs.setString('deviceId', deviceId);
+    }
+    // Always ensure deviceId is synced to both storages
+    await prefs.setString('deviceId', deviceId);
+    try {
+      await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+    } catch (_) {}
+
+    // Read installationSecret from secure storage first, fallback to shared_preferences
+    try {
+      installationSecret =
+          await _secureStorage.read(key: _installationSecretKey);
+    } catch (_) {
+      installationSecret = null;
+    }
+    if (installationSecret == null || installationSecret!.isEmpty) {
+      installationSecret = prefs.getString(_installationSecretKey);
+    }
+    if (installationSecret != null && installationSecret!.isNotEmpty) {
+      await prefs.setString(_installationSecretKey, installationSecret!);
       try {
-        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
-      } catch (_) {}
-    } else {
-      await prefs.setString('deviceId', deviceId);
-      try {
-        await _secureStorage.write(key: _deviceIdKey, value: deviceId);
+        await _secureStorage.write(
+            key: _installationSecretKey, value: installationSecret!);
       } catch (_) {}
     }
 
-    // Auth tokens come from secure storage, not shared_preferences.
+    // Auth tokens come from secure storage
     try {
       authToken = await _secureStorage.read(key: _authTokenKey);
       refreshToken = await _secureStorage.read(key: _refreshTokenKey);
-      installationSecret =
-          await _secureStorage.read(key: _installationSecretKey);
       sessionId = await _secureStorage.read(key: _sessionIdKey);
     } catch (e) {
       debugPrint(
-          '[AppState] Secure storage read failed (keystore reset or corrupted): $e');
-      try {
-        await _secureStorage.deleteAll();
-      } catch (_) {}
+          '[AppState] Secure storage auth read failed (keystore reset or corrupted): $e');
       authToken = null;
       refreshToken = null;
-      installationSecret = null;
       sessionId = null;
     }
 
@@ -397,6 +422,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool('locationPrompted', locationPrompted);
     await prefs.setBool('hasValidLocation', hasValidLocation);
     await prefs.setBool('pushNotificationsEnabled', pushNotificationsEnabled);
+    await prefs.setDouble('readingFontSize', readingFontSize);
     // Deliberately no authToken here — see setAuthToken/_clearAuthToken.
   }
 
@@ -886,21 +912,6 @@ class AppState extends ChangeNotifier {
     unawaited(NotificationService.instance.registerAsGuest());
   }
 
-  /// Permanently deletes the user account on the server, then clears the
-  /// local session.
-  ///
-  /// The local session is cleared only on [AccountDeletionResult.deleted].
-  /// Clearing it unconditionally — as this used to — destroyed the auth token
-  /// the retry needs, logging the reader out of an account that still exists
-  /// on the server with no way to try again.
-  Future<AccountDeletionResult> deleteAccount() async {
-    final result = await ApiService.instance.deleteAccount();
-    if (result == AccountDeletionResult.deleted) {
-      await _clearLocalSession();
-      unawaited(NotificationService.instance.registerAsGuest());
-    }
-    return result;
-  }
 
   Future<void> logoutAllDevices() async {
     final tokenToRevoke = await _clearLocalSession();

@@ -15,23 +15,12 @@ import '../models/ad_banner.dart';
 import '../models/reporter_post.dart';
 import '../models/poll.dart';
 import '../models/app_notification.dart';
+import '../models/account_deletion_request.dart';
 import 'dio_client.dart';
 import 'location_service.dart';
 import '../state/app_state.dart';
 import '../core/utils/date_parser.dart';
 import '../core/errors/app_exception.dart';
-
-/// Outcome of an account-deletion attempt.
-///
-/// Only [deleted] means the server account is gone. Everything else leaves it
-/// possibly intact, so the local session must survive for a retry.
-enum AccountDeletionResult {
-  deleted,
-  unauthorized,
-  networkFailure,
-  serverError,
-  unknown,
-}
 
 class ApiService {
   ApiService._internal();
@@ -54,6 +43,20 @@ class ApiService {
     }
   }
 
+
+  String? _extractInstallationSecret(dynamic responseData) {
+    if (responseData is Map<String, dynamic>) {
+      if (responseData['installation_secret'] != null) {
+        return responseData['installation_secret'].toString();
+      }
+      if (responseData['data'] is Map<String, dynamic> &&
+          responseData['data']['installation_secret'] != null) {
+        return responseData['data']['installation_secret'].toString();
+      }
+    }
+    return null;
+  }
+
   // --- Auth ---
   Future<Map<String, dynamic>> login(String email, String password,
       {String? fcmToken}) async {
@@ -71,8 +74,8 @@ class ApiService {
       }
     }
 
-    // 2. Recommended backend flow: If installation_secret is missing,
-    // ensure guest registration is performed first so backend generates and returns installation_secret.
+    // 2. If installation_secret is missing, ensure guest registration is performed first
+    // so backend generates and returns installation_secret before logging in.
     if (AppState.instance.installationSecret == null ||
         AppState.instance.installationSecret!.isEmpty) {
       try {
@@ -88,7 +91,7 @@ class ApiService {
           'password': password,
           'device_id': AppState.instance.deviceId,
           'device_name': 'Mobile Device',
-          'device_type': 'android',
+          'device_type': deviceType,
           'app_version': '1.0.0',
           if (token != null && token.isNotEmpty) 'fcm_token': token,
           if (AppState.instance.installationSecret != null &&
@@ -99,32 +102,38 @@ class ApiService {
     try {
       final response =
           await _dio.post('/api/v1/auth/login/', data: buildPayload());
-      final data = response.data['data'] as Map<String, dynamic>;
-      if (data['installation_secret'] != null) {
-        await AppState.instance
-            .setInstallationSecret(data['installation_secret'].toString());
+      final data = (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data as Map<String, dynamic>);
+      final secret = _extractInstallationSecret(response.data);
+      if (secret != null && secret.isNotEmpty) {
+        await AppState.instance.setInstallationSecret(secret);
       }
       return data;
     } on DioException catch (dioErr) {
+      debugPrint(
+          '[ApiService] Login failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
+
+      // A 403 here means the backend holds an installation_secret for this
+      // device_id that this client no longer has. Without the retry below the
+      // reader is locked out permanently with no way to recover: fresh
+      // device_id, re-register as a guest to obtain a matching secret, retry
+      // once. Restored after the merge dropped it — covered by
+      // "login self-heals on 403" in production_reliability_test.
       final respStr = dioErr.response?.data?.toString() ?? '';
       final isInstallationError = dioErr.response?.statusCode == 403 ||
           respStr.toLowerCase().contains('installation');
 
       if (isInstallationError) {
-        debugPrint(
-            '[ApiService] 403 Installation credential required/mismatched. Regenerating device ID and re-registering guest device...');
-        // The backend expects the installation_secret matching this device_id,
-        // but this client lost or does not have that secret.
-        // As per backend contract: Generate fresh device_id, register guest-device to obtain a new installation_secret, and retry login.
         await AppState.instance.regenerateDeviceId();
         await registerGuestDevice(fcmToken: token);
 
         final retryResponse =
             await _dio.post('/api/v1/auth/login/', data: buildPayload());
-        final data = retryResponse.data['data'] as Map<String, dynamic>;
-        if (data['installation_secret'] != null) {
-          await AppState.instance
-              .setInstallationSecret(data['installation_secret'].toString());
+        final data = (retryResponse.data['data'] as Map<String, dynamic>?) ??
+            (retryResponse.data as Map<String, dynamic>);
+        final secret = _extractInstallationSecret(retryResponse.data);
+        if (secret != null && secret.isNotEmpty) {
+          await AppState.instance.setInstallationSecret(secret);
         }
         return data;
       }
@@ -162,7 +171,7 @@ class ApiService {
           await _dio.post('/api/v1/notifications/guest-device/', data: {
         'device_id': devId,
         'device_name': 'Mobile Device',
-        'device_type': 'android',
+        'device_type': deviceType,
         'app_version': '1.0.0',
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
@@ -188,55 +197,17 @@ class ApiService {
         },
       });
 
-      final data = response.data['data'] as Map<String, dynamic>?;
-      if (data != null && data['installation_secret'] != null) {
-        await AppState.instance
-            .setInstallationSecret(data['installation_secret'].toString());
+      final secretReturned = _extractInstallationSecret(response.data);
+      if (secretReturned != null && secretReturned.isNotEmpty) {
+        await AppState.instance.setInstallationSecret(secretReturned);
       }
-      return data;
+      return (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data is Map<String, dynamic>
+              ? response.data as Map<String, dynamic>
+              : null);
     } on DioException catch (dioErr) {
-      final respStr = dioErr.response?.data?.toString() ?? '';
-      if (dioErr.response?.statusCode == 403 ||
-          respStr.toLowerCase().contains('installation') ||
-          respStr.toLowerCase().contains('upgrade')) {
-        await AppState.instance.setInstallationSecret(null);
-        try {
-          final retryResp =
-              await _dio.post('/api/v1/notifications/guest-device/', data: {
-            'device_id': devId,
-            'device_name': 'Mobile Device',
-            'device_type': 'android',
-            'app_version': '1.0.0',
-            'fcm_token': token,
-            'state': AppState.instance.stateName,
-            'district': AppState.instance.district,
-            'subdistrict': AppState.instance.subdistrict,
-            'village': AppState.instance.village,
-            'country': AppState.instance.country,
-            'preferences': {
-              'enabled': true,
-              'content_language': lang,
-              'articles': true,
-              'posters': true,
-              'quotes': true,
-              'ugc': true,
-              'breaking_news': true,
-              'local_news': true,
-              'quiet_hours_start': '22:00:00',
-              'quiet_hours_end': '06:00:00',
-              'timezone': 'Asia/Kolkata',
-              'max_per_hour': 5,
-              'max_per_day': 25,
-            },
-          });
-          final data = retryResp.data['data'] as Map<String, dynamic>?;
-          if (data != null && data['installation_secret'] != null) {
-            await AppState.instance
-                .setInstallationSecret(data['installation_secret'].toString());
-          }
-          return data;
-        } catch (_) {}
-      }
+      debugPrint(
+          '[ApiService] registerGuestDevice failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
       return null;
     } catch (_) {
       return null;
@@ -295,77 +266,107 @@ class ApiService {
 
   Future<Map<String, dynamic>> register(Map<String, dynamic> data) async {
     final response = await _dio.post('/api/v1/auth/register/', data: data);
-    return response.data['data'] as Map<String, dynamic>;
+    final secret = _extractInstallationSecret(response.data);
+    if (secret != null && secret.isNotEmpty) {
+      await AppState.instance.setInstallationSecret(secret);
+    }
+    return (response.data['data'] as Map<String, dynamic>?) ??
+        (response.data as Map<String, dynamic>);
   }
 
-  /// Initiates account deletion for Play Store compliance.
-  ///
-  /// Returns *why* it ended rather than a bool: the caller has to know
-  /// whether the server account is gone before it destroys the local session,
-  /// and "request failed" is not the same claim as "account still exists".
-  /// Endpoints and their order are unchanged.
-  Future<AccountDeletionResult> deleteAccount() async {
-    AccountDeletionResult worst = AccountDeletionResult.unknown;
+  // --- Account Deletion Flow (Play Store Compliance & Backend Contract) ---
 
-    // Keeps the most informative failure seen so far, so a network error on
-    // the last attempt does not mask a 401 from an earlier one.
-    void record(AccountDeletionResult r) {
-      const rank = {
-        AccountDeletionResult.unknown: 0,
-        AccountDeletionResult.networkFailure: 1,
-        AccountDeletionResult.serverError: 2,
-        AccountDeletionResult.unauthorized: 3,
-      };
-      if ((rank[r] ?? 0) > (rank[worst] ?? 0)) worst = r;
-    }
-
-    Future<AccountDeletionResult?> attempt(
-        Future<Response<dynamic>> Function() send) async {
-      try {
-        final response = await send();
-        final code = response.statusCode ?? 0;
-        if (code == 200 || code == 204) return AccountDeletionResult.deleted;
-        record(_classifyStatus(code));
-        return null;
-      } on DioException catch (e) {
-        final code = e.response?.statusCode;
-        record(code != null
-            ? _classifyStatus(code)
-            : (_isNetworkError(e)
-                ? AccountDeletionResult.networkFailure
-                : AccountDeletionResult.unknown));
-        return null;
-      } catch (_) {
-        record(AccountDeletionResult.unknown);
+  /// 1. Check deletion request status: GET /api/v1/auth/account/deletion-request/
+  /// Returns the user's most recent request. If 404, returns null ("no request").
+  Future<AccountDeletionRequest?> getAccountDeletionRequest() async {
+    try {
+      final response = await _dio.get('/api/v1/auth/account/deletion-request/');
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data['data'] as Map<String, dynamic>?;
+        if (data != null) {
+          return AccountDeletionRequest.fromJson(data);
+        }
+      }
+      return null;
+    } on DioException catch (dioErr) {
+      if (dioErr.response?.statusCode == 404) {
+        // 404 indicates user has never raised a request. Treat as null, not an error.
         return null;
       }
+      debugPrint('[ApiService] getAccountDeletionRequest failed: $dioErr');
+      rethrow;
+    } catch (e) {
+      debugPrint('[ApiService] getAccountDeletionRequest unexpected error: $e');
+      return null;
     }
+  }
 
-    for (final endpoint in const [
-      '/api/v1/auth/delete-account/',
-      '/api/v1/auth/me/',
-    ]) {
-      final r = await attempt(() => _dio.delete(endpoint));
-      if (r == AccountDeletionResult.deleted) {
-        return AccountDeletionResult.deleted;
+  /// 2. Raise a deletion request: POST /api/v1/auth/account/deletion-request/
+  Future<AccountDeletionRequest> requestAccountDeletion({
+    String reason = 'other',
+    String? notes,
+    bool confirm = true,
+  }) async {
+    try {
+      final response = await _dio.post(
+        '/api/v1/auth/account/deletion-request/',
+        data: {
+          'reason': reason,
+          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+          'confirm': confirm,
+        },
+      );
+      final data = (response.data['data'] as Map<String, dynamic>?) ??
+          (response.data as Map<String, dynamic>);
+      return AccountDeletionRequest.fromJson(data);
+    } on DioException catch (dioErr) {
+      final errData = dioErr.response?.data;
+      String message = 'ఖాతా తొలగింపు అభ్యర్థన సమర్పించడం విఫలమైంది.';
+      if (errData is Map<String, dynamic>) {
+        final errors = errData['errors'];
+        if (errors is Map<String, dynamic>) {
+          if (errors['message'] != null) {
+            message = errors['message'].toString();
+          } else if (errors['details'] is Map) {
+            final details = errors['details'] as Map;
+            if (details['detail'] != null) {
+              message = details['detail'].toString();
+            }
+          }
+        }
       }
+      throw ApiException(message, dioErr.response?.statusCode);
     }
-
-    final r = await attempt(() => _dio.post('/api/v1/auth/account/delete/'));
-    return r ?? worst;
   }
 
-  static AccountDeletionResult _classifyStatus(int code) {
-    if (code == 401 || code == 403) return AccountDeletionResult.unauthorized;
-    if (code >= 500) return AccountDeletionResult.serverError;
-    return AccountDeletionResult.unknown;
+  /// 3. Cancel a pending deletion request: DELETE /api/v1/auth/account/deletion-request/
+  Future<bool> cancelAccountDeletionRequest() async {
+    try {
+      final response =
+          await _dio.delete('/api/v1/auth/account/deletion-request/');
+      return response.statusCode == 200 || response.statusCode == 204;
+    } on DioException catch (dioErr) {
+      final errData = dioErr.response?.data;
+      String message = 'అభ్యర్థన రద్దు చేయడం విఫలమైంది.';
+      if (errData is Map<String, dynamic> && errData['errors'] is Map) {
+        final errors = errData['errors'] as Map;
+        if (errors['message'] != null) {
+          message = errors['message'].toString();
+        }
+      }
+      throw ApiException(message, dioErr.response?.statusCode);
+    }
   }
 
-  static bool _isNetworkError(DioException e) =>
-      e.type == DioExceptionType.connectionError ||
-      e.type == DioExceptionType.connectionTimeout ||
-      e.type == DioExceptionType.sendTimeout ||
-      e.type == DioExceptionType.receiveTimeout;
+  /// Backwards compatibility stub: attempts requestAccountDeletion
+  Future<bool> deleteAccount() async {
+    try {
+      await requestAccountDeletion(confirm: true);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     final response = await _dio.post('/api/v1/auth/token/refresh/', data: {
