@@ -239,8 +239,7 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
         params: const YoutubePlayerParams(
           mute: false,
           showFullscreenButton: true,
-          origin: 'https://www.youtube.com',
-          privacyEnhancedMode: false,
+          privacyEnhancedMode: true,
         ),
       );
     }

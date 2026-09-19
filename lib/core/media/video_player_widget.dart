@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import '../../theme/app_theme.dart';
 import 'network_video_playback_controller.dart';
 import 'video_playback_controller.dart';
 import 'youtube_playback_controller.dart';
@@ -37,6 +39,8 @@ class VideoPlayerWidget extends StatefulWidget {
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   bool _controlsVisible = true;
   Timer? _hideTimer;
+  bool _useInAppWebPlayer = false;
+  WebViewController? _webViewController;
 
   @override
   void initState() {
@@ -48,6 +52,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   void dispose() {
     _hideTimer?.cancel();
     super.dispose();
+  }
+
+  void _playInAppYouTube() {
+    final videoId = widget.controller.source.youtubeVideoId;
+    if (videoId == null || videoId.isEmpty) return;
+
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..loadRequest(
+        Uri.parse(
+            'https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1'),
+      );
+
+    setState(() {
+      _useInAppWebPlayer = true;
+      _webViewController = controller;
+    });
   }
 
   void _startAutoHideTimer() {
@@ -369,21 +391,21 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                           runSpacing: 10,
                           alignment: WrapAlignment.center,
                           children: [
-                            ElevatedButton.icon(
-                              onPressed: widget.onRetry ??
-                                  () => widget.controller.initialize(),
-                              icon: const Icon(Icons.refresh_rounded, size: 16),
-                              label: const Text('మళ్ళీ ప్రయత్నించండి'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white24,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 8),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20)),
+                            if (widget.controller.source.isYouTube) ...[
+                              ElevatedButton.icon(
+                                onPressed: _playInAppYouTube,
+                                icon: const Icon(Icons.play_circle_fill_rounded,
+                                    size: 18),
+                                label: const Text('యాప్‌లోనే ప్లే చేయండి'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 9),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20)),
+                                ),
                               ),
-                            ),
-                            if (widget.controller.source.isYouTube)
                               ElevatedButton.icon(
                                 onPressed: () =>
                                     _openYouTubeExternal(widget.controller),
@@ -399,6 +421,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                                       borderRadius: BorderRadius.circular(20)),
                                 ),
                               ),
+                            ],
+                            ElevatedButton.icon(
+                              onPressed: widget.onRetry ??
+                                  () {
+                                    setState(() => _useInAppWebPlayer = false);
+                                    widget.controller.initialize();
+                                  },
+                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                              label: const Text('మళ్ళీ ప్రయత్నించండి'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white24,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20)),
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -414,6 +454,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   Widget _buildActivePlayerSurface(
       BuildContext context, VideoPlaybackState state) {
+    if (_useInAppWebPlayer && _webViewController != null) {
+      return Center(
+        child: AspectRatio(
+          aspectRatio: widget.controller.source.isShort ? 9 / 16 : 16 / 9,
+          child: WebViewWidget(controller: _webViewController!),
+        ),
+      );
+    }
+
     if (widget.controller is YouTubePlaybackController) {
       final ytCtrl =
           (widget.controller as YouTubePlaybackController).rawController;
