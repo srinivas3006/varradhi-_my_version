@@ -53,11 +53,15 @@ class AppTheme {
     final base = ThemeData.light();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
+      primaryColor: AppColors.primary,
       scaffoldBackgroundColor: AppColors.background,
       colorScheme: base.colorScheme.copyWith(
         primary: AppColors.primary,
         secondary: AppColors.primary,
         surface: Colors.white,
+        surfaceContainerHighest: const Color(0xFFF3F4F6),
+        onSurface: AppColors.textDark,
+        onSurfaceVariant: const Color(0xFF6B7280),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.white,
@@ -77,13 +81,16 @@ class AppTheme {
     final base = ThemeData.dark();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
+      primaryColor: AppColors.primary,
       scaffoldBackgroundColor: AppColors.backgroundDark,
       colorScheme: base.colorScheme.copyWith(
         brightness: Brightness.dark,
         primary: AppColors.primary,
         secondary: AppColors.brandBlue,
         surface: AppColors.cardDarkNavy,
+        surfaceContainerHighest: AppColors.surfaceElevatedDark,
         onSurface: AppColors.textLight,
+        onSurfaceVariant: AppColors.readingMetaDark,
         onPrimary: Colors.white,
         error: AppColors.error,
       ),
