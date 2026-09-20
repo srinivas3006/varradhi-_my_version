@@ -28,10 +28,37 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   @override
   void initState() {
     super.initState();
+    AppState.instance.addListener(_onAppStateChanged);
     if (AppState.instance.isLoggedIn) {
       _fetchBookmarks();
     } else {
       _isLoading = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_onAppStateChanged);
+    super.dispose();
+  }
+
+  void _onAppStateChanged() {
+    if (!mounted) return;
+    if (AppState.instance.isLoggedIn) {
+      if (_bookmarks.isEmpty && !_isLoading) {
+        _fetchBookmarks();
+      } else {
+        setState(() {});
+      }
+    } else {
+      if (_bookmarks.isNotEmpty) {
+        setState(() {
+          _bookmarks = [];
+          _isLoading = false;
+        });
+      } else {
+        setState(() {});
+      }
     }
   }
 
@@ -48,9 +75,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
       final bookmarks = await ApiService.instance.getBookmarks();
       if (mounted && generation == _generation) {
         for (final article in bookmarks) {
-          if (!_removing.contains(article.id) &&
-              !AppState.instance.isBookmarked(article.id)) {
-            AppState.instance.toggleBookmark(article.id);
+          if (!_removing.contains(article.id)) {
+            AppState.instance.setBookmarked(article.id, true);
           }
         }
         setState(() {

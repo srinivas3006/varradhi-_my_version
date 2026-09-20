@@ -1172,71 +1172,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               ? AppColors.readingMetaDark
                                               : const Color(0xFF6B7280)),
                                       label: '',
-                                      onTap: () async {
-                                        if (_bookmarkInFlight) return;
-                                        _bookmarkInFlight = true;
-                                        HapticFeedback.lightImpact();
-
-                                        final messenger =
-                                            ScaffoldMessenger.of(context);
-                                        final telugu =
-                                            AppState.instance.language ==
-                                                'Telugu';
-                                        final nowSaved = !isSaved;
-
-                                        // Optimistic: flip both the model
-                                        // field and the local set so they
-                                        // cannot disagree.
-                                        AppState.instance
-                                            .toggleBookmark(targetId);
-                                        setState(() =>
-                                            article.isBookmarked = nowSaved);
-
-                                        var failed = false;
-                                        if (AppState.instance.isLoggedIn) {
-                                          try {
-                                            await ApiService.instance
-                                                .toggleBookmark(targetId);
-                                          } catch (e) {
-                                            // Roll back rather than claim a
-                                            // save the server never made.
-                                            // Swallowing this left the icon
-                                            // filled and the bookmark absent
-                                            // on the next feed load.
-                                            debugPrint(
-                                                '[SpotlightNewsCard] Bookmark sync failed: $e');
-                                            failed = true;
-                                            AppState.instance
-                                                .toggleBookmark(targetId);
-                                            if (mounted) {
-                                              setState(() => article
-                                                  .isBookmarked = !nowSaved);
-                                            }
-                                          }
-                                        }
-                                        _bookmarkInFlight = false;
-                                        if (!mounted) return;
-
-                                        messenger.removeCurrentSnackBar();
-                                        messenger.showSnackBar(
-                                          SnackBar(
-                                            content: Text(failed
-                                                ? (telugu
-                                                    ? 'బుక్‌మార్క్ సేవ్ చేయలేకపోయాము.'
-                                                    : 'Could not save the bookmark.')
-                                                : nowSaved
-                                                    ? (telugu
-                                                        ? 'వార్త సేవ్ చేయబడింది'
-                                                        : 'Article saved to bookmarks')
-                                                    : (telugu
-                                                        ? 'బుక్‌మార్క్ తీసివేయబడింది'
-                                                        : 'Bookmark removed')),
-                                            duration: const Duration(
-                                                milliseconds: 1400),
-                                            behavior: SnackBarBehavior.floating,
-                                          ),
-                                        );
-                                      },
+                                      onTap: () => _handleBookmarkTap(
+                                        targetId: targetId,
+                                        isSaved: isSaved,
+                                        article: article,
+                                      ),
                                     );
                                   },
                                 ),
@@ -1252,6 +1192,97 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _handleBookmarkTap({
+    required String targetId,
+    required bool isSaved,
+    required NewsArticle article,
+  }) {
+    if (_bookmarkInFlight) return;
+    if (!AppState.instance.isLoggedIn) {
+      requireAuth(context, () {
+        if (!mounted) return;
+        _executeBookmarkToggle(
+          targetId: targetId,
+          currentSaved: isSaved,
+          article: article,
+        );
+      });
+      return;
+    }
+    _executeBookmarkToggle(
+      targetId: targetId,
+      currentSaved: isSaved,
+      article: article,
+    );
+  }
+
+  Future<void> _executeBookmarkToggle({
+    required String targetId,
+    required bool currentSaved,
+    required NewsArticle article,
+  }) async {
+    if (_bookmarkInFlight) return;
+    _bookmarkInFlight = true;
+    HapticFeedback.lightImpact();
+
+    final messenger = ScaffoldMessenger.of(context);
+    final telugu = AppState.instance.language == 'Telugu';
+    final nowSaved = !currentSaved;
+
+    // Optimistic: flip both the model field and the local set so they cannot disagree.
+    AppState.instance.setBookmarked(targetId, nowSaved);
+    if (widget.article.id.isNotEmpty && widget.article.id != targetId) {
+      AppState.instance.setBookmarked(widget.article.id, nowSaved);
+    }
+    if (mounted) {
+      setState(() => article.isBookmarked = nowSaved);
+    }
+
+    var failed = false;
+    try {
+      final success = await ApiService.instance.toggleBookmark(targetId);
+      if (!success) {
+        failed = true;
+      }
+    } catch (e) {
+      debugPrint('[SpotlightNewsCard] Bookmark sync failed: $e');
+      failed = true;
+    }
+
+    if (failed) {
+      // Roll back rather than claim a save the server never made.
+      AppState.instance.setBookmarked(targetId, currentSaved);
+      if (widget.article.id.isNotEmpty && widget.article.id != targetId) {
+        AppState.instance.setBookmarked(widget.article.id, currentSaved);
+      }
+      if (mounted) {
+        setState(() => article.isBookmarked = currentSaved);
+      }
+    }
+
+    _bookmarkInFlight = false;
+    if (!mounted) return;
+
+    messenger.removeCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(failed
+            ? (telugu
+                ? 'బుక్‌మార్క్ సేవ్ చేయలేకపోయాము.'
+                : 'Could not save the bookmark.')
+            : nowSaved
+                ? (telugu
+                    ? 'వార్త సేవ్ చేయబడింది'
+                    : 'Article saved to bookmarks')
+                : (telugu
+                    ? 'బుక్‌మార్క్ తీసివేయబడింది'
+                    : 'Bookmark removed')),
+        duration: const Duration(milliseconds: 1400),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

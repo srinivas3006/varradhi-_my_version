@@ -153,9 +153,9 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     icon: Icons.bookmark_border_rounded,
                     title: tr('saved_articles'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () => _handleGatedAction(state, () {
+                    onTap: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const BookmarksScreen()));
-                    }),
+                    },
                   ),
                   _buildListTile(
                     isDark: isDark,

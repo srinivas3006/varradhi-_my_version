@@ -1416,24 +1416,93 @@ class ApiService {
         'page_size': 20,
         if (cursor != null) 'cursor': cursor,
       });
-      final parsed =
-          ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-        return (json as List? ?? []).map((item) {
-          final map = Map<String, dynamic>.from(item as Map);
-          final nested = map['article'];
-          return NewsArticle.fromJson(
-              nested is Map<String, dynamic> ? nested : map);
-        }).toList();
-      });
-      if (parsed.hasErrors) {
-        throw ApiException(
-            parsed.errorMessage ?? 'Unable to load saved articles.');
+
+      final rawData = response.data;
+      if (rawData is Map) {
+        final rawMap = Map<String, dynamic>.from(rawData);
+        if (rawMap['errors'] != null && rawMap['errors'] != false) {
+          final parsedError = ApiResponse.fromJson(rawMap, (j) => j);
+          if (parsedError.hasErrors) {
+            throw ApiException(
+                parsedError.errorMessage ?? 'Unable to load saved articles.');
+          }
+        }
       }
-      articles
-          .addAll((parsed.data ?? []).where((article) => seen.add(article.id)));
-      cursor = parsed.nextCursor;
+
+      final items = _extractBookmarkList(rawData);
+      for (final item in items) {
+        final article = _parseBookmarkItem(item);
+        final key = article.id.isNotEmpty ? article.id : article.slug;
+        if (key.isNotEmpty && seen.add(key)) {
+          articles.add(article);
+        }
+      }
+
+      cursor = _extractBookmarkNextCursor(rawData);
     } while (cursor != null && cursor.isNotEmpty && visited.add(cursor));
     return articles;
+  }
+
+  static List<dynamic> _extractBookmarkList(dynamic rawData) {
+    if (rawData is List) return rawData;
+    if (rawData is Map) {
+      final map = Map<String, dynamic>.from(rawData);
+      final dataField = map['data'];
+      if (dataField is List) return dataField;
+      if (dataField is Map) {
+        final dataMap = Map<String, dynamic>.from(dataField);
+        if (dataMap['results'] is List) return dataMap['results'] as List;
+        if (dataMap['items'] is List) return dataMap['items'] as List;
+        if (dataMap['articles'] is List) return dataMap['articles'] as List;
+      }
+      if (map['results'] is List) return map['results'] as List;
+      if (map['items'] is List) return map['items'] as List;
+      if (map['articles'] is List) return map['articles'] as List;
+    }
+    return const [];
+  }
+
+  static NewsArticle _parseBookmarkItem(dynamic item) {
+    if (item is! Map) {
+      return NewsArticle.fromJson(const {});
+    }
+    final map = Map<String, dynamic>.from(item);
+    final nested = map['article'];
+    Map<String, dynamic> articleData;
+    if (nested is Map) {
+      articleData = Map<String, dynamic>.from(nested);
+      if ((articleData['id'] == null ||
+              articleData['id'].toString().isEmpty) &&
+          map['article_id'] != null) {
+        articleData['id'] = map['article_id'];
+      }
+    } else {
+      articleData = Map<String, dynamic>.from(map);
+    }
+    articleData['is_bookmarked'] = true;
+    articleData['is_bookmarked_by_user'] = true;
+    return NewsArticle.fromJson(articleData);
+  }
+
+  static String? _extractBookmarkNextCursor(dynamic rawData) {
+    if (rawData is! Map) return null;
+    final map = Map<String, dynamic>.from(rawData);
+    String? next;
+    final meta = map['meta'];
+    if (meta is Map) {
+      next = meta['next']?.toString() ?? meta['cursor']?.toString();
+    }
+    next ??= map['next']?.toString();
+    if (map['data'] is Map) {
+      final dataMap = Map<String, dynamic>.from(map['data'] as Map);
+      next ??= dataMap['next']?.toString();
+    }
+    if (next == null || next.trim().isEmpty) return null;
+    final uri = Uri.tryParse(next.trim());
+    if (uri != null && uri.queryParameters.containsKey('cursor')) {
+      return uri.queryParameters['cursor'];
+    }
+    return next.trim();
   }
 
   Future<void> addBookmark(String articleId) async {
@@ -1443,7 +1512,16 @@ class ApiService {
   Future<bool> toggleBookmark(String articleId) async {
     final response = await _dio
         .post('/api/v1/bookmarks/toggle/', data: {'article_id': articleId});
-    return response.statusCode == 200 || response.statusCode == 201;
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      return false;
+    }
+    if (response.data is Map) {
+      final map = response.data as Map;
+      if (map['errors'] != null && map['errors'] != false) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> removeBookmark(String bookmarkId) async {
