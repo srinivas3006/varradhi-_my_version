@@ -17,6 +17,7 @@ import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
 import '../widgets/watermark/article_watermark_overlay.dart';
 import 'comments_screen.dart';
+import '../widgets/watermark/watermark_banner.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
@@ -188,8 +189,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-  Future<void> _toggleLike() => _toggleReaction('like');
-  Future<void> _toggleDislike() => _toggleReaction('dislike');
 
   String _formatCount(int count) {
     if (count <= 0) return '';
@@ -345,14 +344,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBgColor = isDark ? AppColors.cardDarkNavy : Colors.white;
-    final titleColor =
-        isDark ? AppColors.readingTitleDark : AppColors.readingTitleLight;
     final bodyColor =
         isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
     final mutedTextColor =
         isDark ? AppColors.readingMetaDark : AppColors.readingMetaLight;
 
-    return Scaffold(
+    return MediaQuery.withClampedTextScaling(
+      minScaleFactor: 1.0,
+      maxScaleFactor: _clampedTextScale(context),
+      child: Scaffold(
       backgroundColor: isDark ? AppColors.backgroundDark : const Color(0xFFF8FAFC),
       body: Stack(
         children: [
@@ -542,26 +542,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           );
                         },
                       ),
-                    GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        _share();
-                      },
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              width: 1),
-                        ),
-                        child: const Icon(Icons.share_rounded,
-                            color: Colors.white, size: 18),
-                      ),
-                    ),
-                  ],
+],
                 ),
               ],
             ),
@@ -723,31 +704,18 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                           const Spacer(),
 
-                          // Orange Highlighted Share Button (Right Header)
-                          GestureDetector(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              _share();
-                            },
-                            child: Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: AppColors.primary
-                                        .withValues(alpha: 0.3),
-                                    width: 1),
-                              ),
-                              child: const Icon(Icons.share_rounded,
-                                  color: AppColors.primary, size: 20),
-                            ),
-                          ),
+                          // Share lives in the engagement bar below. This
+                          // screen had three of them — here, over the hero
+                          // image, and in the bar — all calling _share().
                         ],
                       ),
 
                       const SizedBox(height: 18),
+
+                      // Masthead band on the seam between the hero media
+                      // and the story, matching the spotlight card.
+                      const WatermarkBanner(height: 28),
+                      const SizedBox(height: 10),
 
                       // Main Article Title (Headline)
                       Text(
@@ -903,9 +871,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       if (!_isUgc) ...[
                         _buildReactionSection(isDark),
                         const SizedBox(height: 16),
-                        const BannerAdSlot(placementZone: 'article'),
-                        const SizedBox(height: 32),
                       ],
+
+                      // Ad slot runs for UGC too. It was inside the !_isUgc
+                      // block, so community posts never carried one — the
+                      // reaction bar and the ad are unrelated decisions.
+                      const BannerAdSlot(placementZone: 'article'),
+                      const SizedBox(height: 32),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -915,8 +887,17 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           ),
         ],
       ),
+      ),
     );
   }
+
+  /// Caps runaway system text scaling, as the spotlight card does.
+  ///
+  /// This screen lays out its chrome — meta row, engagement bar, buttons — at
+  /// fixed sizes, so Android's accessibility scale multiplied all of them and
+  /// overflowed the row on smaller devices.
+  double _clampedTextScale(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
 
   Widget _buildReactionSection(bool isDark) {
     final targetId = article.id.isNotEmpty ? article.id : article.slug;

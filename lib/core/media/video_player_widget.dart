@@ -137,8 +137,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // 1. Ambient Background / Thumbnail
-              if (widget.controller.source.thumbnailUrl.isNotEmpty)
+              // 1. Poster frame, shown only until the player surface is up.
+              //
+              // It used to stay behind the player for the whole session as an
+              // "ambient background". The player letterboxes inside a slot
+              // that is not 16:9, so the thumbnail showed through those bands
+              // while the video was playing — two pictures at once. Black
+              // behind the player is what a letterbox should be.
+              if (!state.isInitialized &&
+                  widget.controller.source.thumbnailUrl.isNotEmpty)
                 CachedNetworkImage(
                   imageUrl: widget.controller.source.thumbnailUrl,
                   fit: widget.fit,
@@ -454,11 +461,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   Widget _buildActivePlayerSurface(
       BuildContext context, VideoPlaybackState state) {
+    final playerAspect =
+        widget.controller.source.isShort ? 9 / 16 : 16 / 9;
+
     if (_useInAppWebPlayer && _webViewController != null) {
-      return Center(
-        child: AspectRatio(
-          aspectRatio: widget.controller.source.isShort ? 9 / 16 : 16 / 9,
-          child: WebViewWidget(controller: _webViewController!),
+      // Clipped: a WebView sizes itself from its content and will paint
+      // outside the slot otherwise.
+      return ClipRect(
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: playerAspect,
+            child: WebViewWidget(controller: _webViewController!),
+          ),
         ),
       );
     }
@@ -467,12 +481,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       final ytCtrl =
           (widget.controller as YouTubePlaybackController).rawController;
       if (ytCtrl != null) {
-        return Center(
-          child: AspectRatio(
-            aspectRatio: widget.controller.source.isShort ? 9 / 16 : 16 / 9,
+        // One aspect authority, not two. YoutubePlayer applies its own
+        // AspectRatio internally, so wrapping it in another let the inner one
+        // compute a size the slot could not hold — the player spilled past
+        // the media area and over the chrome above it.
+        //
+        // ClipRect is the backstop: whatever the embedded surface decides,
+        // it cannot paint outside its box.
+        return ClipRect(
+          child: Center(
             child: YoutubePlayer(
               controller: ytCtrl,
-              aspectRatio: widget.controller.source.isShort ? 9 / 16 : 16 / 9,
+              aspectRatio: playerAspect,
+              // This card sits inside a vertical PageView. Fullscreen-on-
+              // vertical-drag would compete with the feed's own swipe, so
+              // the reader gets the explicit fullscreen button instead.
+              enableFullScreenOnVerticalDrag: false,
+              autoFullScreen: false,
             ),
           ),
         );

@@ -207,10 +207,18 @@ class NewsArticle {
           'Vaaradhi',
       category: parsedCategory,
       publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
-      likes: _toInt(json['likes_count'] ?? json['likes']),
-      dislikes: _toInt(json['dislike_count'] ?? json['dislikes_count'] ?? json['dislikes']),
-      comments: _toInt(json['comments_count'] ?? json['comments']),
-      shares: _toInt(json['shares_count'] ?? json['shares']),
+      // The backend sends singular *_count names: like_count, dislike_count,
+      // comment_count. Only dislike_count was listed, so likes and comments
+      // fell through to plural keys that never arrive and rendered 0 no
+      // matter what the article actually had. Plural spellings kept as
+      // fallbacks in case an older endpoint still uses them.
+      likes: _toInt(json['like_count'] ?? json['likes_count'] ?? json['likes']),
+      dislikes: _toInt(
+          json['dislike_count'] ?? json['dislikes_count'] ?? json['dislikes']),
+      comments: _toInt(
+          json['comment_count'] ?? json['comments_count'] ?? json['comments']),
+      shares: _toInt(
+          json['share_count'] ?? json['shares_count'] ?? json['shares']),
       readTimeMinutes: _toInt(json['read_time_minutes'], 2),
       viewCount: _toInt(json['view_count'] ?? json['views_count']),
       state: json['state']?.toString(),

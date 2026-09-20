@@ -109,4 +109,49 @@ void main() {
       }
     });
   });
+
+  group('App Links from the public site route to content, not Home', () {
+    // The resolver only knew varadhi:// — a tapped https share link resolved
+    // to unknown and the reader landed on Home.
+    NotificationTarget resolve(String url) =>
+        NotificationDeepLinkResolver.resolveFromUri(url);
+
+    test('an article link resolves by slug', () {
+      final t = resolve('https://vaaradhinews.com/article/telangana-story/');
+      expect(t.type, NotificationTargetType.article);
+      expect(t.identifier, 'telangana-story');
+      expect(t.requiresAuth, isFalse, reason: 'guests must reach it');
+    });
+
+    test('the trailing slash does not swallow the identifier', () {
+      expect(resolve('https://vaaradhinews.com/poster/abc-123/').identifier,
+          'abc-123');
+    });
+
+    test('www is accepted too', () {
+      expect(resolve('https://www.vaaradhinews.com/article/s/').type,
+          NotificationTargetType.article);
+    });
+
+    test('ugc resolves to its own destination', () {
+      final t = resolve('https://vaaradhinews.com/ugc/sub-1/');
+      expect(t.type, NotificationTargetType.ugc);
+      expect(t.identifier, 'sub-1');
+    });
+
+    test('a video link opens the story carrying it', () {
+      expect(resolve('https://vaaradhinews.com/video/v1/').type,
+          NotificationTargetType.article);
+    });
+
+    test('an unrelated host is not hijacked', () {
+      expect(resolve('https://example.com/article/x/').type,
+          NotificationTargetType.unknown);
+    });
+
+    test('the bare site root has nothing to route to', () {
+      expect(resolve('https://vaaradhinews.com/').type,
+          NotificationTargetType.unknown);
+    });
+  });
 }

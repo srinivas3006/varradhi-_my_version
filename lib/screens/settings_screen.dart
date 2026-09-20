@@ -9,6 +9,7 @@ import 'notification_settings_screen.dart';
 import 'cms_page_screen.dart';
 import 'account_deletion_screen.dart';
 import 'package:dio/dio.dart';
+import 'bookmarks_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -182,6 +183,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     const Divider(height: 1),
+
+                    // Saved articles. Reachable only from the Profile tab
+                    // and a notification deep link before this — there was
+                    // no way into it from Settings at all.
+                    if (state.isLoggedIn) ...[
+                      ListTile(
+                        leading: const Icon(Icons.bookmark_rounded,
+                            color: AppColors.primary),
+                        title: Text(
+                          state.language == 'Telugu'
+                              ? 'సేవ్ చేసిన వార్తలు'
+                              : 'Saved Articles',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87),
+                        ),
+                        subtitle: Text(
+                          state.language == 'Telugu'
+                              ? 'మీరు బుక్‌మార్క్ చేసిన వార్తలు'
+                              : 'Articles you bookmarked',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                        trailing: const Icon(Icons.arrow_forward_ios_rounded,
+                            size: 16),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const BookmarksScreen()),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                    ],
 
                     // App Language
                     ListTile(

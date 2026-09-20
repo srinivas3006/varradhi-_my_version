@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/poll.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../services/sharing/share_content_builder.dart';
+import 'sharing/share_sheet.dart';
 
 class PollCard extends StatefulWidget {
   final Poll poll;
@@ -132,14 +134,39 @@ class _PollCardState extends State<PollCard> {
             ],
           ),
           const SizedBox(height: 14),
-          Text(
-            poll.question,
-            style: TextStyle(
-              fontSize: 16.5,
-              fontWeight: FontWeight.w700,
-              color: textColor,
-              height: 1.3,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  poll.question,
+                  style: TextStyle(
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              // Shares the question and how to vote. Only public poll data
+              // travels — never voter identity or tallies beyond what the
+              // card already shows.
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: Icon(Icons.share_rounded,
+                    size: 18, color: textColor.withValues(alpha: 0.6)),
+                tooltip: 'Share poll',
+                onPressed: () => ShareSheet.show(
+                  context,
+                  ShareContentBuilder.fromPoll(
+                    id: poll.id,
+                    question: poll.question,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           ...List.generate(poll.options.length, (index) {

@@ -131,4 +131,42 @@ void main() {
       expect(strip, contains('VideoPlayerScreen('));
     });
   });
+
+  group('the Video tab presents Shorts in their own shape', () {
+    final tab = File('lib/screens/video_tab.dart').readAsStringSync();
+    final code = tab
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('tiles are laid out in a grid, not a wide list', () {
+      // The list card was landscape, so every 9:16 Short rendered with black
+      // bars down both sides.
+      expect(code, contains('SliverGrid'));
+      expect(code, contains('crossAxisCount: 2'));
+      expect(code, isNot(contains('SliverList.builder')));
+    });
+
+    test('the tile is portrait', () {
+      expect(code, contains('childAspectRatio: 9 / 19.5'));
+    });
+
+    test('thumbnails cover the tile rather than letterboxing', () {
+      final tile = code.substring(code.indexOf('class _ShortTile'));
+      expect(tile, contains('fit: BoxFit.cover'));
+    });
+
+    test('the superseded wide card is gone, not just unused', () {
+      expect(code, isNot(contains('class _VideoListCard')));
+    });
+
+    test('tapping a tile still opens the vertical viewer', () {
+      expect(code, contains('ShortsViewerScreen('));
+    });
+
+    test('pagination still has a loading footer', () {
+      expect(code, contains('if (_hasMore)'));
+      expect(code, contains('CircularProgressIndicator'));
+    });
+  });
 }

@@ -49,8 +49,15 @@ class YouTubePlaybackController extends VideoPlaybackController {
           enableCaption: false,
           enableJavaScript: true,
           playsInline: true,
-          privacyEnhancedMode: false,
-          origin: 'https://www.youtube.com',
+          // youtube-nocookie.com, and no explicit origin.
+          //
+          // This is 1aff663's fix, which a later merge reverted back to
+          // privacyEnhancedMode: false plus origin: youtube.com. The package
+          // uses `origin` as the WebView's baseUrl, and pinning it to
+          // youtube.com while the page has no real web origin breaks the
+          // iframe's postMessage handshake: the player loads, never reports
+          // ready, and nothing plays.
+          privacyEnhancedMode: true,
           strictRelatedVideos: false,
         ),
       );

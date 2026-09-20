@@ -16,6 +16,7 @@ import '../news_article_video_player.dart';
 import '../article_media_carousel.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
 import '../watermark/article_watermark_overlay.dart';
+import '../watermark/watermark_banner.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
   final NewsArticle article;
@@ -204,12 +205,32 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
-    // 16:10 aspect ratio bounded to approximately 38%–40% of viewport height
-    final target16x10Height = screenWidth / (16 / 10);
-    final mediaHeight = target16x10Height.clamp(
-      screenHeight * 0.38,
-      screenHeight * 0.40,
-    );
+
+    // The card's chrome — headline, meta row, action bar — is laid out at
+    // fixed sizes against a measured height budget. Android's accessibility
+    // scale multiplies every one of those without the budget being
+    // recomputed, so at 150% the headline and meta row overflow before the
+    // body is even measured.
+    //
+    // Capped rather than ignored: scaling up to 1.3x still reaches the
+    // reader, and the body size derived below already grows with the room
+    // available, so large-text users are not left with phone-sized copy.
+    final requestedScale =
+        MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
+    // One fixed aspect, so the same photo is cropped identically on every
+    // device. The previous rule asked for 16:10 and then clamped it to
+    // 38–40% of viewport height — and the clamp won on every phone, so the
+    // image ran from 1.48:1 on a compact screen down to 0.88:1 on a tall
+    // one. It was never 16:10 anywhere except a tablet.
+    //
+    // Height now follows width. A taller screen gets no more image; it gets
+    // more room for the story, which the body below turns into larger type
+    // rather than more lines.
+    const mediaAspect = 16 / 10;
+    final mediaHeight = (screenWidth / mediaAspect)
+        // Still bounded, but only to stop a very wide screen handing the
+        // image half the card.
+        .clamp(0.0, screenHeight * 0.45);
 
     // Always fully painted. The feed is a FlipPageView now, which owns the
     // transition and passes no drag values — deriving opacity from them left
@@ -222,7 +243,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final headlineOffset = widget.dragDelta * 1.0;
     final bodyOffset = widget.dragDelta * 0.85;
 
-    return GestureDetector(
+    return MediaQuery.withClampedTextScaling(
+      minScaleFactor: 1.0,
+      maxScaleFactor: requestedScale,
+      child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onTap,
       child: Container(
@@ -235,7 +259,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
               left: 0,
               right: 0,
               height: mediaHeight,
-              child: RepaintBoundary(
+              // Clipped to the media slot. A Transform paints outside its
+              // bounds, and an embedded player sizes itself from its own
+              // content — without this, either can spill over the chrome
+              // above the card.
+              child: ClipRect(
+                child: RepaintBoundary(
                 child: Transform.translate(
                   offset: Offset(
                       0, widget.dragDelta * 0.5), // Subtle image parallax
@@ -384,6 +413,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                   ),
                 ),
               ),
+              ),
             ),
 
             // 2. CONTENT ZONE (Overlaps image slightly)
@@ -396,6 +426,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Masthead band, sitting on the seam between the media
+                      // and the story.
+                      const WatermarkBanner(height: 26),
+
                       // Meta Row: Audio/Listen + Time (Utility)
                       Transform.translate(
                         offset: Offset(0, bodyOffset),
@@ -746,18 +780,46 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                             return LayoutBuilder(
                               builder: (context, constraints) {
-                                final effectiveFontSize =
+                                // Type scales with the room available, so
+                                // the story is not set at phone size on a
+                                // tablet. A fixed 16pt looked cramped on a
+                                // compact screen and undersized on a tall
+                                // one.
+                                //
+                                // It scales gently and stops: holding the
+                                // line count itself constant across a
+                                // 640–1080px range would need 44pt body text
+                                // on the tallest device, so taller screens
+                                // still show somewhat more text — they just
+                                // show it at a readable size.
+                                const double bodyLineHeight = 1.65;
+                                const double referenceBody = 214.0; // compact
+                                const double referenceFont = 15.0;
+
+                                final fitted = referenceFont *
+                                    (constraints.maxHeight / referenceBody)
+                                        .clamp(1.0, 1.30);
+
+                                // The reader's own size setting stays a
+                                // preference, applied as a ratio around the
+                                // 19pt default rather than an absolute.
+                                final preference =
                                     AppState.instance.readingFontSize > 0
-                                        ? (AppState.instance.readingFontSize *
-                                            (16.0 / 19.0))
-                                        : 16.0;
+                                        ? AppState.instance.readingFontSize /
+                                            19.0
+                                        : 1.0;
+
+                                // Bounded so neither a tiny nor a huge screen
+                                // produces type nobody can read.
+                                final effectiveFontSize =
+                                    (fitted * preference).clamp(14.0, 21.0);
 
                                 final textStyle = GoogleFonts.notoSansTelugu(
                                   fontSize: effectiveFontSize,
                                   color: isDark
                                       ? AppColors.readingBodyDark
                                       : const Color(0xFF424242),
-                                  height: 1.65,
+                                  height: bodyLineHeight,
                                   fontWeight: FontWeight.w400,
                                   letterSpacing: 0.2,
                                 );
@@ -1195,6 +1257,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

@@ -49,6 +49,27 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="varadhi" />
             </intent-filter>
+
+            <!-- Android App Links for the public site.
+                 autoVerify only takes effect once
+                 https://vaaradhinews.com/.well-known/assetlinks.json is
+                 reachable; the file is in web/.well-known/ ready to publish.
+                 Until it is live these links open the browser as before, and
+                 on Android 11 and below a chooser may appear — so publish
+                 assetlinks.json before shipping this build. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="vaaradhinews.com" />
+                <data android:scheme="https" android:host="www.vaaradhinews.com" />
+                <data android:pathPrefix="/article/" />
+                <data android:pathPrefix="/poster/" />
+                <data android:pathPrefix="/poll/" />
+                <data android:pathPrefix="/ugc/" />
+                <data android:pathPrefix="/video/" />
+                <data android:pathPrefix="/short/" />
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -73,5 +94,21 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+
+        <!-- Android 11+ package visibility. Without these, canLaunchUrl()
+             cannot see a handler and returns false, so every ad click-through
+             silently did nothing even with a destination_url present — the
+             guard failed, not the launch. Ten widgets share that guard. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <!-- wa.me links open the WhatsApp app when it is installed. -->
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
     </queries>
 </manifest>

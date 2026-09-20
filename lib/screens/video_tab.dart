@@ -310,24 +310,43 @@ class _VideoTabState extends State<VideoTab> {
                     onTrailingTap: _changeLocation,
                   ),
                 ),
-                SliverList.builder(
-                  itemCount: bulletinVideos.length + (_hasMore ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= bulletinVideos.length) {
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 22),
-                        child: Center(
-                            child: CircularProgressIndicator(
-                                color: Color(0xFFC80022))),
-                      );
-                    }
-                    final video = bulletinVideos[index];
-                    return _VideoListCard(
-                      video: video,
-                      onTap: () => _openVideo(video),
-                    );
-                  },
+                // Portrait tiles in a grid. Shorts are 9:16, and the wide
+                // list card letterboxed every one of them with black bars
+                // down both sides. Two columns also put four shorts on
+                // screen where the list showed one and a half.
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 14,
+                      // 9:16 for the thumbnail plus room for two title lines
+                      // and the meta row beneath it.
+                      childAspectRatio: 9 / 19.5,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final video = bulletinVideos[index];
+                        return _ShortTile(
+                          video: video,
+                          onTap: () => _openVideo(video),
+                        );
+                      },
+                      childCount: bulletinVideos.length,
+                    ),
+                  ),
                 ),
+                if (_hasMore)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 22),
+                      child: Center(
+                          child: CircularProgressIndicator(
+                              color: Color(0xFFC80022))),
+                    ),
+                  ),
                 SliverPadding(padding: EdgeInsets.only(bottom: bottomPadding)),
               ],
             ),
@@ -584,169 +603,6 @@ class _VideoTabState extends State<VideoTab> {
   }
 }
 
-class _VideoListCard extends StatelessWidget {
-  final VideoItem video;
-  final VoidCallback onTap;
-
-  const _VideoListCard({
-    required this.video,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        child: Material(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          clipBehavior: Clip.antiAlias,
-          elevation: 0,
-          shadowColor: Colors.black.withValues(alpha: 0.06),
-          child: InkWell(
-            onTap: onTap,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Stack(
-                  children: [
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: CachedNetworkImage(
-                        imageUrl: video.thumbnailUrl,
-                        fit: BoxFit.cover,
-                        memCacheWidth: 700,
-                        placeholder: (_, __) =>
-                            Container(color: const Color(0xFFE9ECEF)),
-                        errorWidget: (_, __, ___) => Container(
-                          color: const Color(0xFFE9ECEF),
-                          child: const Center(
-                              child: Icon(Icons.videocam_outlined,
-                                  color: Color(0xFF9E9E9E), size: 44)),
-                        ),
-                      ),
-                    ),
-                    // Gradient overlay
-                    Positioned.fill(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.25),
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.35),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Central Solid Red Play Button (matching YouTube video screen reference!)
-                    Positioned.fill(
-                      child: Center(
-                        child: Container(
-                          width: 46,
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFC80022),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.35),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Icon(Icons.play_arrow_rounded,
-                              color: Colors.white, size: 26),
-                        ),
-                      ),
-                    ),
-                    if (video.duration.isNotEmpty)
-                      Positioned(
-                        right: 10,
-                        bottom: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.75),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(video.duration,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                      ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        video.title.isNotEmpty
-                            ? video.title
-                            : 'Short',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: const Color(0xFF141414),
-                          fontSize: 14.5,
-                          height: 1.3,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                          children: [
-                            const Icon(Icons.remove_red_eye_outlined,
-                                size: 14, color: Color(0xFF6B7280)),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${video.views} వీక్షణలు',
-                              style: const TextStyle(
-                                  color: Color(0xFF6B7280),
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                            if (video.channel.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              Text('•',
-                                  style:
-                                      TextStyle(color: Colors.grey.shade400)),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  video.channel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: Color(0xFF6B7280),
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Individual Vertical Short Card with Unified Video Engine & Glass Controls
 class VideoCardItem extends StatefulWidget {
@@ -1353,6 +1209,96 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A Short as a portrait tile: 9:16 thumbnail, title, view count.
+///
+/// Replaces the wide list card, which letterboxed portrait content with
+/// black bars down both sides.
+class _ShortTile extends StatelessWidget {
+  const _ShortTile({required this.video, required this.onTap});
+
+  final VideoItem video;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(color: const Color(0xFF1A1A1A)),
+                  if (video.thumbnailUrl.isNotEmpty)
+                    CachedNetworkImage(
+                      imageUrl: video.thumbnailUrl,
+                      // Cover, not contain: the tile is already the content's
+                      // own shape, so there is nothing to letterbox.
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) =>
+                          Container(color: const Color(0xFF1A1A1A)),
+                      errorWidget: (_, __, ___) => const Icon(
+                          Icons.videocam_off_rounded,
+                          color: Colors.white24),
+                    ),
+                  const Center(
+                    child: Icon(Icons.play_circle_fill_rounded,
+                        color: Colors.white70, size: 34),
+                  ),
+                  if (video.duration.isNotEmpty)
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          video.duration,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            video.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.3,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF161616),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            video.views,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
           ),
         ],
       ),

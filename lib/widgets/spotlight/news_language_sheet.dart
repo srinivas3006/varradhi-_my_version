@@ -51,13 +51,15 @@ class NewsLanguageSheet extends StatelessWidget {
 
     return SafeArea(
       top: false,
-      child: Container(
+      // Material, not a decorated Container: the ListTiles below paint their
+      // background and ink splashes onto the nearest Material ancestor, and
+      // a DecoratedBox in between hides both — Flutter asserts on it.
+      child: Material(
+        color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+        borderRadius:
+            const BorderRadius.vertical(top: Radius.circular(22)),
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
-          borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(22)),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,6 +107,7 @@ class NewsLanguageSheet extends StatelessWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

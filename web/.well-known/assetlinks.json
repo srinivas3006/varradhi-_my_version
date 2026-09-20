@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.varadhi",
+      "sha256_cert_fingerprints": [
+        "6A:C4:FD:D7:B9:08:B1:4A:DF:BC:50:88:2E:3D:E7:BD:A4:2E:4E:23:4E:6D:5B:A8:ED:67:74:D2:FE:F7:5D:C8"
+      ]
+    }
+  }
+]

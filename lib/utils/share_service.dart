@@ -8,6 +8,7 @@ import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
+import '../widgets/watermark/watermark_banner.dart';
 import '../core/utils/url_normalizer.dart';
 import '../widgets/watermark/article_watermark_overlay.dart';
 
@@ -19,7 +20,7 @@ class ShareService {
 
   /// Official Google Play Store link for app download
   static const String appDownloadUrl =
-      'https://play.google.com/store/apps/details?id=com.vaaradhi.vaaradhi';
+      'https://play.google.com/store/apps/details?id=com.varadhi';
 
   /// Official Vaaradhi web article domain
   static const String webBaseUrl = 'https://vaaradhinews.com';
@@ -164,6 +165,12 @@ class ShareService {
   /// without a usable image there is nothing to generate and the control
   /// should not be offered.
   static bool canGeneratePoster(NewsArticle article) {
+    // A video story has no still to download, but it still has something to
+    // hand over: a black card carrying the masthead. So the control stays
+    // offered rather than disappearing on exactly the items people most
+    // want to pass on.
+    if (article.isVideo) return true;
+
     final url = UrlNormalizer.normalize(
       (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
           ? article.mediaItems.first.url
@@ -187,7 +194,12 @@ class ShareService {
           : article.imageUrl,
     );
     final imageBytes = await _fetchImageBytes(url);
-    if (imageBytes == null || imageBytes.isEmpty) return null;
+
+    // No still available — a video, or an image that would not load. Fall
+    // back to the branded black card instead of returning nothing.
+    if (imageBytes == null || imageBytes.isEmpty) {
+      return _buildWatermarkOnlyFile(article);
+    }
 
     // Image + watermark only. No headline, no body: the download is the
     // picture, and the text travels beside it in the share sheet instead of
@@ -239,6 +251,50 @@ class ShareService {
   static const int downloadSaved = 0;
   static const int downloadPermissionDenied = 1;
   static const int downloadFailed = 2;
+
+  /// A plain black card carrying only the masthead.
+  ///
+  /// Used when there is no still to build a poster from — a video story, or
+  /// artwork that failed to load. Keeps the download meaningful and branded
+  /// rather than failing silently.
+  static Future<File?> _buildWatermarkOnlyFile(NewsArticle article) async {
+    const double width = 1080;
+    const double height = 1350;
+
+    try {
+      final bytes = await _screenshotController.captureFromWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: ColoredBox(
+              color: Colors.black,
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 64),
+                  child: WatermarkBanner(padding: EdgeInsets.zero),
+                ),
+              ),
+            ),
+          ),
+        ),
+        targetSize: const Size(width, height),
+        delay: const Duration(milliseconds: 120),
+      );
+      if (bytes.isEmpty) return null;
+
+      final dir = await getTemporaryDirectory();
+      final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final file =
+          await File('${dir.path}/vaaradhi_card_$safeId.png').create();
+      await file.writeAsBytes(bytes);
+      return file;
+    } catch (e) {
+      debugPrint('[ShareService] watermark-only card failed: $e');
+      return null;
+    }
+  }
 
   /// Writes the watermarked PNG into the device gallery.
   ///

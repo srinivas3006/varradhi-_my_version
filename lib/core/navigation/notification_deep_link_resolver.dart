@@ -59,6 +59,27 @@ class NotificationDeepLinkResolver {
       );
     }
 
+    // 1b. Handle the public site over https — Android App Links and iOS
+    // Universal Links arrive as real URLs, not as varadhi:// . Without this
+    // a tapped share link resolved to unknown and opened Home.
+    //
+    // Paths are /article/{slug}/, /poster/{id}/, /video/{id}/, /poll/{id}/
+    // and /ugc/{id}/ — the trailing slash leaves an empty last segment,
+    // which is dropped here.
+    if ((scheme == 'https' || scheme == 'http') &&
+        (host == 'vaaradhinews.com' || host == 'www.vaaradhinews.com')) {
+      final parts = segments.where((s) => s.isNotEmpty).toList();
+      if (parts.length >= 2) {
+        return _resolveSegments(
+          type: parts.first.toLowerCase(),
+          segments: parts.sublist(1),
+          notificationId: notificationId,
+          originalPayload: originalPayload,
+          rawUri: trimmed,
+        );
+      }
+    }
+
     // 2. Handle scheme: "article://"
     if (scheme == 'article') {
       final slug =
@@ -305,6 +326,31 @@ class NotificationDeepLinkResolver {
         if (segments.isNotEmpty && segments[0].isNotEmpty) {
           return NotificationTarget.poster(
             posterId: segments[0],
+            notificationId: notificationId,
+            originalPayload: originalPayload,
+          );
+        }
+        break;
+
+      // A video or Short opens the story that carries it; there is no
+      // dedicated video target, and the article screen already plays it.
+      case 'video':
+      case 'short':
+        if (segments.isNotEmpty && segments[0].isNotEmpty) {
+          return NotificationTarget.article(
+            slugOrId: segments[0],
+            notificationId: notificationId,
+            originalPayload: originalPayload,
+          );
+        }
+        break;
+
+      // Polls live in the feed rather than on their own screen, so a poll
+      // link opens the feed. Replace with a poll target once one exists.
+      case 'poll':
+        if (segments.isNotEmpty && segments[0].isNotEmpty) {
+          return NotificationTarget.screen(
+            screenName: 'home',
             notificationId: notificationId,
             originalPayload: originalPayload,
           );

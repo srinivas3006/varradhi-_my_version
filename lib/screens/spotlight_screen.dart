@@ -6,6 +6,7 @@ class SpotlightScreen extends StatelessWidget {
   final int? initialStoryIndex;
   final String? initialCategory;
   final bool isLocal;
+  final bool embedded;
 
   const SpotlightScreen({
     super.key,
@@ -13,6 +14,7 @@ class SpotlightScreen extends StatelessWidget {
     this.initialStoryIndex,
     this.initialCategory,
     this.isLocal = false,
+    this.embedded = false,
   });
 
   @override
@@ -22,6 +24,7 @@ class SpotlightScreen extends StatelessWidget {
       initialStoryIndex: initialStoryIndex,
       initialCategory: initialCategory,
       isLocal: isLocal,
+      embedded: embedded,
     );
   }
 }

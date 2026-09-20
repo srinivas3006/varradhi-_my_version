@@ -5,7 +5,6 @@ import '../core/navigation/app_navigator.dart';
 import '../widgets/bottom_nav_bar.dart';
 import '../widgets/ads/bottom_sticky_ad_banner.dart';
 import '../models/ad_banner.dart';
-import 'local_news_tab.dart';
 import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
 import 'profile_tab.dart';
@@ -154,8 +153,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _activatedIndices.contains(0)
           ? const NewsFeedTab()
           : const SizedBox.shrink(),
+      // Spotlight in the local slot. isLocal: true keeps the tab's scope —
+      // it is the district-labelled position, so it shows local stories in
+      // the spotlight reader rather than the old list.
       _activatedIndices.contains(1)
-          ? const LocalNewsTab()
+          ? const SpotlightScreen(isLocal: true, embedded: true)
           : const SizedBox.shrink(),
       _activatedIndices.contains(2)
           ? const CreatePostScreen()

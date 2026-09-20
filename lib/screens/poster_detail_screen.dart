@@ -1,9 +1,10 @@
 // ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:share_plus/share_plus.dart';
 import '../theme/app_theme.dart';
 import '../models/poster_images.dart';
+import '../services/sharing/share_content_builder.dart';
+import '../widgets/sharing/share_sheet.dart';
 
 /// Screen 19: PosterDetailScreen
 /// - APIs: None required after selected poster payload
@@ -33,11 +34,12 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
   }
 
   void _shareCurrentPoster() {
-    if (_images.isNotEmpty && _currentIndex < _images.length) {
-      final url = _images[_currentIndex];
-      final title = widget.poster['title'] ?? 'Greeting';
-      Share.share('Check out this $title poster: $url');
-    }
+    // One sheet, one wording, one canonical URL — this used to compose its
+    // own sentence around a raw image link.
+    ShareSheet.show(
+      context,
+      ShareContentBuilder.fromPoster(widget.poster),
+    );
   }
 
   @override

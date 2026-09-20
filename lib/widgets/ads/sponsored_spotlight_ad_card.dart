@@ -112,8 +112,24 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
         .recordClick(widget.ad, placementZone: widget.placementZone);
 
     final uri = Uri.tryParse(widget.ad.destinationUrl);
-    if (uri != null && await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (uri == null) {
+      debugPrint('[Ad] unparseable destination: ${widget.ad.destinationUrl}');
+      return;
+    }
+
+    // canLaunchUrl is advisory: it answers false whenever package visibility
+    // hides the handler, which is how a click with a perfectly good
+    // destination ended up doing nothing at all. Try the launch regardless
+    // and let it report its own failure.
+    try {
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        debugPrint('[Ad] launch refused for $uri, retrying in-app');
+        await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+      }
+    } catch (e) {
+      debugPrint('[Ad] could not open $uri: $e');
     }
   }
 

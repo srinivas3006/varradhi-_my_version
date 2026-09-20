@@ -239,8 +239,10 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
         params: const YoutubePlayerParams(
           mute: false,
           showFullscreenButton: true,
-          privacyEnhancedMode: false,
-          origin: 'https://www.youtube.com',
+          // Same revert as the shared controller: an explicit origin becomes
+          // the WebView baseUrl and breaks the iframe handshake, so Live TV
+          // loaded a player that never became ready.
+          privacyEnhancedMode: true,
         ),
       );
     }

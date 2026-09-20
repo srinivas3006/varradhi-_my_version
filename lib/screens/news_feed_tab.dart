@@ -8,7 +8,6 @@ import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import 'news_detail_screen.dart';
 import 'search_screen.dart';
-import 'spotlight_screen.dart';
 import 'live_news_screen.dart';
 import '../services/api_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -34,6 +33,7 @@ import '../models/poster_images.dart';
 import '../models/video_item.dart';
 import '../repositories/video_repository.dart';
 import 'video_player_screen.dart';
+import 'notifications_screen.dart';
 
 enum HeroCardKind { liveStream, breakingArticle }
 
@@ -1082,25 +1082,60 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   );
                 },
               ),
-              Container(
-                margin: const EdgeInsets.only(left: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.auto_awesome_rounded,
-                      color: AppColors.primary),
-                  onPressed: () {
-                    AppNavigator.pushSafe(
+
+              // Notifications, badged with whatever is unread. Rebuilt from
+              // AppState so the count follows a push arriving or the list
+              // being read, without this bar polling anything.
+              AnimatedBuilder(
+                animation: AppState.instance,
+                builder: (context, _) {
+                  final unread = AppState.instance.unreadNotificationsCount;
+                  return IconButton(
+                    tooltip: AppState.instance.language == 'Telugu'
+                        ? 'నోటిఫికేషన్లు'
+                        : 'Notifications',
+                    onPressed: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => const SpotlightScreen()),
-                    );
-                  },
-                ),
+                          builder: (_) => const NotificationsScreen()),
+                    ),
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(Icons.notifications_none_rounded,
+                            color: Theme.of(context).iconTheme.color),
+                        if (unread > 0)
+                          Positioned(
+                            right: -3,
+                            top: -3,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4, vertical: 1),
+                              constraints: const BoxConstraints(minWidth: 15),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                // Past 99 the badge would widen enough to
+                                // push the icons along.
+                                unread > 99 ? '99+' : '$unread',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            ],
+],
           ),
         ),
       ),
