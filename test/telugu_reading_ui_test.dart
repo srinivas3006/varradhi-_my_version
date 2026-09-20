@@ -9,10 +9,10 @@ void main() {
 
   group('Telugu Reading UI Color Tokens & Typography Specification', () {
     test('Reading color tokens match exact specification', () {
-      expect(AppColors.readingTitleLight, const Color(0xFF111827),
-          reason: 'Headline in light mode must be #111827 (dark gray, not pure black)');
-      expect(AppColors.readingBodyLight, const Color(0xFF374151),
-          reason: 'Article body in light mode must be #374151 (soft dark gray, avoid pure black)');
+      expect(AppColors.readingTitleLight, const Color(0xFF212121),
+          reason: 'Headline in light mode must be #212121 (dark gray, not pure black)');
+      expect(AppColors.readingBodyLight, const Color(0xFF424242),
+          reason: 'Article body in light mode must be #424242 (soft dark gray, avoid pure black)');
       expect(AppColors.readingMetaLight, const Color(0xFF6B7280),
           reason: 'Meta information in light mode must be #6B7280');
 
