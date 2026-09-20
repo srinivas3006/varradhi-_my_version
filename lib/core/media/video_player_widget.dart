@@ -63,7 +63,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       ..setBackgroundColor(Colors.black)
       ..loadRequest(
         Uri.parse(
-            'https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1'),
+            'https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1&origin=https://www.youtube.com'),
       );
 
     setState(() {

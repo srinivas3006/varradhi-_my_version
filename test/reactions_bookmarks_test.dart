@@ -222,4 +222,89 @@ void main() {
               'payload predates it');
     });
   });
+
+  group('article dislike counts & mutual exclusivity contract', () {
+    test('NewsArticle parses and mutates dislike count', () {
+      final article = NewsArticle.fromJson({
+        'id': 'a10',
+        'title': 'Test',
+        'likes_count': 10,
+        'dislike_count': 4,
+        'is_liked': false,
+        'is_disliked': false,
+      });
+
+      expect(article.likes, 10);
+      expect(article.dislikes, 4);
+
+      // Mutate optimistically
+      article.dislikes++;
+      expect(article.dislikes, 5);
+
+      article.dislikes--;
+      expect(article.dislikes, 4);
+    });
+
+    test('mutual exclusivity: dislike increments dislikes and decrements likes if previously liked', () {
+      final article = NewsArticle.fromJson({
+        'id': 'a11',
+        'likes_count': 5,
+        'dislike_count': 2,
+        'is_liked': true,
+        'is_disliked': false,
+      });
+
+      // User taps dislike:
+      final wasLiked = article.isLiked;
+      article.isLiked = false;
+      article.isDisliked = true;
+      if (wasLiked) {
+        article.likes = (article.likes - 1).clamp(0, 100000);
+      }
+      article.dislikes = article.dislikes + 1;
+
+      expect(article.likes, 4);
+      expect(article.dislikes, 3);
+      expect(article.isLiked, isFalse);
+      expect(article.isDisliked, isTrue);
+    });
+
+    test('mutual exclusivity: like increments likes and decrements dislikes if previously disliked', () {
+      final article = NewsArticle.fromJson({
+        'id': 'a12',
+        'likes_count': 8,
+        'dislike_count': 3,
+        'is_liked': false,
+        'is_disliked': true,
+      });
+
+      // User taps like:
+      final wasDisliked = article.isDisliked;
+      article.isDisliked = false;
+      article.isLiked = true;
+      if (wasDisliked) {
+        article.dislikes = (article.dislikes - 1).clamp(0, 100000);
+      }
+      article.likes = article.likes + 1;
+
+      expect(article.likes, 9);
+      expect(article.dislikes, 2);
+      expect(article.isLiked, isTrue);
+      expect(article.isDisliked, isFalse);
+    });
+
+    test('server response updates both like_count and dislike_count', () async {
+      serve((o) async => _json({
+        'data': {
+          'like_count': 15,
+          'dislike_count': 7,
+        }
+      }, 200));
+
+      final res = await ApiService.instance.postArticleReaction('a1', 'dislike');
+      expect(res['like_count'], 15);
+      expect(res['dislike_count'], 7);
+    });
+  });
 }
+

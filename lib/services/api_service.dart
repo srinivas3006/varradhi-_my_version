@@ -1339,12 +1339,13 @@ class ApiService {
         if (lang != null) 'lang': lang,
         if (category != null) 'category': category,
       });
-      // Search API wraps items in data['results'] instead of directly in data.
+      // Search API wraps items in data['results'], 'articles', or directly in data.
       return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-        if (json is Map<String, dynamic> && json['results'] is List) {
-          return (json['results'] as List)
-              .map((i) => NewsArticle.fromJson(i))
-              .toList();
+        if (json is Map<String, dynamic>) {
+          final list = json['results'] ?? json['articles'] ?? json['data'] ?? json['items'];
+          if (list is List) {
+            return list.map((i) => NewsArticle.fromJson(i)).toList();
+          }
         } else if (json is List) {
           return json.map((i) => NewsArticle.fromJson(i)).toList();
         }
@@ -1518,7 +1519,7 @@ class ApiService {
             summary: map['description']?.toString() ?? '',
             thumbnailUrl: map['thumbnail_url']?.toString() ?? '',
             mediaUrl: map['media_url']?.toString() ?? '',
-            createdAt: DateParser.tryParse(map['created_at']) ?? DateTime.now(),
+            createdAt: DateParser.tryParse(map['created_at'] ?? map['published_at']) ?? DateTime.now(),
             district: map['district']?.toString() ?? '',
             subdistrict: map['subdistrict']?.toString() ?? '',
             village: map['village']?.toString() ?? '',
@@ -2003,9 +2004,14 @@ class ApiService {
     try {
       final response = await _dio
           .get('/api/v1/search/trending/', queryParameters: {'days': days});
-      final List data = response.data['data'] ?? [];
+      final List data = response.data['data'] is List ? response.data['data'] : [];
       return data
-          .map<String>((item) => (item['keyword'] ?? '').toString())
+          .map<String>((item) {
+            if (item is Map) {
+              return (item['keyword'] ?? item['term'] ?? item['query'] ?? item['title'] ?? '').toString();
+            }
+            return item.toString();
+          })
           .where((k) => k.isNotEmpty)
           .toList();
     } catch (_) {

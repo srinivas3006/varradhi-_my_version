@@ -44,6 +44,8 @@ class _FeedAdapter implements HttpClientAdapter {
           'id': 'ugc-1',
           'title': 'Citizen report',
           'content_type': 'ugc',
+          'created_at': '2026-09-14T11:00:00Z',
+          'published_at': '2026-09-14T11:00:00Z',
           'media_items': [
             {'media_type': 'image', 'url': 'https://example.com/ugc.jpg'},
             {'media_type': 'video', 'url': 'https://example.com/ugc.mp4'},

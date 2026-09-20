@@ -68,6 +68,11 @@ void main() {
       final commentOnCard = contrastRatio(AppColors.textCommentBodyDark, AppColors.cardDarkNavy);
       expect(commentOnCard, greaterThanOrEqualTo(4.5),
           reason: 'Comment body text must have at least 4.5:1 contrast on card surface');
+
+      // Search text on elevated surface
+      final textOnElevated = contrastRatio(AppColors.textLight, AppColors.surfaceElevatedDark);
+      expect(textOnElevated, greaterThanOrEqualTo(4.5),
+          reason: 'Search input text must have at least 4.5:1 contrast on search container');
     });
   });
 }

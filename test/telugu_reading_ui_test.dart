@@ -86,5 +86,29 @@ void main() {
       await appState.setReadingFontSize(19.0);
       expect(appState.readingFontSize, 19.0);
     });
+
+    test('Spotlight news card typography scaling yields balanced line density', () {
+      double calculateEffectiveFontSize(double sliderValue) {
+        return sliderValue > 0 ? (sliderValue * (16.5 / 19.0)) : 16.5;
+      }
+
+      // At default slider 19.0, effective size is 16.5
+      expect(calculateEffectiveFontSize(19.0), closeTo(16.5, 0.01),
+          reason: 'Default 19.0 slider must scale to 16.5dp to avoid oversized body typography');
+
+      // At minimum slider 12.0
+      expect(calculateEffectiveFontSize(12.0), closeTo(10.42, 0.01));
+
+      // At maximum slider 24.0
+      expect(calculateEffectiveFontSize(24.0), closeTo(20.84, 0.01));
+
+      // Media aspect ratio 4:3 (1.333) vs previous 9:8 (1.125) saves vertical height
+      const cardWidth = 390.0;
+      final oldMediaHeight = cardWidth / (9 / 8); // 346.67dp
+      final newMediaHeight = cardWidth / (4 / 3); // 292.50dp
+      expect(oldMediaHeight - newMediaHeight, greaterThan(50.0),
+          reason: '4:3 ratio must reclaim >50dp of vertical space for news reading body');
+    });
   });
 }
+

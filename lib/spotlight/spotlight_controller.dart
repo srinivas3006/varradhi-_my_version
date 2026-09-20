@@ -312,13 +312,14 @@ class SpotlightController extends ChangeNotifier {
         // Content type comes from the backend; media stays within this parent.
         content.add(SpotlightItem.standard(stories[index]));
         final position = index + 1;
-        if (position % 5 == 0 && posters.isNotEmpty) {
-          content.add(posters[posterIndex++ % posters.length]);
+        if (position % 5 == 0 && posterIndex < posters.length) {
+          content.add(posters[posterIndex++]);
         }
         if (position % 8 == 0 && _pollsPool.isNotEmpty) {
           content.add(SpotlightItem.poll(_pollsPool[pollIndex++ % _pollsPool.length]));
         }
       }
+      content.addAll(posters.skip(posterIndex));
       final run = insertAdsIntoFeed<SpotlightItem>(
         contentItems: content,
         eligibleAds: _adsPool,

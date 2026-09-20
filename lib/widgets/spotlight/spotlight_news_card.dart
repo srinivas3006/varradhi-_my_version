@@ -202,11 +202,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   Widget build(BuildContext context) {
     final article = _detailArticle ?? widget.article;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 9:8 from the card's own width, not a share of screen height: screen
-    // height includes the status bar and gesture inset, so a fraction of it
-    // gives a different shape on every device.
-    final mediaHeight = (MediaQuery.sizeOf(context).width / (9 / 8))
-        .clamp(0.0, MediaQuery.sizeOf(context).height * 0.5);
+    // 4:3 from the card's width, capped at 38% of screen height to allow
+    // 6-8 lines of article text plus headline to display comfortably without
+    // premature cutoffs.
+    final mediaHeight = (MediaQuery.sizeOf(context).width / (4 / 3))
+        .clamp(0.0, MediaQuery.sizeOf(context).height * 0.38);
 
     // Always fully painted. The feed is a FlipPageView now, which owns the
     // transition and passes no drag values — deriving opacity from them left
@@ -670,16 +670,36 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.notoSansTelugu(
-                            fontSize: 24,
+                            fontSize: 20.5,
                             fontWeight: FontWeight.w700,
                             color: isDark
                                 ? AppColors.readingTitleDark
                                 : AppColors.readingTitleLight,
-                            height: 1.35,
+                            height: 1.30,
                             letterSpacing: 0.0,
                           ),
                         ),
                       ),
+                      if (article.authorName.isNotEmpty &&
+                          article.authorName != 'VARADHI Desk') ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.person_pin_rounded,
+                                size: 13,
+                                color: isDark ? Colors.white60 : Colors.black54),
+                            const SizedBox(width: 4),
+                            Text(
+                              article.authorName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white60 : Colors.black54,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 12),
 
                       // Body Text with Dynamic Auto-Adjusting & Adaptive "Read More"
@@ -723,17 +743,20 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                             return LayoutBuilder(
                               builder: (context, constraints) {
+                                final effectiveFontSize =
+                                    AppState.instance.readingFontSize > 0
+                                        ? (AppState.instance.readingFontSize *
+                                            (16.5 / 19.0))
+                                        : 16.5;
+
                                 final textStyle = GoogleFonts.notoSansTelugu(
-                                  fontSize:
-                                      AppState.instance.readingFontSize > 0
-                                          ? AppState.instance.readingFontSize
-                                          : 19.0,
+                                  fontSize: effectiveFontSize,
                                   color: isDark
                                       ? AppColors.readingBodyDark
                                       : AppColors.readingBodyLight,
-                                  height: 1.88,
+                                  height: 1.58,
                                   fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.2,
+                                  letterSpacing: 0.15,
                                 );
 
                                 const double reservedForButton = 44.0;
@@ -860,16 +883,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    // article.isLiked carries the reader's
-                                    // existing reaction from the backend
-                                    // (is_liked_by_user / my_reaction), so a
-                                    // post liked in an earlier session shows
-                                    // as liked on first paint. The local set
-                                    // is the optimistic overlay on top of it.
                                     final isLiked = article.isLiked ||
                                         AppState.instance.isLiked(targetId) ||
                                         (article.id.isNotEmpty &&
                                             AppState.instance.isLiked(article.id));
+                                    final isDisliked = article.isDisliked ||
+                                        AppState.instance.isDisliked(targetId) ||
+                                        (article.id.isNotEmpty &&
+                                            AppState.instance.isDisliked(article.id));
                                     return _buildActionIcon(
                                       icon: isLiked
                                           ? Icons.thumb_up_rounded
@@ -879,27 +900,26 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           : (isDark
                                               ? AppColors.readingMetaDark
                                               : const Color(0xFF6B7280)),
-                                      // article.likes is already the
-                                      // authoritative count: the handler
-                                      // below sets it optimistically and then
-                                      // replaces it with the server's
-                                      // like_count. Adding isLiked on top
-                                      // counted the same like twice, which is
-                                      // why one tap showed 2.
                                       label: _formatCount(article.likes),
                                       onTap: () async {
                                         final messenger = ScaffoldMessenger.of(context);
                                         HapticFeedback.lightImpact();
                                         final wasLiked = isLiked;
+                                        final wasDisliked = isDisliked;
                                         final nextReaction = wasLiked ? 'none' : 'like';
 
                                         // 1. Optimistic local update
                                         AppState.instance.setReaction(targetId, nextReaction);
                                         final prevLikes = article.likes;
+                                        final prevDislikes = article.dislikes;
                                         setState(() {
                                           article.isLiked = (nextReaction == 'like');
                                           if (nextReaction == 'like') {
                                             article.likes = wasLiked ? prevLikes : prevLikes + 1;
+                                            if (wasDisliked) {
+                                              article.isDisliked = false;
+                                              article.dislikes = prevDislikes > 0 ? prevDislikes - 1 : 0;
+                                            }
                                           } else {
                                             article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
                                           }
@@ -911,18 +931,31 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             targetId,
                                             nextReaction,
                                           );
-                                          if (mounted && res['like_count'] != null) {
+                                          if (mounted) {
                                             setState(() {
-                                              article.likes = (res['like_count'] as num).toInt();
+                                              final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
+                                              if (l != null) {
+                                                article.likes = (l as num).toInt();
+                                              }
+                                              final d = res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
+                                              if (d != null) {
+                                                article.dislikes = (d as num).toInt();
+                                              }
                                             });
                                           }
                                         } catch (e) {
                                           debugPrint('[SpotlightNewsCard] Like sync failed: $e');
                                           if (mounted) {
-                                            AppState.instance.setReaction(targetId, wasLiked ? 'like' : 'none');
+                                            AppState.instance.setReaction(
+                                                targetId,
+                                                wasLiked
+                                                    ? 'like'
+                                                    : (wasDisliked ? 'dislike' : 'none'));
                                             setState(() {
                                               article.isLiked = wasLiked;
                                               article.likes = prevLikes;
+                                              article.isDisliked = wasDisliked;
+                                              article.dislikes = prevDislikes;
                                             });
                                             messenger.removeCurrentSnackBar();
                                             messenger.showSnackBar(
@@ -947,11 +980,6 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     final targetId = article.id.isNotEmpty
                                         ? article.id
                                         : article.slug;
-                                    // Backend state first, local set as the
-                                    // optimistic overlay — same shape as the
-                                    // like button above. The handler keeps
-                                    // both in step so an un-dislike cannot
-                                    // leave the model field stale and true.
                                     final isDisliked = article.isDisliked ||
                                         AppState.instance.isDisliked(targetId) ||
                                         (article.id.isNotEmpty &&
@@ -969,7 +997,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           : (isDark
                                               ? AppColors.readingMetaDark
                                               : const Color(0xFF6B7280)),
-                                      label: '',
+                                      label: _formatCount(article.dislikes),
                                       onTap: () async {
                                         final messenger = ScaffoldMessenger.of(context);
                                         HapticFeedback.lightImpact();
@@ -980,12 +1008,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                         // 1. Optimistic local update
                                         AppState.instance.setReaction(targetId, nextReaction);
                                         final prevLikes = article.likes;
+                                        final prevDislikes = article.dislikes;
                                         setState(() {
-                                          article.isDisliked =
-                                              (nextReaction == 'dislike');
-                                          if (wasLiked) {
-                                            article.isLiked = false;
-                                            article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
+                                          article.isDisliked = (nextReaction == 'dislike');
+                                          if (nextReaction == 'dislike') {
+                                            article.dislikes = wasDisliked ? prevDislikes : prevDislikes + 1;
+                                            if (wasLiked) {
+                                              article.isLiked = false;
+                                              article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
+                                            }
+                                          } else {
+                                            article.dislikes = prevDislikes > 0 ? prevDislikes - 1 : 0;
                                           }
                                         });
 
@@ -995,27 +1028,32 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             targetId,
                                             nextReaction,
                                           );
-                                          if (mounted && res['like_count'] != null) {
+                                          if (mounted) {
                                             setState(() {
-                                              article.likes = (res['like_count'] as num).toInt();
+                                              final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
+                                              if (l != null) {
+                                                article.likes = (l as num).toInt();
+                                              }
+                                              final d = res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
+                                              if (d != null) {
+                                                article.dislikes = (d as num).toInt();
+                                              }
                                             });
                                           }
                                         } catch (e) {
                                           debugPrint('[SpotlightNewsCard] Dislike sync failed: $e');
                                           if (mounted) {
-                                            setState(() =>
-                                                article.isDisliked = wasDisliked);
-                                            if (wasLiked) {
-                                              AppState.instance.setReaction(targetId, 'like');
-                                              setState(() {
-                                                article.isLiked = true;
-                                                article.likes = prevLikes;
-                                              });
-                                            } else if (wasDisliked) {
-                                              AppState.instance.setReaction(targetId, 'dislike');
-                                            } else {
-                                              AppState.instance.setReaction(targetId, 'none');
-                                            }
+                                            AppState.instance.setReaction(
+                                                targetId,
+                                                wasDisliked
+                                                    ? 'dislike'
+                                                    : (wasLiked ? 'like' : 'none'));
+                                            setState(() {
+                                              article.isDisliked = wasDisliked;
+                                              article.dislikes = prevDislikes;
+                                              article.isLiked = wasLiked;
+                                              article.likes = prevLikes;
+                                            });
                                             messenger.removeCurrentSnackBar();
                                             messenger.showSnackBar(
                                               SnackBar(

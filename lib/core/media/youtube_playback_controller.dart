@@ -49,7 +49,8 @@ class YouTubePlaybackController extends VideoPlaybackController {
           enableCaption: false,
           enableJavaScript: true,
           playsInline: true,
-          privacyEnhancedMode: true,
+          privacyEnhancedMode: false,
+          origin: 'https://www.youtube.com',
           strictRelatedVideos: false,
         ),
       );

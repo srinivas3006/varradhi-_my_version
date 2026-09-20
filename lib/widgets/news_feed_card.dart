@@ -68,9 +68,11 @@ class _NewsFeedCardState extends State<NewsFeedCard>
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.0), weight: 20),
     ]).animate(_heartController);
 
-    _localReaction = widget.article.isLiked ? Reaction.like : Reaction.none;
+    _localReaction = widget.article.isLiked
+        ? Reaction.like
+        : (widget.article.isDisliked ? Reaction.dislike : Reaction.none);
     _localLikes = widget.article.likes;
-    _localDislikes = 0;
+    _localDislikes = widget.article.dislikes;
   }
 
   @override
@@ -506,6 +508,9 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                             _localLikes = likes;
                             _localDislikes = dislikes;
                             widget.article.isLiked = reaction == Reaction.like;
+                            widget.article.isDisliked = reaction == Reaction.dislike;
+                            widget.article.likes = likes;
+                            widget.article.dislikes = dislikes;
                           });
                         },
                       ),

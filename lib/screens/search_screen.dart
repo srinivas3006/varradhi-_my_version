@@ -121,15 +121,28 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final telugu = AppState.instance.language == 'Telugu';
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? AppColors.backgroundDark : AppColors.background,
       appBar: AppBar(
         titleSpacing: 0,
+        backgroundColor: isDark ? AppColors.backgroundDark : AppColors.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: IconThemeData(
+          color: isDark ? AppColors.textLight : AppColors.textDark,
+        ),
         title: Container(
-          height: 42,
+          height: 44,
+          margin: const EdgeInsets.only(right: 8),
           decoration: BoxDecoration(
-            color: AppColors.chipBg,
+            color: isDark ? AppColors.surfaceElevatedDark : AppColors.chipBg,
             borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? AppColors.borderDark : AppColors.borderLight,
+            ),
           ),
           child: TextField(
             controller: _controller,
@@ -139,10 +152,40 @@ class _SearchScreenState extends State<SearchScreen> {
               setState(() {});
               _onQueryChanged(value);
             },
+            style: TextStyle(
+              color: isDark ? AppColors.textLight : AppColors.textDark,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+            cursorColor: AppColors.primary,
             decoration: InputDecoration(
               hintText: tr('search_hint'),
-              hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
-              prefixIcon: const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+              hintStyle: TextStyle(
+                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                fontSize: 13,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                size: 20,
+              ),
+              suffixIcon: _controller.text.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(
+                        Icons.clear_rounded,
+                        color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                        size: 18,
+                      ),
+                      onPressed: () {
+                        _controller.clear();
+                        setState(() {
+                          _results = [];
+                          _presentedResults = [];
+                          _isLoading = false;
+                        });
+                      },
+                    )
+                  : null,
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
@@ -151,33 +194,81 @@ class _SearchScreenState extends State<SearchScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(tr('cancel'),
-                style: const TextStyle(color: AppColors.textDark)),
+            child: Text(
+              tr('cancel'),
+              style: TextStyle(
+                color: isDark ? AppColors.textLight : AppColors.textDark,
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+              ),
+            ),
           ),
         ],
       ),
       body: _controller.text.isEmpty
-          ? _buildSuggestions()
+          ? _buildSuggestions(isDark, telugu)
           : _isLoading 
-              ? const Center(child: CircularProgressIndicator()) 
-              : _buildResults(),
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                ) 
+              : _buildResults(isDark),
     );
   }
 
-  Widget _buildSuggestions() {
+  Widget _buildSuggestions(bool isDark, bool telugu) {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
         if (_recent.isNotEmpty) ...[
-          Text(tr('recent_searches'),
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                tr('recent_searches'),
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  color: isDark ? AppColors.textLight : AppColors.textDark,
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() => _recent.clear());
+                  _saveRecent();
+                },
+                child: Text(
+                  telugu ? 'అన్నీ తీసివేయి' : 'Clear all',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           ..._recent.map((q) => ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.history, color: AppColors.textMuted),
-                title: Text(q, style: const TextStyle(fontSize: 13.5)),
+                dense: true,
+                leading: Icon(
+                  Icons.history_rounded,
+                  color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                  size: 20,
+                ),
+                title: Text(
+                  q,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: isDark ? AppColors.textLight : AppColors.textDark,
+                  ),
+                ),
                 trailing: IconButton(
-                  icon: const Icon(Icons.close, size: 18, color: AppColors.textMuted),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                  ),
                   onPressed: () {
                     setState(() => _recent.remove(q));
                     _saveRecent();
@@ -188,46 +279,79 @@ class _SearchScreenState extends State<SearchScreen> {
                   _runSearch(q);
                 },
               )),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
         ],
-        Text(tr('trending_searches'),
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _trending
-              .map((t) => GestureDetector(
-                    onTap: () {
-                      _controller.text = t;
-                      _runSearch(t);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.chipBg,
-                        borderRadius: BorderRadius.circular(20),
+        if (_trending.isNotEmpty) ...[
+          Text(
+            tr('trending_searches'),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+              color: isDark ? AppColors.textLight : AppColors.textDark,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _trending
+                .map((t) => GestureDetector(
+                      onTap: () {
+                        _controller.text = t;
+                        _runSearch(t);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AppColors.surfaceElevatedDark
+                              : AppColors.chipBg,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark
+                                ? AppColors.borderDark
+                                : AppColors.borderLight,
+                          ),
+                        ),
+                        child: Text(
+                          t,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: isDark
+                                ? AppColors.textLight
+                                : AppColors.textDark,
+                          ),
+                        ),
                       ),
-                      child: Text(t, style: const TextStyle(fontSize: 12.5)),
-                    ),
-                  ))
-              .toList(),
-        ),
+                    ))
+                .toList(),
+          ),
+        ],
       ],
     );
   }
 
-  Widget _buildResults() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _buildResults(bool isDark) {
     if (_results.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search_off_rounded, size: 56, color: isDark ? Colors.white24 : Colors.black26),
+            Icon(
+              Icons.search_off_rounded,
+              size: 56,
+              color: isDark ? Colors.white24 : Colors.black26,
+            ),
             const SizedBox(height: 12),
-            Text(tr('no_results'), style: const TextStyle(color: AppColors.textMuted)),
+            Text(
+              tr('no_results'),
+              style: TextStyle(
+                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                fontSize: 14,
+              ),
+            ),
           ],
         ),
       );
@@ -235,7 +359,10 @@ class _SearchScreenState extends State<SearchScreen> {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: _presentedResults.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, __) => Divider(
+        height: 16,
+        color: isDark ? AppColors.borderDark : AppColors.borderLight,
+      ),
       itemBuilder: (context, index) {
         final item = _presentedResults[index];
         if (item.isAd) {
@@ -254,42 +381,59 @@ class _SearchScreenState extends State<SearchScreen> {
             child: article.imageUrl.isNotEmpty
                 ? CachedNetworkImage(
                     imageUrl: article.imageUrl,
-                    width: 56,
-                    height: 56,
-                    memCacheWidth: 150,
-                    memCacheHeight: 150,
+                    width: 60,
+                    height: 60,
+                    memCacheWidth: 160,
+                    memCacheHeight: 160,
                     fit: BoxFit.cover,
                     placeholder: (_, __) => Container(
-                      width: 56,
-                      height: 56,
-                      color: isDark ? Colors.white10 : Colors.black12,
+                      width: 60,
+                      height: 60,
+                      color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
                     ),
                     errorWidget: (_, __, ___) => Container(
-                      width: 56,
-                      height: 56,
-                      color: isDark ? Colors.white10 : Colors.black12,
-                      child: const Icon(Icons.broken_image_rounded, size: 20),
+                      width: 60,
+                      height: 60,
+                      color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
+                      child: Icon(
+                        Icons.broken_image_rounded,
+                        size: 20,
+                        color: isDark ? Colors.white38 : Colors.black26,
+                      ),
                     ),
                   )
                 : Container(
-                    width: 56,
-                    height: 56,
-                    color: isDark ? Colors.white10 : Colors.black12,
-                    child: const Icon(Icons.newspaper_rounded, size: 20),
+                    width: 60,
+                    height: 60,
+                    color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
+                    child: Icon(
+                      Icons.newspaper_rounded,
+                      size: 20,
+                      color: isDark ? Colors.white38 : Colors.black26,
+                    ),
                   ),
           ),
           title: Text(
             article.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14.5,
               fontWeight: FontWeight.w600,
               height: 1.3,
+              color: isDark ? AppColors.textLight : AppColors.textDark,
             ),
           ),
-          subtitle: Text('${article.source} · ${article.timeAgo}',
-              style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4.0),
+            child: Text(
+              '${article.source} · ${article.timeAgo}',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+              ),
+            ),
+          ),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(

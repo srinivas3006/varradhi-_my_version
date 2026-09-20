@@ -96,55 +96,108 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-  bool _isTogglingLike = false;
+  bool _isTogglingReaction = false;
 
-  Future<void> _toggleLike() async {
-    if (_isTogglingLike) return;
-    _isTogglingLike = true;
+  Future<void> _toggleReaction(String tapped) async {
+    if (_isTogglingReaction) return;
+    _isTogglingReaction = true;
     HapticFeedback.selectionClick();
 
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
     if (targetId.isEmpty) {
-      _isTogglingLike = false;
+      _isTogglingReaction = false;
       return;
     }
 
     final isCurrentlyLiked =
         AppState.instance.isLiked(targetId) || article.isLiked;
-    AppState.instance.toggleLike(targetId);
-    final isNowLiked = AppState.instance.isLiked(targetId);
+    final isCurrentlyDisliked =
+        AppState.instance.isDisliked(targetId) || article.isDisliked;
+
+    String nextReaction;
+    if (tapped == 'like') {
+      nextReaction = isCurrentlyLiked ? 'none' : 'like';
+    } else if (tapped == 'dislike') {
+      nextReaction = isCurrentlyDisliked ? 'none' : 'dislike';
+    } else {
+      nextReaction = 'none';
+    }
+
+    AppState.instance.setReaction(targetId, nextReaction);
     final prevLikes = article.likes;
+    final prevDislikes = article.dislikes;
 
     setState(() {
-      article.isLiked = isNowLiked;
-      article.likes = isNowLiked
-          ? (isCurrentlyLiked ? prevLikes : prevLikes + 1)
-          : (prevLikes > 0 ? prevLikes - 1 : 0);
+      if (nextReaction == 'like') {
+        article.isLiked = true;
+        article.likes = isCurrentlyLiked ? prevLikes : prevLikes + 1;
+        if (isCurrentlyDisliked) {
+          article.isDisliked = false;
+          article.dislikes = prevDislikes > 0 ? prevDislikes - 1 : 0;
+        }
+      } else if (nextReaction == 'dislike') {
+        article.isDisliked = true;
+        article.dislikes = isCurrentlyDisliked ? prevDislikes : prevDislikes + 1;
+        if (isCurrentlyLiked) {
+          article.isLiked = false;
+          article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
+        }
+      } else {
+        if (isCurrentlyLiked) {
+          article.isLiked = false;
+          article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
+        }
+        if (isCurrentlyDisliked) {
+          article.isDisliked = false;
+          article.dislikes = prevDislikes > 0 ? prevDislikes - 1 : 0;
+        }
+      }
     });
 
     try {
       final res = await ApiService.instance.postArticleReaction(
         targetId,
-        isNowLiked ? 'like' : 'none',
+        nextReaction,
       );
-      if (mounted && res.containsKey('like_count')) {
+      if (mounted) {
         setState(() {
-          article.likes =
-              (res['like_count'] as num?)?.toInt() ?? article.likes;
+          final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
+          if (l != null) {
+            article.likes = (l as num).toInt();
+          }
+          final d = res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
+          if (d != null) {
+            article.dislikes = (d as num).toInt();
+          }
         });
       }
     } catch (e) {
       debugPrint('[NewsDetailScreen] Could not sync reaction to backend: $e');
       if (mounted) {
-        AppState.instance.setReaction(targetId, isCurrentlyLiked ? 'like' : 'none');
+        AppState.instance.setReaction(
+            targetId,
+            isCurrentlyLiked
+                ? 'like'
+                : (isCurrentlyDisliked ? 'dislike' : 'none'));
         setState(() {
           article.isLiked = isCurrentlyLiked;
           article.likes = prevLikes;
+          article.isDisliked = isCurrentlyDisliked;
+          article.dislikes = prevDislikes;
         });
       }
     } finally {
-      _isTogglingLike = false;
+      _isTogglingReaction = false;
     }
+  }
+
+  Future<void> _toggleLike() => _toggleReaction('like');
+  Future<void> _toggleDislike() => _toggleReaction('dislike');
+
+  String _formatCount(int count) {
+    if (count <= 0) return '';
+    if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}k';
+    return count.toString();
   }
 
   Future<void> _toggleBookmark() async {
@@ -275,11 +328,16 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     super.initState();
     article = widget.article;
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    if (!article.isUgc && AppState.instance.isLiked(targetId)) {
-      article.isLiked = true;
+    if (!article.isUgc) {
+      if (AppState.instance.isLiked(targetId)) {
+        article.isLiked = true;
+      }
+      _fetchFullArticleDetail();
+      _fetchRecommendations();
+    } else {
+      _isLoadingRecommendations = false;
+      _fetchFullArticleDetail();
     }
-    _fetchFullArticleDetail();
-    _fetchRecommendations();
   }
 
   Future<void> _fetchRecommendations() async {
@@ -714,9 +772,9 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Text(
                         article.title,
                         style: GoogleFonts.notoSansTelugu(
-                          fontSize: 26,
+                          fontSize: 22.0,
                           fontWeight: FontWeight.w700,
-                          height: 1.35,
+                          height: 1.30,
                           color: titleColor,
                           letterSpacing: 0.0,
                         ),
@@ -866,6 +924,74 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                           ? AppColors.borderDark
                                           : const Color(0xFFE5E7EB)),
 
+                                  // Dislikes Metric Pill
+                                  AnimatedBuilder(
+                                    animation: AppState.instance,
+                                    builder: (context, _) {
+                                      final targetId = article.id.isNotEmpty
+                                          ? article.id
+                                          : article.slug;
+                                      final isDisliked =
+                                          AppState.instance.isDisliked(targetId) ||
+                                              article.isDisliked;
+
+                                      return InkWell(
+                                        onTap: _toggleDislike,
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 16, vertical: 6),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              AnimatedSwitcher(
+                                                duration: const Duration(
+                                                    milliseconds: 250),
+                                                transitionBuilder:
+                                                    (child, anim) =>
+                                                        ScaleTransition(
+                                                            scale: anim,
+                                                            child: child),
+                                                child: Icon(
+                                                  isDisliked
+                                                      ? Icons.thumb_down_rounded
+                                                      : Icons.thumb_down_outlined,
+                                                  key: ValueKey(isDisliked),
+                                                  color: isDisliked
+                                                      ? Colors.redAccent
+                                                      : (isDark
+                                                          ? AppColors.iconMutedDark
+                                                          : const Color(0xFF9CA3AF)),
+                                                  size: 20,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '${article.dislikes}',
+                                                style: TextStyle(
+                                                  fontSize: 15.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: isDisliked
+                                                      ? Colors.redAccent
+                                                      : (isDark
+                                                          ? AppColors.textLight
+                                                          : AppColors.readingTitleLight),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+
+                                  Container(
+                                      width: 1,
+                                      height: 22,
+                                      color: isDark
+                                          ? AppColors.borderDark
+                                          : const Color(0xFFE5E7EB)),
+
                                   // Comments Metric Pill
                                   AnimatedBuilder(
                                     animation: AppState.instance,
@@ -957,7 +1083,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                     style: GoogleFonts.notoSansTelugu(
                                       fontSize:
                                           AppState.instance.readingFontSize,
-                                      height: 1.90,
+                                      height: 1.62,
                                       letterSpacing: 0.2,
                                       color: bodyColor,
                                       fontWeight: FontWeight.w400,
@@ -980,10 +1106,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           ),
                         ),
 
-                      const SizedBox(height: 24),
-                      const BannerAdSlot(placementZone: 'article'),
-                      const SizedBox(height: 32),
-                      _buildRecommendations(),
+                      if (!_isUgc) ...[
+                        _buildReactionSection(isDark),
+                        const SizedBox(height: 16),
+                        const BannerAdSlot(placementZone: 'article'),
+                        const SizedBox(height: 32),
+                        _buildRecommendations(),
+                      ],
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -993,6 +1122,161 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildReactionSection(bool isDark) {
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    return AnimatedBuilder(
+      animation: AppState.instance,
+      builder: (context, _) {
+        final isLiked = article.isLiked ||
+            AppState.instance.isLiked(targetId) ||
+            (article.id.isNotEmpty && AppState.instance.isLiked(article.id));
+        final isDisliked = article.isDisliked ||
+            AppState.instance.isDisliked(targetId) ||
+            (article.id.isNotEmpty &&
+                AppState.instance.isDisliked(article.id));
+
+        final cardBg = isDark ? AppColors.surfaceElevatedDark : const Color(0xFFF3F4F6);
+        final activeColor = AppColors.primary;
+        final inactiveColor =
+            isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280);
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark
+                  ? AppColors.borderDark
+                  : Colors.black.withValues(alpha: 0.06),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              // Like Button
+              InkWell(
+                onTap: () => _toggleReaction('like'),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isLiked
+                            ? Icons.thumb_up_rounded
+                            : Icons.thumb_up_alt_outlined,
+                        color: isLiked ? activeColor : inactiveColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatCount(article.likes).isNotEmpty
+                            ? _formatCount(article.likes)
+                            : (AppState.instance.language == 'Telugu'
+                                ? 'లైక్'
+                                : 'Like'),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isLiked ? activeColor : inactiveColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Divider
+              Container(
+                height: 24,
+                width: 1,
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+
+              // Dislike Button
+              InkWell(
+                onTap: () => _toggleReaction('dislike'),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isDisliked
+                            ? Icons.thumb_down_rounded
+                            : Icons.thumb_down_alt_outlined,
+                        color: isDisliked ? Colors.redAccent : inactiveColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatCount(article.dislikes).isNotEmpty
+                            ? _formatCount(article.dislikes)
+                            : (AppState.instance.language == 'Telugu'
+                                ? 'డిస్‌లైక్'
+                                : 'Dislike'),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDisliked ? Colors.redAccent : inactiveColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Divider
+              Container(
+                height: 24,
+                width: 1,
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+
+              // Share Button
+              InkWell(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  _share();
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.share_rounded,
+                        color: inactiveColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        AppState.instance.language == 'Telugu' ? 'షేర్' : 'Share',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: inactiveColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1123,7 +1407,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     final paragraphStyle = GoogleFonts.notoSansTelugu(
       fontSize: AppState.instance.readingFontSize,
-      height: 1.90,
+      height: 1.62,
       color: bodyColor,
       fontWeight: FontWeight.w400,
       letterSpacing: 0.2,

@@ -21,9 +21,9 @@ class NewsArticle {
   final DateTime publishedAt;
   int likes;
 
-  /// Sent by the backend as `dislike_count`; previously dropped on the floor,
-  /// which is why the dislike button had no number beside it.
-  final int dislikes;
+  /// Sent by the backend as `dislike_count` or `dislikes_count`.
+  /// Mutable: updated optimistically and synchronized on reaction responses.
+  int dislikes;
 
   /// Mutable: comment count is updated in place by the live comment stream.
   int comments;
