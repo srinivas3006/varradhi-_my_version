@@ -17,6 +17,7 @@ import 'create_post_screen.dart';
 import 'location_selection_screen.dart';
 import 'news_detail_screen.dart';
 import 'search_screen.dart';
+import '../localization/location_translations.dart';
 
 class LocalNewsTab extends StatefulWidget {
   const LocalNewsTab({super.key});
@@ -1093,24 +1094,31 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
   }
 
   String _locationLabelFor(NewsArticle article) {
-    if (_isCoverage(article, 'global')) return 'India / Global';
+    if (_isCoverage(article, 'global')) return 'భారత్ / అంతర్జాతీయం';
     if (_isCoverage(article, 'state')) {
-      return _hasText(article.state)
+      final state = _hasText(article.state)
           ? article.state!.trim()
           : AppState.instance.stateName;
+      return LocationTranslations.toTelugu(state);
     }
     if (_isCoverage(article, 'district')) {
       final district = _hasText(article.district)
           ? article.district!.trim()
           : AppState.instance.district;
-      return district.isEmpty ? 'District' : '$district District';
+      final districtTe = LocationTranslations.toTelugu(district);
+      return districtTe.isEmpty ? 'జిల్లా' : '$districtTe జిల్లా';
     }
-    if (_hasText(article.village)) return article.village!.trim();
-    if (_hasText(article.subdistrict)) return article.subdistrict!.trim();
+    if (_hasText(article.village)) {
+      return LocationTranslations.toTelugu(article.village!.trim());
+    }
+    if (_hasText(article.subdistrict)) {
+      return LocationTranslations.toTelugu(article.subdistrict!.trim());
+    }
     if (_hasText(article.district)) {
-      return '${article.district!.trim()} District';
+      final districtTe = LocationTranslations.toTelugu(article.district!.trim());
+      return '$districtTe జిల్లా';
     }
-    return 'Local';
+    return 'స్థానిక వార్తలు';
   }
 
   Map<String, FeedPresentationItem<NewsArticle>> _sectionAdSlots = {};
@@ -1305,7 +1313,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'No local news available for your area yet.',
+              'దయచేసి మీ ప్రాంతాన్ని మార్చి చూడండి లేదా కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -1365,6 +1373,11 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     final selectedSubdistrict = AppState.instance.subdistrict;
     final selectedDistrict = AppState.instance.district;
     final selectedState = AppState.instance.stateName;
+
+    final selectedVillageTe = LocationTranslations.toTelugu(selectedVillage);
+    final selectedSubdistrictTe = LocationTranslations.toTelugu(selectedSubdistrict);
+    final selectedDistrictTe = LocationTranslations.toTelugu(selectedDistrict);
+    final selectedStateTe = LocationTranslations.toTelugu(selectedState);
 
     final hasAnyContent = _villageArticles.isNotEmpty ||
         _mandalArticles.isNotEmpty ||
@@ -1427,7 +1440,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                       teluguTitle: 'గ్రామ వార్తలు',
                                       englishTitle:
                                           'గ్రామ ముఖ్యాంశాలు & నివేదికలు',
-                                      locationTag: selectedVillage,
+                                      locationTag: selectedVillageTe,
                                       icon: Icons.holiday_village_rounded,
                                       accentColor: AppColors.primary,
                                     ),
@@ -1437,14 +1450,14 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                               a, cardColor, borderColor)),
                                       if (_villageHasMore)
                                         _buildLoadMoreButton(
-                                          title: selectedVillage,
+                                          title: selectedVillageTe,
                                           isLoading: _isLoadingMoreVillage,
                                           onLoadMore: _loadMoreVillage,
                                         ),
                                     ] else ...[
                                       _buildSectionEmptyCard(
                                         message:
-                                            '$selectedVillage గ్రామంలో ప్రస్తుతానికి వార్తలు లేవు. మీరే వార్తను పోస్ట్ చేయండి!',
+                                            '$selectedVillageTe గ్రామంలో ప్రస్తుతానికి వార్తలు లేవు. మీరే వార్తను పోస్ట్ చేయండి!',
                                         ctaText: 'సిటిజెన్ రిపోర్ట్ రాయండి',
                                         onCta: () => requireAuth(
                                           context,
@@ -1465,7 +1478,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     _buildSectionHeader(
                                       teluguTitle: 'మండల వార్తలు',
                                       englishTitle: 'మండల సమగ్ర సమాచారం',
-                                      locationTag: selectedSubdistrict,
+                                      locationTag: selectedSubdistrictTe,
                                       icon: Icons.location_city_rounded,
                                       accentColor: Colors.teal,
                                     ),
@@ -1475,14 +1488,14 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                               a, cardColor, borderColor)),
                                       if (_mandalHasMore)
                                         _buildLoadMoreButton(
-                                          title: selectedSubdistrict,
+                                          title: selectedSubdistrictTe,
                                           isLoading: _isLoadingMoreMandal,
                                           onLoadMore: _loadMoreMandal,
                                         ),
                                     ] else ...[
                                       _buildSectionEmptyCard(
                                         message:
-                                            '$selectedSubdistrict మండలంలో ప్రస్తుతానికి కొత్త వార్తలు లేవు.',
+                                            '$selectedSubdistrictTe మండలంలో ప్రస్తుతానికి కొత్త వార్తలు లేవు.',
                                         ctaText: 'వార్తను రిపోర్ట్ చేయండి',
                                         onCta: () => requireAuth(
                                           context,
@@ -1503,7 +1516,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     _buildSectionHeader(
                                       teluguTitle: 'జిల్లా వార్తలు',
                                       englishTitle: 'జిల్లా ముఖ్యాంశాలు',
-                                      locationTag: selectedDistrict,
+                                      locationTag: selectedDistrictTe,
                                       icon: Icons.domain_rounded,
                                       accentColor: Colors.indigo,
                                     ),
@@ -1513,14 +1526,14 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                               a, cardColor, borderColor)),
                                       if (_districtHasMore)
                                         _buildLoadMoreButton(
-                                          title: '$selectedDistrict జిల్లా',
+                                          title: '$selectedDistrictTe జిల్లా',
                                           isLoading: _isLoadingMoreDistrict,
                                           onLoadMore: _loadMoreDistrict,
                                         ),
                                     ] else ...[
                                       _buildSectionEmptyCard(
                                         message:
-                                            '$selectedDistrict జిల్లాలో తాజా కథనాలు అందుబాటులో లేవు.',
+                                            '$selectedDistrictTe జిల్లాలో తాజా కథనాలు అందుబాటులో లేవు.',
                                         ctaText: 'మళ్ళీ రిఫ్రెష్ చేయండి',
                                         onCta: _refresh,
                                       ),
@@ -1532,7 +1545,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                     _buildSectionHeader(
                                       teluguTitle: 'రాష్ట్ర ముఖ్యాంశాలు',
                                       englishTitle: 'రాష్ట్ర వార్తా సమాచారం',
-                                      locationTag: selectedState,
+                                      locationTag: selectedStateTe,
                                       icon: Icons.map_rounded,
                                       accentColor: Colors.deepOrange,
                                     ),
@@ -1562,7 +1575,7 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                                       ),
                                     if (_globalHasMore)
                                       _buildLoadMoreButton(
-                                          title: 'India / Global',
+                                          title: 'భారత్ / అంతర్జాతీయం',
                                           isLoading: _isLoadingMoreGlobal,
                                           onLoadMore: _loadMoreGlobal),
                                   ],

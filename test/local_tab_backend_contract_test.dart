@@ -275,17 +275,17 @@ void main() {
       );
       expect(stateNewsReq.queryParameters['state'], 'Telangana');
 
-      // 8. Verify UI Elements: Section headers and location tags
+      // 8. Verify UI Elements: Section headers and localized Telugu location tags
       expect(find.text('గ్రామ వార్తలు'), findsOneWidget);
-      expect(find.text('Kesaram'), findsWidgets);
+      expect(find.text('కేసారం'), findsWidgets);
       expect(find.text('మండల వార్తలు'), findsOneWidget);
-      expect(find.text('Jajireddygudem'), findsWidgets);
+      expect(find.text('జాజిరెడ్డిగూడెం'), findsWidgets);
       expect(find.text('జిల్లా వార్తలు'), findsOneWidget);
-      expect(find.text('Suryapet'), findsWidgets);
+      expect(find.text('సూర్యాపేట'), findsWidgets);
 
       // 9. Verify Per-Section Pagination:
       // Find the Village Load More button and tap it
-      final villageLoadMore = find.text('ఇంకా చూడండి (Kesaram)');
+      final villageLoadMore = find.text('ఇంకా చూడండి (కేసారం)');
       expect(villageLoadMore, findsOneWidget);
 
       final preCount = requests.length;
