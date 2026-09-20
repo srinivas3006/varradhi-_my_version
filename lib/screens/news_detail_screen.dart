@@ -753,15 +753,17 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       Text(
                         article.title,
                         style: GoogleFonts.notoSansTelugu(
-                          fontSize: 22.0,
+                          fontSize: 20.0,
                           fontWeight: FontWeight.w700,
-                          height: 1.30,
-                          color: titleColor,
+                          height: 1.4,
+                          color: isDark
+                              ? AppColors.readingTitleDark
+                              : const Color(0xFF212121),
                           letterSpacing: 0.0,
                         ),
                       ),
 
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Author & Timestamp Row
                       Row(
@@ -796,238 +798,48 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                       const SizedBox(height: 16),
 
-                      // Article engagement or UGC moderation actions.
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? AppColors.surfaceElevatedDark
-                              : const Color(0xFFF3F4F6),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                              color: isDark
-                                  ? AppColors.borderDark
-                                  : const Color(0xFFE5E7EB),
-                              width: 0.8),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: _isUgc
-                              ? [
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.campaign_outlined,
-                                          color: AppColors.primary, size: 22),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        tr('citizen_report'),
-                                        style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w700),
-                                      ),
-                                    ],
-                                  ),
-                                  TextButton.icon(
-                                    onPressed: _showUgcReportSheet,
-                                    icon: const Icon(Icons.flag_outlined,
-                                        size: 18),
-                                    label: Text(tr('report')),
-                                  ),
-                                ]
-                              : [
-                                  // Likes Metric Pill
-                                  AnimatedBuilder(
-                                    animation: AppState.instance,
-                                    builder: (context, _) {
-                                      final targetId = article.id.isNotEmpty
-                                          ? article.id
-                                          : article.slug;
-                                      final isLiked =
-                                          AppState.instance.isLiked(targetId) ||
-                                              article.isLiked;
-
-                                      return InkWell(
-                                        onTap: _toggleLike,
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 6),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              AnimatedSwitcher(
-                                                duration: const Duration(
-                                                    milliseconds: 250),
-                                                transitionBuilder:
-                                                    (child, anim) =>
-                                                        ScaleTransition(
-                                                            scale: anim,
-                                                            child: child),
-                                                child: Icon(
-                                                  isLiked
-                                                      ? Icons.favorite_rounded
-                                                      : Icons
-                                                          .favorite_outline_rounded,
-                                                  key: ValueKey(isLiked),
-                                                  color: isLiked
-                                                      ? AppColors.heartRed
-                                                      : (isDark
-                                                          ? AppColors.iconMutedDark
-                                                          : const Color(0xFF9CA3AF)),
-                                                  size: 24,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '${article.likes}',
-                                                style: TextStyle(
-                                                  fontSize: 15.5,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: isLiked
-                                                      ? AppColors.heartRed
-                                                      : (isDark
-                                                          ? AppColors.textLight
-                                                          : AppColors.readingTitleLight),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-
-                                  Container(
-                                      width: 1,
-                                      height: 22,
-                                      color: isDark
-                                          ? AppColors.borderDark
-                                          : const Color(0xFFE5E7EB)),
-
-                                  // Dislikes Metric Pill
-                                  AnimatedBuilder(
-                                    animation: AppState.instance,
-                                    builder: (context, _) {
-                                      final targetId = article.id.isNotEmpty
-                                          ? article.id
-                                          : article.slug;
-                                      final isDisliked =
-                                          AppState.instance.isDisliked(targetId) ||
-                                              article.isDisliked;
-
-                                      return InkWell(
-                                        onTap: _toggleDislike,
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 6),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              AnimatedSwitcher(
-                                                duration: const Duration(
-                                                    milliseconds: 250),
-                                                transitionBuilder:
-                                                    (child, anim) =>
-                                                        ScaleTransition(
-                                                            scale: anim,
-                                                            child: child),
-                                                child: Icon(
-                                                  isDisliked
-                                                      ? Icons.thumb_down_rounded
-                                                      : Icons.thumb_down_outlined,
-                                                  key: ValueKey(isDisliked),
-                                                  color: isDisliked
-                                                      ? Colors.redAccent
-                                                      : (isDark
-                                                          ? AppColors.iconMutedDark
-                                                          : const Color(0xFF9CA3AF)),
-                                                  size: 20,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '${article.dislikes}',
-                                                style: TextStyle(
-                                                  fontSize: 15.5,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: isDisliked
-                                                      ? Colors.redAccent
-                                                      : (isDark
-                                                          ? AppColors.textLight
-                                                          : AppColors.readingTitleLight),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-
-                                  Container(
-                                      width: 1,
-                                      height: 22,
-                                      color: isDark
-                                          ? AppColors.borderDark
-                                          : const Color(0xFFE5E7EB)),
-
-                                  // Comments Metric Pill
-                                  AnimatedBuilder(
-                                    animation: AppState.instance,
-                                    builder: (context, _) {
-                                      final count = AppState.instance
-                                          .getDisplayCommentCount(
-                                              article.id, article.comments);
-                                      return InkWell(
-                                        onTap: () {
-                                          HapticFeedback.lightImpact();
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) => CommentsScreen(
-                                                  article: article),
-                                            ),
-                                          ).then((_) {
-                                            if (mounted) setState(() {});
-                                          });
-                                        },
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16, vertical: 6),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                  Icons
-                                                      .chat_bubble_outline_rounded,
-                                                  color: isDark
-                                                      ? AppColors.iconMutedDark
-                                                      : const Color(0xFF9CA3AF),
-                                                  size: 24),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '$count',
-                                                style: TextStyle(
-                                                    fontSize: 15.5,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: isDark
-                                                        ? AppColors.textLight
-                                                        : AppColors.readingTitleLight),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
+                      if (_isUgc) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? AppColors.surfaceElevatedDark
+                                : const Color(0xFFF3F4F6),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                                color: isDark
+                                    ? AppColors.borderDark
+                                    : const Color(0xFFE5E7EB),
+                                width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.campaign_outlined,
+                                      color: AppColors.primary, size: 22),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    tr('citizen_report'),
+                                    style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700),
                                   ),
                                 ],
+                              ),
+                              TextButton.icon(
+                                onPressed: _showUgcReportSheet,
+                                icon: const Icon(Icons.flag_outlined,
+                                    size: 18),
+                                label: Text(tr('report')),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-
-                      const SizedBox(height: 24),
+                        const SizedBox(height: 16),
+                      ],
 
                       // Article Content Body
                       if (_isLoadingDetail && article.body.isEmpty)
@@ -1062,11 +874,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                   builder: (context, _) => Text(
                                     article.summary,
                                     style: GoogleFonts.notoSansTelugu(
-                                      fontSize:
-                                          AppState.instance.readingFontSize,
-                                      height: 1.62,
+                                      fontSize: AppState.instance.readingFontSize > 0
+                                          ? (AppState.instance.readingFontSize * (16.0 / 19.0))
+                                          : 16.0,
+                                      height: 1.65,
                                       letterSpacing: 0.2,
-                                      color: bodyColor,
+                                      color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),
                                       fontWeight: FontWeight.w400,
                                     ),
                                   ),
@@ -1222,6 +1035,62 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 color: isDark ? Colors.white12 : Colors.black12,
               ),
 
+              // Comment Button
+              AnimatedBuilder(
+                animation: AppState.instance,
+                builder: (context, _) {
+                  final count = AppState.instance
+                      .getDisplayCommentCount(article.id, article.comments);
+                  return InkWell(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CommentsScreen(article: article),
+                        ),
+                      ).then((_) {
+                        if (mounted) setState(() {});
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline_rounded,
+                            color: inactiveColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _formatCount(count).isNotEmpty
+                                ? _formatCount(count)
+                                : (AppState.instance.language == 'Telugu'
+                                    ? 'కామెంట్'
+                                    : 'Comment'),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: inactiveColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              // Divider
+              Container(
+                height: 24,
+                width: 1,
+                color: isDark ? Colors.white12 : Colors.black12,
+              ),
+
               // Share Button
               InkWell(
                 onTap: () {
@@ -1294,10 +1163,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       paragraphs.add(text.trim());
     }
 
+    final effectiveFontSize = AppState.instance.readingFontSize > 0
+        ? (AppState.instance.readingFontSize * (16.0 / 19.0))
+        : 16.0;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final paragraphStyle = GoogleFonts.notoSansTelugu(
-      fontSize: AppState.instance.readingFontSize,
-      height: 1.62,
-      color: bodyColor,
+      fontSize: effectiveFontSize,
+      height: 1.65,
+      color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),
       fontWeight: FontWeight.w400,
       letterSpacing: 0.2,
     );

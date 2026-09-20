@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../../theme/app_theme.dart';
 
 class SectionHeader extends StatelessWidget {
   final String title;
@@ -17,31 +19,41 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 8 : 16),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 8 : 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
             child: Text(
               title,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+              style: GoogleFonts.notoSansTelugu(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),
           if (onTrailingTap != null && trailingText != null)
-            TextButton(
-              onPressed: onTrailingTap,
-              style: TextButton.styleFrom(
-                visualDensity: compact ? VisualDensity.compact : null,
-              ),
-              child: Text(
-                trailingText!,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).primaryColor,
+            InkWell(
+              onTap: onTrailingTap,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  trailingText!,
+                  style: GoogleFonts.notoSansTelugu(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.5,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
             ),

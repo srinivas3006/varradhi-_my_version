@@ -32,8 +32,8 @@ class AppColors {
   static const iconMutedDark = Color(0xFF9CA3AF);  // Default inactive icons & placeholders
   
   // Reading & Article UI Tokens (Optimized for Telugu & Maximum Readability)
-  static const readingTitleLight = Color(0xFF111827); // Dark gray headline, avoid pure black #000000
-  static const readingBodyLight = Color(0xFF374151);  // Soft dark gray body, optimal contrast
+  static const readingTitleLight = Color(0xFF212121); // #212121 headline
+  static const readingBodyLight = Color(0xFF424242);  // #424242 body, optimal contrast
   static const readingMetaLight = Color(0xFF6B7280);  // Accessible meta text
   static const readingTitleDark = Color(0xFFFFFFFF);  // Pure white headline in dark mode
   static const readingBodyDark = Color(0xFFE5E7EB);   // Soft white body in dark mode
@@ -53,11 +53,15 @@ class AppTheme {
     final base = ThemeData.light();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
+      primaryColor: AppColors.primary,
       scaffoldBackgroundColor: AppColors.background,
       colorScheme: base.colorScheme.copyWith(
         primary: AppColors.primary,
         secondary: AppColors.primary,
         surface: Colors.white,
+        surfaceContainerHighest: const Color(0xFFF3F4F6),
+        onSurface: AppColors.textDark,
+        onSurfaceVariant: const Color(0xFF6B7280),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.white,
@@ -77,13 +81,16 @@ class AppTheme {
     final base = ThemeData.dark();
     final textTheme = _textThemeFor(language, base);
     return base.copyWith(
+      primaryColor: AppColors.primary,
       scaffoldBackgroundColor: AppColors.backgroundDark,
       colorScheme: base.colorScheme.copyWith(
         brightness: Brightness.dark,
         primary: AppColors.primary,
         secondary: AppColors.brandBlue,
         surface: AppColors.cardDarkNavy,
+        surfaceContainerHighest: AppColors.surfaceElevatedDark,
         onSurface: AppColors.textLight,
+        onSurfaceVariant: AppColors.readingMetaDark,
         onPrimary: Colors.white,
         error: AppColors.error,
       ),

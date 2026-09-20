@@ -18,6 +18,7 @@ import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
 import 'device_sessions_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../localization/app_translations.dart';
 
 class ProfileTab extends StatefulWidget {
@@ -157,9 +158,9 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     icon: Icons.bookmark_border_rounded,
                     title: tr('saved_articles'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                    onTap: () => _handleGatedAction(state, () {
+                    onTap: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const BookmarksScreen()));
-                    }),
+                    },
                   ),
                   _buildListTile(
                     isDark: isDark,
@@ -297,7 +298,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 const SizedBox(height: 20),
                 Center(
                   child: Text(
-                    'Vaaradhi v1.0.0',
+                    'వారధి న్యూస్ v1.0.0',
                     style: TextStyle(
                       color: isDark ? Colors.white38 : Colors.black38, 
                       fontSize: 12,
@@ -505,7 +506,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                   children: [
                     Flexible(
                       child: Text(
-                        state.userName,
+                        state.userName == 'Guest User' ? 'గెస్ట్ యూజర్' : state.userName,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold),
                       ),
@@ -746,7 +747,12 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         title,
-        style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+        style: GoogleFonts.notoSansTelugu(
+          color: isDark ? Colors.white38 : Colors.black45,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.8,
+        ),
       ),
     );
   }
@@ -793,7 +799,14 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
             ),
         ],
       ),
-      title: Text(title, style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 15, fontWeight: FontWeight.w500)),
+      title: Text(
+        title,
+        style: GoogleFonts.notoSansTelugu(
+          color: isDark ? Colors.white : Colors.black87,
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
       trailing: trailing,
     );
   }

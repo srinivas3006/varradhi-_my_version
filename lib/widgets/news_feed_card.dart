@@ -180,8 +180,10 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                   child: AnimatedBuilder(
                       animation: AppState.instance,
                       builder: (context, _) {
-                        final isSaved =
-                            AppState.instance.isBookmarked(article.id);
+                        final isSaved = article.isBookmarked ||
+                            AppState.instance.isBookmarked(article.id) ||
+                            (article.slug.isNotEmpty &&
+                                AppState.instance.isBookmarked(article.slug));
                         return _iconPill(
                           icon:
                               isSaved ? Icons.bookmark : Icons.bookmark_border,

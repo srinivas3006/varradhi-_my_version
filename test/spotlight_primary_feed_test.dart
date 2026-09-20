@@ -198,7 +198,13 @@ void main() {
       AppState.instance.district = 'Warangal';
       AppState.instance.stateName = 'Telangana';
       await controller.updateLocation();
-      expect(controller.state.locationName, contains('Warangal'));
+      // Location names are localized now, so the district surfaces as
+      // వరంగల్ in a Telugu UI. Assert the active rendering rather than
+      // pinning the English spelling.
+      expect(
+        controller.state.locationName,
+        anyOf(contains('Warangal'), contains('వరంగల్')),
+      );
 
       controller.dispose();
     });

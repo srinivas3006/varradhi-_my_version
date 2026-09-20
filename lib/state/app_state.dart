@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../repositories/ad_repository.dart';
+import '../localization/location_translations.dart';
 
 /// Simple app-wide state singleton. Scalar fields (onboarding completion,
 /// language, location, coins, login, reporter status) survive app restarts
@@ -667,6 +668,15 @@ class AppState extends ChangeNotifier {
   }
 
   String get displayLocation {
+    if (uiLanguageCode == 'te' || language.toLowerCase().contains('telugu')) {
+      return LocationTranslations.formatDisplayLocation(
+        state: stateName,
+        district: district,
+        city: city,
+        subdistrict: subdistrict,
+        village: village,
+      );
+    }
     if (village.isNotEmpty) {
       return subdistrict.isNotEmpty
           ? '$village, $subdistrict'

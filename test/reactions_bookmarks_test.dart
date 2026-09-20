@@ -200,6 +200,52 @@ void main() {
       state.toggleBookmark('a1');
       expect(state.isBookmarked('a1'), isFalse);
     });
+
+    test('getBookmarks parses standard DRF results envelope with nested article', () async {
+      serve((o) async {
+        return _json({
+          'count': 1,
+          'next': null,
+          'results': [
+            {
+              'id': 'bm_1',
+              'article': {
+                'id': 'art_1',
+                'title': 'Saved Article 1',
+                'slug': 'saved-article-1',
+              },
+            }
+          ]
+        }, 200);
+      });
+
+      final articles = await ApiService.instance.getBookmarks();
+      expect(articles.length, 1);
+      expect(articles.first.id, 'art_1');
+      expect(articles.first.title, 'Saved Article 1');
+      expect(articles.first.isBookmarked, isTrue);
+    });
+
+    test('getBookmarks parses wrapped data envelope and preserves bookmarked flag', () async {
+      serve((o) async {
+        return _json({
+          'data': [
+            {
+              'id': 'bm_2',
+              'article': {
+                'id': 'art_2',
+                'title': 'Saved Article 2',
+              },
+            }
+          ]
+        }, 200);
+      });
+
+      final articles = await ApiService.instance.getBookmarks();
+      expect(articles.length, 1);
+      expect(articles.first.id, 'art_2');
+      expect(articles.first.isBookmarked, isTrue);
+    });
   });
 
   group('feed and detail read the same state', () {
