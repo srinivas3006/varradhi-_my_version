@@ -1,7 +1,7 @@
 import 'dart:async';
 import '../repositories/ad_repository.dart';
 import '../core/ads/ad_placement.dart';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
@@ -384,9 +384,37 @@ class ApiService {
     return response.data['data'] as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> data) async {
-    final response = await _dio.patch('/api/v1/auth/me/', data: data);
-    return response.data['data'] as Map<String, dynamic>;
+  /// PATCH /api/v1/auth/me/ — partial profile update.
+  ///
+  /// Accepts full_name, profile_image, preferred_language, theme, font_size.
+  /// Pass [imageFile] to send the avatar as multipart/form-data, which is how
+  /// the endpoint takes an actual file; everything else goes as JSON.
+  ///
+  /// Returns the updated profile, so the caller can take the canonical
+  /// profile_image URL the server assigns rather than guessing it.
+  Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> data, {
+    File? imageFile,
+  }) async {
+    Object payload = data;
+
+    if (imageFile != null) {
+      // Same multipart shape the UGC uploads in this file already use.
+      payload = FormData.fromMap({
+        ...data,
+        'profile_image': await MultipartFile.fromFile(
+          imageFile.path,
+          filename: imageFile.path.split(Platform.pathSeparator).last,
+        ),
+      });
+    }
+
+    final response = await _dio.patch('/api/v1/auth/me/', data: payload);
+    final body = response.data;
+    if (body is Map && body['data'] is Map<String, dynamic>) {
+      return body['data'] as Map<String, dynamic>;
+    }
+    return body is Map<String, dynamic> ? body : <String, dynamic>{};
   }
 
   // --- Passwords ---

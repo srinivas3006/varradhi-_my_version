@@ -147,7 +147,9 @@ class _PosterCardState extends State<PosterCard> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: AspectRatio(
-                  aspectRatio: 4 / 5,
+                  // 9:16 — posters are authored portrait for sharing, and a
+                  // 4:5 box left the tall ones letterboxed under BoxFit.contain.
+                  aspectRatio: 9 / 16,
                   child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: Stack(

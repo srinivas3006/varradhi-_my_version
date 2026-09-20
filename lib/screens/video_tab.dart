@@ -20,7 +20,7 @@ import '../widgets/ads/bottom_sticky_ad_banner.dart';
 import 'location_selection_screen.dart';
 import 'search_screen.dart';
 import 'spotlight_screen.dart';
-import 'video_player_screen.dart';
+import 'shorts_viewer_screen.dart';
 
 class VideoTab extends StatefulWidget {
   final bool isActive;
@@ -212,12 +212,16 @@ class _VideoTabState extends State<VideoTab> {
       return;
     }
     HapticFeedback.selectionClick();
+
+    // This tab holds Shorts, so open the vertical 9:16 viewer positioned on
+    // the tapped item — not the landscape player, which letterboxed them.
+    // The whole loaded list goes with it so swiping up and down works.
+    final index = _videos.indexWhere((v) => v.id == video.id);
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => VideoPlayerScreen(
-          videoUrl: url,
-          title: video.title,
-          thumbnailUrl: video.thumbnailUrl,
+        builder: (_) => ShortsViewerScreen(
+          shorts: _videos,
+          initialIndex: index < 0 ? 0 : index,
         ),
       ),
     );
@@ -278,8 +282,9 @@ class _VideoTabState extends State<VideoTab> {
       );
     }
 
-    final featuredVideo = _videos.first;
-    final bulletinVideos = _videos.skip(1).toList();
+    // Every Short belongs in the Shorts feed now; the LIVE section above it
+    // carries real broadcasts instead of borrowing the first Short.
+    final bulletinVideos = _videos;
     final bottomPadding = (_bottomAd != null ? 162.0 : 94.0) +
         MediaQuery.of(context).padding.bottom;
 
@@ -298,22 +303,8 @@ class _VideoTabState extends State<VideoTab> {
                 SliverToBoxAdapter(child: _buildHeader(context)),
                 SliverToBoxAdapter(
                   child: _buildSectionTitle(
-                    leading: 'LIVE',
-                    title: 'On air now',
-                    trailing: '${_videos.isNotEmpty ? 1 : 0} channels',
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: _VideoListCard(
-                    video: featuredVideo,
-                    featured: true,
-                    onTap: () => _openVideo(featuredVideo),
-                  ),
-                ),
-                SliverToBoxAdapter(
-                  child: _buildSectionTitle(
                     isBulletin: true,
-                    title: 'Video bulletins',
+                    title: 'Shorts',
                     trailing: 'My district',
                     showDistrictIcon: true,
                     onTrailingTap: _changeLocation,
@@ -595,13 +586,11 @@ class _VideoTabState extends State<VideoTab> {
 
 class _VideoListCard extends StatelessWidget {
   final VideoItem video;
-  final bool featured;
   final VoidCallback onTap;
 
   const _VideoListCard({
     required this.video,
     required this.onTap,
-    this.featured = false,
   });
 
   @override
@@ -613,7 +602,7 @@ class _VideoListCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
-          elevation: featured ? 2 : 0,
+          elevation: 0,
           shadowColor: Colors.black.withValues(alpha: 0.06),
           child: InkWell(
             onTap: onTap,
@@ -654,30 +643,12 @@ class _VideoListCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (featured)
-                      Positioned(
-                        left: 10,
-                        top: 10,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFC80022),
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: const Text('LIVE',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w900)),
-                        ),
-                      ),
                     // Central Solid Red Play Button (matching YouTube video screen reference!)
                     Positioned.fill(
                       child: Center(
                         child: Container(
-                          width: featured ? 54 : 46,
-                          height: featured ? 54 : 46,
+                          width: 46,
+                          height: 46,
                           decoration: BoxDecoration(
                             color: const Color(0xFFC80022),
                             shape: BoxShape.circle,
@@ -690,7 +661,7 @@ class _VideoListCard extends StatelessWidget {
                             ],
                           ),
                           child: Icon(Icons.play_arrow_rounded,
-                              color: Colors.white, size: featured ? 32 : 26),
+                              color: Colors.white, size: 26),
                         ),
                       ),
                     ),
@@ -715,63 +686,25 @@ class _VideoListCard extends StatelessWidget {
                   ],
                 ),
                 Padding(
-                  padding: EdgeInsets.fromLTRB(14, featured ? 12 : 10, 14, 12),
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         video.title.isNotEmpty
                             ? video.title
-                            : (featured ? 'tv9 live' : 'Video bulletin'),
+                            : 'Short',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: const Color(0xFF141414),
-                          fontSize: featured ? 16 : 14.5,
+                          fontSize: 14.5,
                           height: 1.3,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 6),
-                      if (featured)
-                        Row(
-                          children: [
-                            const Icon(Icons.sensors_rounded,
-                                size: 14, color: Color(0xFF6B7280)),
-                            const SizedBox(width: 4),
-                            Text(
-                              video.viewsCount > 0
-                                  ? video.views
-                                  : (video.views.isNotEmpty
-                                      ? video.views
-                                      : '2'),
-                              style: const TextStyle(
-                                  color: Color(0xFF6B7280),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700),
-                            ),
-                            if (video.channel.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              Text('•',
-                                  style:
-                                      TextStyle(color: Colors.grey.shade400)),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  video.channel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: Color(0xFF6B7280),
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ],
-                        )
-                      else
-                        Row(
+                      Row(
                           children: [
                             const Icon(Icons.remove_red_eye_outlined,
                                 size: 14, color: Color(0xFF6B7280)),

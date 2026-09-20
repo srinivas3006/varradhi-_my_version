@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -267,6 +268,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     hasOnboarded = prefs.getBool('hasOnboarded') ?? false;
     language = prefs.getString('language') ?? 'Telugu';
+    profileImageUrl = prefs.getString('profileImageUrl');
     // Absent key means never chosen — stays null so the feed is unfiltered.
     _contentLanguage = prefs.getString('content_language');
     contentLanguagePrompted =
@@ -375,6 +377,9 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('hasOnboarded', hasOnboarded);
     await prefs.setString('language', language);
+    if (profileImageUrl != null && profileImageUrl!.isNotEmpty) {
+      await prefs.setString('profileImageUrl', profileImageUrl!);
+    }
     await prefs.setBool(
         'content_language_prompted', contentLanguagePrompted);
     if (_contentLanguage == null) {
@@ -500,6 +505,18 @@ class AppState extends ChangeNotifier {
       } else if (me['email'] != null && me['email'].toString().isNotEmpty) {
         userName = me['email'].toString();
       }
+      // profile_image is read-only on /auth/me/ — the documented editable
+      // fields are full_name, preferred_language, theme and font_size only.
+      // The app could not display an avatar set anywhere else because it
+      // never read this back.
+      final serverImage = (me['profile_image'] ??
+              me['profileImage'] ??
+              (me['profile'] is Map ? me['profile']['profile_image'] : null))
+          ?.toString();
+      if (serverImage != null && serverImage.startsWith('http')) {
+        profileImageUrl = serverImage;
+      }
+
       if (me['phone'] != null) userPhone = me['phone'].toString();
       if (me['id'] != null) userId = me['id'].toString();
       // Apply the account's saved interface language. Without this the
@@ -772,23 +789,46 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  void toggleLike(String itemId) {
+  /// Toggles a like and tells the server.
+  ///
+  /// setReaction alone only writes the local sets and SharedPreferences, so
+  /// every caller of this method — double-tap on a spotlight card, the video
+  /// tab's like button — changed the icon and lost the like on the next
+  /// refresh, because the reaction never reached the backend. The spotlight
+  /// action bar and the detail screen called the API themselves, which is why
+  /// only some likes stuck.
+  Future<void> toggleLike(String itemId) async {
     if (itemId.isEmpty) return;
-    if (likedItemIds.contains(itemId)) {
-      setReaction(itemId, 'none');
-    } else {
-      setReaction(itemId, 'like');
+    final wasLiked = likedItemIds.contains(itemId);
+    final next = wasLiked ? 'none' : 'like';
+    final previous = getReaction(itemId);
+
+    setReaction(itemId, next);
+    await _syncReaction(itemId, next, previous);
+  }
+
+  Future<void> toggleDislike(String itemId) async {
+    if (itemId.isEmpty) return;
+    final wasDisliked = dislikedItemIds.contains(itemId);
+    final next = wasDisliked ? 'none' : 'dislike';
+    final previous = getReaction(itemId);
+
+    setReaction(itemId, next);
+    await _syncReaction(itemId, next, previous);
+  }
+
+  /// Sends the reaction, restoring [previous] if the server rejects it, so
+  /// the icon never claims a reaction the backend does not hold.
+  Future<void> _syncReaction(
+      String itemId, String next, String previous) async {
+    try {
+      await ApiService.instance.postArticleReaction(itemId, next);
+    } catch (e) {
+      debugPrint('[AppState] reaction sync failed for $itemId: $e');
+      setReaction(itemId, previous);
     }
   }
 
-  void toggleDislike(String itemId) {
-    if (itemId.isEmpty) return;
-    if (dislikedItemIds.contains(itemId)) {
-      setReaction(itemId, 'none');
-    } else {
-      setReaction(itemId, 'dislike');
-    }
-  }
 
   void setReaction(String itemId, String reaction) {
     if (itemId.isEmpty) return;
@@ -921,14 +961,68 @@ class AppState extends ChangeNotifier {
     if (changed) notifyListeners();
   }
 
-  void updateProfile({required String name, String? imagePath}) {
+  /// Avatar URL the backend holds, when it has one.
+  ///
+  /// Distinct from [profileImagePath], which is a local file the reader
+  /// picked. There is no upload endpoint, so a locally picked image stays on
+  /// the device — see the report accompanying this change.
+  String? profileImageUrl;
+
+  /// Saves the profile, uploading the avatar through the existing
+  /// PATCH /api/v1/auth/me/ when [imagePath] is a local file.
+  ///
+  /// profile_image is an editable field on that endpoint and takes a real
+  /// file via multipart, so the picked image is uploaded rather than kept as
+  /// a device-local path that no other device could ever see. The URL the
+  /// server returns becomes the canonical one.
+  ///
+  /// Returns false if the save failed, with the previous avatar restored.
+  Future<bool> updateProfile({
+    required String name,
+    String? imagePath,
+  }) async {
+    final previousName = userName;
+    final previousUrl = profileImageUrl;
+    final previousPath = profileImagePath;
+
     userName = name;
-    profileImagePath = imagePath;
+    // Shown immediately so the reader sees their pick while it uploads.
+    if (imagePath != null && imagePath.isNotEmpty) {
+      profileImagePath = imagePath;
+    }
     notifyListeners();
-    _persist();
-    // Note: profileImagePath is a local file path, not a backend field —
-    // only full_name is part of the /auth/me/ profile contract.
-    _syncProfileToBackend(fullName: name);
+
+    final isLocalFile = imagePath != null &&
+        imagePath.isNotEmpty &&
+        !imagePath.startsWith('http');
+
+    try {
+      final updated = await ApiService.instance.updateProfile(
+        {'full_name': name},
+        imageFile: isLocalFile ? File(imagePath) : null,
+      );
+
+      final serverImage = (updated['profile_image'] ??
+              updated['profileImage'])
+          ?.toString();
+      if (serverImage != null && serverImage.startsWith('http')) {
+        profileImageUrl = serverImage;
+        // The local copy has served its purpose; the server URL is canonical
+        // and survives reinstall.
+        profileImagePath = null;
+      }
+
+      notifyListeners();
+      await _persist();
+      return true;
+    } catch (e) {
+      debugPrint('[AppState] profile update failed: $e');
+      userName = previousName;
+      profileImageUrl = previousUrl;
+      profileImagePath = previousPath;
+      notifyListeners();
+      return false;
+    }
   }
 
   /// Clears local session state first. If the backend logout call that

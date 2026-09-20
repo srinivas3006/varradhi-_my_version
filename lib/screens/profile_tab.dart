@@ -28,6 +28,10 @@ class ProfileTab extends StatefulWidget {
 }
 
 class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateMixin {
+  /// True while the avatar is uploading, so the save button cannot be
+  /// tapped twice into two multipart requests.
+  bool _savingProfile = false;
+
   late AnimationController _themeAnimController;
 
   @override
@@ -901,11 +905,49 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                               elevation: 0,
                             ),
-                            onPressed: () {
-                              state.updateProfile(name: nameController.text.trim(), imagePath: tempImagePath);
-                              Navigator.pop(context);
-                            },
-                            child: const Text('మార్పులను సేవ్ చేయండి', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            onPressed: _savingProfile
+                                ? null
+                                : () async {
+                                    final messenger =
+                                        ScaffoldMessenger.of(context);
+                                    setModalState(
+                                        () => _savingProfile = true);
+
+                                    // Awaited so the avatar upload can report
+                                    // failure — firing and forgetting left a
+                                    // rejected upload looking like a save.
+                                    final ok = await state.updateProfile(
+                                      name: nameController.text.trim(),
+                                      imagePath: tempImagePath,
+                                    );
+                                    if (!context.mounted) return;
+                                    setModalState(
+                                        () => _savingProfile = false);
+
+                                    if (ok) {
+                                      Navigator.pop(context);
+                                      return;
+                                    }
+                                    messenger
+                                      ..removeCurrentSnackBar()
+                                      ..showSnackBar(SnackBar(
+                                        content: Text(
+                                          state.language == 'Telugu'
+                                              ? 'ప్రొఫైల్ సేవ్ చేయడం విఫలమైంది.'
+                                              : 'Could not save your profile.',
+                                        ),
+                                        behavior: SnackBarBehavior.floating,
+                                      ));
+                                  },
+                            child: _savingProfile
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                        color: Colors.white),
+                                  )
+                                : const Text('మార్పులను సేవ్ చేయండి', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                         const SizedBox(height: 16),

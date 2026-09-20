@@ -165,7 +165,13 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
               behavior: HitTestBehavior.opaque,
               onTap: _handleAdTap,
               child: Center(
-                child: widget.ad.videoUrl.isNotEmpty
+                // 9:16 box for the creative. The card itself stays full-bleed
+                // with the blurred backdrop behind, but the ad is drawn into
+                // a fixed portrait frame so every creative lands the same
+                // shape regardless of the device it is on.
+                child: AspectRatio(
+                  aspectRatio: 9 / 16,
+                  child: widget.ad.videoUrl.isNotEmpty
                     ? AdActivityScope(
                         active: widget.active,
                         child: VideoAdCard(
@@ -204,6 +210,7 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
                           ],
                         ),
                       ),
+                ),
               ),
             ),
 

@@ -815,7 +815,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             color: isDark
                                 ? const Color(0xFF1A1A1A)
                                 : const Color(0xFFF3F4F6),
-                            image: (thumb != null && thumb.isNotEmpty)
+                            image: thumb.isNotEmpty
                                 ? DecorationImage(
                                     image: CachedNetworkImageProvider(thumb,
                                         maxWidth: 400),
