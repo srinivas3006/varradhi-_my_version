@@ -202,11 +202,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   Widget build(BuildContext context) {
     final article = _detailArticle ?? widget.article;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 4:3 from the card's width, capped at 38% of screen height to allow
-    // 6-8 lines of article text plus headline to display comfortably without
-    // premature cutoffs.
-    final mediaHeight = (MediaQuery.sizeOf(context).width / (4 / 3))
-        .clamp(0.0, MediaQuery.sizeOf(context).height * 0.38);
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    // 16:10 aspect ratio bounded to approximately 38%–40% of viewport height
+    final target16x10Height = screenWidth / (16 / 10);
+    final mediaHeight = target16x10Height.clamp(
+      screenHeight * 0.38,
+      screenHeight * 0.40,
+    );
 
     // Always fully painted. The feed is a FlipPageView now, which owns the
     // transition and passes no drag values — deriving opacity from them left
@@ -670,12 +673,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.notoSansTelugu(
-                            fontSize: 20.5,
+                            fontSize: 20.0,
                             fontWeight: FontWeight.w700,
                             color: isDark
                                 ? AppColors.readingTitleDark
-                                : AppColors.readingTitleLight,
-                            height: 1.30,
+                                : const Color(0xFF212121),
+                            height: 1.4,
                             letterSpacing: 0.0,
                           ),
                         ),
@@ -700,7 +703,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           ],
                         ),
                       ],
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Body Text with Dynamic Auto-Adjusting & Adaptive "Read More"
                       Expanded(
@@ -746,17 +749,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 final effectiveFontSize =
                                     AppState.instance.readingFontSize > 0
                                         ? (AppState.instance.readingFontSize *
-                                            (16.5 / 19.0))
-                                        : 16.5;
+                                            (16.0 / 19.0))
+                                        : 16.0;
 
                                 final textStyle = GoogleFonts.notoSansTelugu(
                                   fontSize: effectiveFontSize,
                                   color: isDark
                                       ? AppColors.readingBodyDark
-                                      : AppColors.readingBodyLight,
-                                  height: 1.58,
+                                      : const Color(0xFF424242),
+                                  height: 1.65,
                                   fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.15,
+                                  letterSpacing: 0.2,
                                 );
 
                                 const double reservedForButton = 44.0;
