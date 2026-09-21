@@ -57,21 +57,48 @@ void main() {
     });
   });
 
-  group('a shared image carries the masthead', () {
-    final overlay =
-        File('lib/widgets/watermark/article_watermark_overlay.dart')
-            .readAsStringSync();
+  group('exactly one mark per surface', () {
+    // The overlay drew a corner logo AND rotated text; stacking the banner
+    // on top of it meant three marks on one card.
+    String code(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
 
-    test('the band is drawn across the foot', () {
-      expect(overlay, contains('WatermarkBanner('));
+    const bannerSurfaces = [
+      'lib/widgets/spotlight/spotlight_news_card.dart',
+      'lib/screens/news_detail_screen.dart',
+      'lib/widgets/news_article_video_player.dart',
+      'lib/widgets/article_media_carousel.dart',
+    ];
+
+    for (final path in bannerSurfaces) {
+      test('${path.split('/').last} carries no floating overlay', () {
+        expect(code(path), isNot(contains('ArticleWatermarkOverlay(')),
+            reason: 'the banner is the watermark on this surface');
+      });
+    }
+
+    test('the spotlight card has one banner, not several', () {
+      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[0])).length, 1);
     });
 
-    test('it sits on a scrim so it reads on any artwork', () {
-      expect(overlay, contains('LinearGradient'));
+    test('the detail screen has one banner', () {
+      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[1])).length, 1);
     });
 
-    test('the corner logo is still there too', () {
-      expect(overlay, contains('assets/images/logo.png'));
+    test('the overlay itself no longer draws a band', () {
+      final overlay =
+          code('lib/widgets/watermark/article_watermark_overlay.dart');
+      expect(overlay, isNot(contains('WatermarkBanner(')));
+    });
+
+    test('each generated card carries a single banner', () {
+      final share = code('lib/utils/share_service.dart');
+      // Three cards: share preview, download, and the black video card.
+      expect('WatermarkBanner('.allMatches(share).length, 3);
+      expect(share, isNot(contains('ArticleWatermarkOverlay(')));
     });
   });
 

@@ -25,15 +25,12 @@ void main() {
       final rotatedBox = tester.widget<RotatedBox>(find.byType(RotatedBox));
       expect(rotatedBox.quarterTurns, 3); // 270° clockwise = 90° bottom-to-top
 
-      // Two marks now: the corner logo and the masthead band across the
-      // foot. The corner one alone was nearly invisible at its clamped
-      // opacity, so a reposted image carried no readable attribution.
-      final assets = tester
-          .widgetList<Image>(find.byType(Image))
-          .map((w) => (w.image as AssetImage).assetName)
-          .toList();
-      expect(assets, contains('assets/images/logo.png'));
-      expect(assets, contains('assets/images/watermark_banner.png'));
+      // One mark: the corner logo. The masthead band lives on the surfaces
+      // themselves, between image and text — stacking it here too put three
+      // marks on a single card.
+      expect(find.byType(Image), findsOneWidget);
+      final image = tester.widget<Image>(find.byType(Image));
+      expect((image.image as AssetImage).assetName, 'assets/images/logo.png');
     });
 
     testWidgets('renders on portrait dimensions without overflow',
@@ -53,7 +50,7 @@ void main() {
       );
 
       expect(find.text('VAARADHI'), findsOneWidget);
-      expect(find.byType(Image), findsNWidgets(2));
+      expect(find.byType(Image), findsOneWidget);
     });
 
     testWidgets('renders on square dimensions without overflow',
@@ -73,7 +70,7 @@ void main() {
       );
 
       expect(find.text('VAARADHI'), findsOneWidget);
-      expect(find.byType(Image), findsNWidgets(2));
+      expect(find.byType(Image), findsOneWidget);
     });
 
     testWidgets('respects opacity constraints (0.15-0.25 logo, 0.08-0.15 text)',
@@ -128,7 +125,7 @@ void main() {
       );
 
       expect(find.text('VAARADHI'), findsOneWidget);
-      expect(find.byType(Image), findsNWidgets(2));
+      expect(find.byType(Image), findsOneWidget);
     });
   });
 }

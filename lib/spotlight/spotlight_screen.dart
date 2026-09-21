@@ -38,9 +38,6 @@ class SpotlightScreenView extends StatefulWidget {
   final String? initialCategory;
   final bool isLocal;
 
-  /// True when the reader is hosted inside a Home tab rather than pushed as
-  /// its own route. There is nothing to close back to in that case.
-  final bool embedded;
 
   const SpotlightScreenView({
     super.key,
@@ -48,7 +45,6 @@ class SpotlightScreenView extends StatefulWidget {
     this.initialStoryIndex,
     this.initialCategory,
     this.isLocal = false,
-    this.embedded = false,
   });
 
   @override
@@ -250,11 +246,6 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   void _closeSpotlight() {
     SpotlightMediaCoordinator.instance.stopAll();
     AppTtsService.instance.stop();
-
-    // As a Home tab there is no route to pop, so the fallback below would
-    // pushReplacement a fresh HomeScreen — rebuilding the shell and losing
-    // which tab the reader was on. Stopping playback is the whole job here.
-    if (widget.embedded) return;
 
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();

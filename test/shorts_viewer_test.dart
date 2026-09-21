@@ -155,4 +155,79 @@ void main() {
       expect(src, contains('dispose()'));
     });
   });
+
+  group('the Video tab is the Reels viewer', () {
+    final tab = File('lib/screens/video_tab.dart').readAsStringSync();
+    final viewer =
+        File('lib/screens/shorts_viewer_screen.dart').readAsStringSync();
+
+    test('the tab renders the fullscreen viewer', () {
+      expect(tab, contains('ShortsViewerScreen('));
+      expect(tab, contains('isActive: widget.isActive'));
+    });
+
+    test('it hides the back button, since the bar is the way out', () {
+      expect(tab, contains('showBackButton: false'));
+    });
+
+    test('pagination is handed to the viewer', () {
+      expect(tab, contains('hasMore: _hasMore'));
+      expect(tab, contains('onLoadMore:'));
+    });
+  });
+
+  group('nothing plays outside the tab', () {
+    final viewer =
+        File('lib/screens/shorts_viewer_screen.dart').readAsStringSync();
+
+    test('no controller is built while inactive', () {
+      final fn = viewer.substring(viewer.indexOf('void _syncControllers()'));
+      expect(fn.substring(0, 300), contains('if (!widget.isActive) return;'));
+    });
+
+    test('initState does not start playback when inactive', () {
+      expect(viewer, contains('if (widget.isActive) _syncControllers();'));
+    });
+
+    test('leaving the tab releases the player, not just pauses it', () {
+      // A backgrounded Short holding a webview is how audio keeps running
+      // somewhere the reader cannot see it.
+      expect(viewer, contains('if (oldWidget.isActive && !widget.isActive)'));
+      expect(viewer, contains('_releaseAll()'));
+      final release = viewer.substring(viewer.indexOf('void _releaseAll()'));
+      expect(release.substring(0, 300), contains('c.pause()'));
+      expect(release.substring(0, 300), contains('c.dispose()'));
+    });
+
+    test('returning to the tab starts the visible Short again', () {
+      expect(viewer, contains('if (!oldWidget.isActive && widget.isActive)'));
+    });
+  });
+
+  group('swiping hands playback to the new Short', () {
+    final viewer =
+        File('lib/screens/shorts_viewer_screen.dart').readAsStringSync();
+
+    test('only the visible index keeps a controller', () {
+      final fn = viewer.substring(viewer.indexOf('void _syncControllers()'));
+      final body = fn.substring(0, 900);
+      expect(body, contains('if (index != _current)'));
+      expect(body, contains('_controllers.remove(index)?.dispose()'));
+    });
+
+    test('a page change re-syncs, so the old one stops', () {
+      final fn = viewer.substring(viewer.indexOf('void _onPageChanged('));
+      expect(fn.substring(0, 600), contains('_syncControllers()'));
+    });
+
+    test('more load before the reader hits the end', () {
+      final fn = viewer.substring(viewer.indexOf('void _onPageChanged('));
+      expect(fn.substring(0, 600), contains('widget.shorts.length - 3'));
+    });
+
+    test('a loading page is appended while more are coming', () {
+      expect(viewer,
+          contains('widget.shorts.length + (widget.hasMore ? 1 : 0)'));
+    });
+  });
 }

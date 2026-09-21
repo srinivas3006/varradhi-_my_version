@@ -134,7 +134,7 @@ void main() {
 
       await tester.pumpWidget(
         const MaterialApp(
-          home: HomeScreen(initialTabIndex: 1), // Local tab
+          home: HomeScreen(initialTabIndex: 3), // Local tab (Spotlight=1, Post=2)
         ),
       );
       await tester.pump();

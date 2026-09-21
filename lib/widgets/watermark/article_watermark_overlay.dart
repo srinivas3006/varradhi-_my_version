@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'watermark_banner.dart';
 
 /// A non-intrusive, responsive watermark overlay designed for news article images.
 ///
@@ -111,30 +110,6 @@ class ArticleWatermarkOverlay extends StatelessWidget {
                 width: logoSize,
                 height: logoSize,
                 fit: BoxFit.contain,
-              ),
-            ),
-          ),
-
-          // Masthead band across the foot of a shared image. The corner mark
-          // alone was nearly invisible at its clamped opacity, so a reposted
-          // screenshot carried no attribution anyone could read.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: EdgeInsets.symmetric(
-                  horizontal: edgePadding, vertical: edgePadding * 0.6),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black87, Colors.transparent],
-                ),
-              ),
-              child: const WatermarkBanner(
-                height: 22,
-                padding: EdgeInsets.zero,
               ),
             ),
           ),

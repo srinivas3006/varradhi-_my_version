@@ -12,6 +12,7 @@ import '../screens/video_player_screen.dart';
 import '../theme/app_theme.dart';
 
 import '../spotlight/spotlight_media_coordinator.dart';
+import 'watermark/watermark_banner.dart';
 
 /// Interactive video player widget for news articles.
 /// Displays an authentic YouTube-style play button over the thumbnail.
@@ -239,6 +240,27 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
             // 2. THUMBNAIL + YOUTUBE PLAY BUTTON (When idle)
             _buildThumbnailWithPlayButton(previewUrl),
 
+          // Masthead across the foot of the video slot. A video card had no
+          // banner at all, so it was the one place the brand disappeared.
+          if (!_isPlaying)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(12, 18, 12, 8),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black87, Colors.transparent],
+                  ),
+                ),
+                child: const WatermarkBanner(
+                    height: 20, padding: EdgeInsets.zero),
+              ),
+            ),
+
           // 3. TOP ACTION BAR (When playing: Close & Fullscreen)
           if (_isPlaying)
             Positioned(
@@ -300,12 +322,16 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
       child: Stack(
         fit: StackFit.expand,
         children: [
+          // Black behind the poster frame, so a video slot reads as video
+          // rather than as a gap when the still is narrower than the box.
+          const ColoredBox(color: Colors.black),
+
           // Image
           if (previewUrl.isNotEmpty)
             CachedNetworkImage(
               imageUrl: previewUrl,
               fit: widget.fit,
-              placeholder: (context, url) => Container(color: AppColors.chipBg),
+              placeholder: (context, url) => const ColoredBox(color: Colors.black),
               errorWidget: (context, url, error) => Container(
                 color: AppColors.chipBg,
                 child: const Icon(Icons.image_not_supported_outlined,

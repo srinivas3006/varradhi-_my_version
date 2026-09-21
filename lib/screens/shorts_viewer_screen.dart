@@ -19,10 +19,25 @@ class ShortsViewerScreen extends StatefulWidget {
     super.key,
     required this.shorts,
     this.initialIndex = 0,
+    this.isActive = true,
+    this.showBackButton = true,
+    this.onLoadMore,
+    this.hasMore = false,
   });
 
   final List<VideoItem> shorts;
   final int initialIndex;
+
+  /// False while the host tab is off-screen. Nothing plays then: a Short must
+  /// never be heard from Home or any other tab.
+  final bool isActive;
+
+  /// Hidden when the viewer *is* a tab rather than a pushed route.
+  final bool showBackButton;
+
+  /// Called as the reader nears the end, so the host can fetch another page.
+  final VoidCallback? onLoadMore;
+  final bool hasMore;
 
   @override
   State<ShortsViewerScreen> createState() => _ShortsViewerScreenState();
@@ -39,7 +54,37 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _syncControllers();
+    if (widget.isActive) _syncControllers();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShortsViewerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Leaving the tab releases the player outright rather than pausing it —
+    // a backgrounded Short holding a webview is the thing that keeps audio
+    // alive somewhere the reader cannot see it.
+    if (oldWidget.isActive && !widget.isActive) {
+      _releaseAll();
+      return;
+    }
+    if (!oldWidget.isActive && widget.isActive) {
+      _syncControllers();
+    }
+
+    // A new page arrived: the current index may now be mid-list.
+    if (widget.shorts.length != oldWidget.shorts.length && widget.isActive) {
+      _syncControllers();
+    }
+  }
+
+  void _releaseAll() {
+    for (final c in _controllers.values) {
+      c.pause();
+      c.dispose();
+    }
+    _controllers.clear();
+    if (mounted) setState(() {});
   }
 
   @override
@@ -78,6 +123,8 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
   /// Bounded on purpose: preloading the whole feed would leave one player per
   /// Short alive, and only one can ever be heard at a time anyway.
   void _syncControllers() {
+    if (!widget.isActive) return;
+
     for (final index in _controllers.keys.toList()) {
       if (index != _current) {
         _controllers.remove(index)?.dispose();
@@ -106,7 +153,14 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
   void _onPageChanged(int index) {
     if (index == _current) return;
     setState(() => _current = index);
+    // _syncControllers disposes every controller but the visible one, so the
+    // Short being swiped away stops rather than playing on underneath.
     _syncControllers();
+
+    // Fetch ahead so the feed does not stall at the last card.
+    if (widget.hasMore && index >= widget.shorts.length - 3) {
+      widget.onLoadMore?.call();
+    }
   }
 
   @override
@@ -127,9 +181,18 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
         children: [
           FlipPageView(
             controller: _pageController,
-            itemCount: widget.shorts.length,
+            // One extra page while more are loading, so the feed ends on a
+            // spinner rather than a wall.
+            itemCount: widget.shorts.length + (widget.hasMore ? 1 : 0),
             onPageChanged: _onPageChanged,
             itemBuilder: (context, index) {
+              if (index >= widget.shorts.length) {
+                return const Center(
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white70),
+                );
+              }
+
               final short = widget.shorts[index];
               final controller = _controllers[index];
 
@@ -150,8 +213,11 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
             },
           ),
 
-          // Back returns to wherever the reader opened this from.
-          SafeArea(
+          // Back returns to wherever the reader opened this from. Hidden
+          // when the viewer is the tab itself — there is nothing to go back
+          // to, and the bottom bar is the way out.
+          if (widget.showBackButton)
+            SafeArea(
             child: Align(
               alignment: Alignment.topLeft,
               child: IconButton(
@@ -170,7 +236,9 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
             child: SafeArea(
               top: false,
               child: Text(
-                widget.shorts[_current].title,
+                _current < widget.shorts.length
+                    ? widget.shorts[_current].title
+                    : '',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(

@@ -15,7 +15,6 @@ import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
-import '../widgets/watermark/article_watermark_overlay.dart';
 import 'comments_screen.dart';
 import '../widgets/watermark/watermark_banner.dart';
 
@@ -394,13 +393,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                 // Non-intrusive Article Watermark Overlay (Vertical VAARADHI on left + bottom-right logo)
                 // Constrained to visible hero area (height 310) so it's not cut off by the curved sheet.
-                const Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 310,
-                  child: ArticleWatermarkOverlay(),
-                ),
+                // No floating mark over the hero image: the masthead band
+                // above the headline is the watermark here.
 
                 // Multi-Image Index Indicator Pill (Positioned to the left of the Logo watermark so no overlap occurs)
                 if (article.imageUrls != null && article.imageUrls!.length > 1)

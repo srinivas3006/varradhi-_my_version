@@ -19,8 +19,14 @@ class BottomNavBar extends StatelessWidget {
 
   static const _items = [
     (icon: Icons.home_rounded, key: 'nav_home'),
-    (icon: Icons.location_on_rounded, key: 'nav_local'),
+    // Spotlight sits beside Home. Tapping it pushes its own screen rather
+    // than switching the stack, so its navigation stays separate.
+    (icon: Icons.auto_awesome_rounded, key: 'nav_spotlight'),
+    // Index 2 is the centre slot the floating Post button occupies — the
+    // Row renders a gap here and the label below comes from _items[2], so
+    // nothing else may take this position.
     (icon: Icons.add, key: 'nav_post'),
+    (icon: Icons.location_on_rounded, key: 'nav_local'),
     (icon: Icons.play_circle_fill_rounded, key: 'nav_video'),
     (icon: Icons.person_rounded, key: 'nav_profile'),
   ];

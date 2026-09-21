@@ -4,7 +4,6 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../models/news_article.dart';
 import '../theme/app_theme.dart';
 import 'news_article_video_player.dart';
-import 'watermark/article_watermark_overlay.dart';
 
 /// The detail screen's horizontal media pager, shared with Spotlight and UGC.
 /// The parent owns geometry; this widget owns only its internal media index.
@@ -76,9 +75,10 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
     return GestureDetector(
       onTap: widget.onTap,
       onDoubleTap: widget.onDoubleTap,
-      child: widget.showWatermark
-          ? ArticleWatermarkOverlay(child: imageWidget)
-          : imageWidget,
+      // No overlay: this renders inside the spotlight card, which already
+      // carries the masthead band beneath the media. showWatermark is kept
+      // so callers outside that card can still opt in.
+      child: imageWidget,
     );
   }
 

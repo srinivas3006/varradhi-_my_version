@@ -15,6 +15,7 @@ import '../state/app_state.dart';
 
 import 'spotlight_screen.dart';
 import '../core/navigation/notification_navigation_gate.dart';
+import 'local_news_tab.dart';
 
 class HomeScreen extends StatefulWidget {
   final int initialTabIndex;
@@ -153,19 +154,22 @@ class _HomeScreenState extends State<HomeScreen> {
       _activatedIndices.contains(0)
           ? const NewsFeedTab()
           : const SizedBox.shrink(),
-      // Spotlight in the local slot. isLocal: true keeps the tab's scope —
-      // it is the district-labelled position, so it shows local stories in
-      // the spotlight reader rather than the old list.
-      _activatedIndices.contains(1)
-          ? const SpotlightScreen(isLocal: true, embedded: true)
-          : const SizedBox.shrink(),
+      // 1 — Spotlight. Never rendered here: tapping its tab pushes the
+      // dedicated screen. The placeholder keeps the stack's indices lined up
+      // with the nav bar's.
+      const SizedBox.shrink(),
+      // 2 — Post, keeping the centre slot the nav bar's floating button
+      // renders a gap for.
       _activatedIndices.contains(2)
           ? const CreatePostScreen()
           : const SizedBox.shrink(),
       _activatedIndices.contains(3)
-          ? VideoTab(isActive: _navIndex == 3)
+          ? const LocalNewsTab()
           : const SizedBox.shrink(),
       _activatedIndices.contains(4)
+          ? VideoTab(isActive: _navIndex == 4)
+          : const SizedBox.shrink(),
+      _activatedIndices.contains(5)
           ? const ProfileTab()
           : const SizedBox.shrink(),
     ];
@@ -204,6 +208,20 @@ class _HomeScreenState extends State<HomeScreen> {
         bottomNavigationBar: BottomNavBar(
           currentIndex: _navIndex,
           onTap: (index) {
+            // Spotlight opens as its own route. _navIndex is left alone, so
+            // popping back lands on whichever tab the reader came from —
+            // Home keeps its own state, Spotlight keeps its own stack.
+            if (index == 1) {
+              AppNavigator.pushSafe(
+                context,
+                MaterialPageRoute(
+                  settings: const RouteSettings(name: '/spotlight'),
+                  builder: (_) => const SpotlightScreen(),
+                ),
+              );
+              return;
+            }
+
             if (index == 2) {
               requireAuth(context, () {
                 if (!mounted) return;

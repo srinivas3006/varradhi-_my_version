@@ -230,11 +230,25 @@ class _VideoTabState extends State<VideoTab> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading && _videos.isEmpty) {
-      return Container(
-        color: const Color(0xFFF8F7FB),
-        child: const Center(
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
           child: CircularProgressIndicator(color: Color(0xFFC80022)),
         ),
+      );
+    }
+
+    // The tab is the Reels viewer. Playback is bound to isActive, so nothing
+    // plays while the reader is on Home or any other tab, and the visible
+    // Short starts as soon as they arrive here.
+    if (_videos.isNotEmpty) {
+      return ShortsViewerScreen(
+        shorts: _videos,
+        isActive: widget.isActive,
+        // Nothing to go back to: the bottom bar is the way out.
+        showBackButton: false,
+        hasMore: _hasMore,
+        onLoadMore: () => _loadVideos(),
       );
     }
 

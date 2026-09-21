@@ -76,8 +76,11 @@ void main() {
       }
     });
 
-    test('the share card still renders the watermark overlay', () {
-      expect(source, contains('ArticleWatermarkOverlay'));
+    test('the share card renders the masthead band', () {
+      // The floating overlay was removed from every banner surface — the
+      // band is the watermark now.
+      expect(source, contains('WatermarkBanner('));
+      expect(source, isNot(contains('ArticleWatermarkOverlay')));
     });
 
     test('the generated file is a .png', () {

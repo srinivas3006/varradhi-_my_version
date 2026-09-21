@@ -76,7 +76,9 @@ class ContentShareService {
     // Reuses the existing generator: a purpose-built branded card with the
     // mandatory watermark, not a screen capture.
     final article = _asArticle(content);
-    final file = await ShareService.buildPosterFile(article);
+    // Share preview carries the story text alongside picture and banner.
+    final file =
+        await ShareService.buildPosterFile(article, includeText: true);
     if (file == null || !await File(file.path).exists()) {
       return ShareResult.failed;
     }

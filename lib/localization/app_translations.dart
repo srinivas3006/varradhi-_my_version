@@ -32,6 +32,7 @@ class AppTranslations {
       'skip_for_now': 'Skip for now',
       // Navigation
       'nav_home': 'Home',
+      'nav_spotlight': 'Spotlight',
       'nav_services': 'Services',
       'nav_post': 'Post',
       'nav_video': 'Video',
@@ -150,6 +151,7 @@ class AppTranslations {
       'skip_for_now': 'ప్రస్తుతానికి వదిలేయండి',
       // Navigation
       'nav_home': 'హోమ్',
+      'nav_spotlight': 'స్పాట్‌లైట్',
       'nav_services': 'సేవలు',
       'nav_post': 'పోస్ట్',
       'nav_video': 'వీడియో',

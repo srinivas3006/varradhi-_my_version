@@ -10,7 +10,6 @@ import 'package:way2news_clone/screens/video_tab.dart';
 import 'package:way2news_clone/state/app_state.dart';
 
 import 'package:flutter/services.dart';
-import 'package:way2news_clone/screens/spotlight_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -99,8 +98,7 @@ void main() {
       expect(find.byType(NewsFeedTab), findsOneWidget);
 
       // Inactive tabs must NOT be mounted on cold start
-      // Tab 1 hosts Spotlight now, in place of the old local list.
-      expect(find.byType(SpotlightScreen), findsNothing);
+      expect(find.byType(LocalNewsTab), findsNothing);
       expect(find.byType(VideoTab), findsNothing);
       expect(find.byType(ProfileTab), findsNothing);
 
@@ -110,8 +108,8 @@ void main() {
       await tester.tap(localNewsTabIcon);
       await tester.pumpAndSettle();
 
-      // The local slot must still mount lazily, on demand.
-      expect(find.byType(SpotlightScreen), findsOneWidget);
+      // The local tab must still mount lazily, on demand.
+      expect(find.byType(LocalNewsTab), findsOneWidget);
 
       // VideoTab and ProfileTab must still be unmounted
       expect(find.byType(VideoTab), findsNothing);

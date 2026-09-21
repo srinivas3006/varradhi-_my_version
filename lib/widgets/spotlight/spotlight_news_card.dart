@@ -15,7 +15,6 @@ import '../../repositories/news_article_repository.dart';
 import '../news_article_video_player.dart';
 import '../article_media_carousel.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
-import '../watermark/article_watermark_overlay.dart';
 import '../watermark/watermark_banner.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
@@ -403,10 +402,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 ),
                               ),
                             ),
-                          // Non-intrusive Vaaradhi Watermark (Bottom-Right Logo + Left Vertical Text)
-                          const Positioned.fill(
-                            child: ArticleWatermarkOverlay(),
-                          ),
+                          // No floating mark over the image: the masthead
+                          // band below it is the watermark. The overlay drew
+                          // a corner logo AND rotated text on top of that —
+                          // three marks on one card.
                         ],
                       ),
                     ),

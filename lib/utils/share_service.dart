@@ -10,7 +10,6 @@ import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
 import '../widgets/watermark/watermark_banner.dart';
 import '../core/utils/url_normalizer.dart';
-import '../widgets/watermark/article_watermark_overlay.dart';
 
 class ShareService {
   static final ScreenshotController _screenshotController =
@@ -185,7 +184,16 @@ class ShareService {
   /// Returns the written file, or null when no poster could be produced.
   /// Works for articles and UGC alike — UGC is a NewsArticle with
   /// contentKind 'ugc', so the only difference is which fields carry text.
-  static Future<File?> buildPosterFile(NewsArticle article) async {
+  /// Builds the PNG that travels with a share or download.
+  ///
+  /// [includeText] adds the headline and summary beneath the banner, which
+  /// is what a share preview needs. A download stays picture-and-banner
+  /// only, so the saved image is the artwork rather than a screenshot of
+  /// the story.
+  static Future<File?> buildPosterFile(
+    NewsArticle article, {
+    bool includeText = false,
+  }) async {
     if (!canGeneratePoster(article)) return null;
 
     final url = UrlNormalizer.normalize(
@@ -227,13 +235,23 @@ class ShareService {
     }
 
     final bytes = await _screenshotController.captureFromWidget(
-      _WatermarkShareCard(
-        article: article,
-        imageBytes: imageBytes,
-        width: width,
-        height: height,
-      ),
-      targetSize: Size(width, height),
+      includeText
+          ? _SharePreviewCard(
+              article: article,
+              imageBytes: imageBytes,
+              width: width,
+            )
+          : _WatermarkShareCard(
+              article: article,
+              imageBytes: imageBytes,
+              width: width,
+              height: height,
+            ),
+      // A preview stacks banner and text under the picture, so it needs the
+      // taller canvas; a plain download is exactly the image.
+      targetSize: includeText
+          ? Size(width, height + _SharePreviewCard.chromeHeight(width))
+          : Size(width, height),
       delay: const Duration(milliseconds: 120),
     );
     if (bytes.isEmpty) return null;
@@ -338,7 +356,8 @@ class ShareService {
     if (_isSharing) return false;
     _isSharing = true;
     try {
-      final file = await buildPosterFile(article);
+      // Share preview: picture, banner, then the story.
+      final file = await buildPosterFile(article, includeText: true);
       if (file == null) return false;
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'image/png')],
@@ -385,15 +404,124 @@ class _WatermarkShareCard extends StatelessWidget {
       child: SizedBox(
         width: width,
         height: height,
-        child: ArticleWatermarkOverlay(
-          width: width,
-          height: height,
-          child: Image.memory(
-            imageBytes,
-            width: width,
-            height: height,
-            fit: BoxFit.cover,
-          ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(
+              imageBytes,
+              width: width,
+              height: height,
+              fit: BoxFit.cover,
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: EdgeInsets.fromLTRB(
+                    width * 0.04, width * 0.05, width * 0.04, width * 0.025),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Colors.black87, Colors.transparent],
+                  ),
+                ),
+                child: WatermarkBanner(
+                  height: width * 0.06,
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The card a share preview is rendered from: the picture, the masthead
+/// banner beneath it, then the story — the same order the reader sees on the
+/// spotlight card and the article screen.
+///
+/// A download uses [_WatermarkShareCard] instead, which is the picture and
+/// the banner without the copy.
+class _SharePreviewCard extends StatelessWidget {
+  const _SharePreviewCard({
+    required this.article,
+    required this.imageBytes,
+    required this.width,
+  });
+
+  final NewsArticle article;
+  final Uint8List imageBytes;
+  final double width;
+
+  /// Height the banner and text add below the picture, so the capture can be
+  /// sized before the widget is laid out.
+  static double chromeHeight(double width) => width * 0.52;
+
+  @override
+  Widget build(BuildContext context) {
+    final pad = width * 0.045;
+
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        width: width,
+        color: Colors.white,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. The original image, uncropped.
+            Image.memory(imageBytes, width: width, fit: BoxFit.contain),
+
+            // 2. The masthead band, on the seam — the same place it sits in
+            // the app, so a shared image reads like the screen it came from.
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: pad, vertical: pad * 0.5),
+              child: WatermarkBanner(
+                height: width * 0.075,
+                padding: EdgeInsets.zero,
+              ),
+            ),
+
+            // 3. The story.
+            Padding(
+              padding: EdgeInsets.fromLTRB(pad, 0, pad, pad),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    article.title.trim(),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: width * 0.042,
+                      height: 1.35,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF141414),
+                    ),
+                  ),
+                  if (article.summary.trim().isNotEmpty) ...[
+                    SizedBox(height: pad * 0.4),
+                    Text(
+                      article.summary.trim(),
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: width * 0.028,
+                        height: 1.6,
+                        color: const Color(0xFF4A4A4A),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

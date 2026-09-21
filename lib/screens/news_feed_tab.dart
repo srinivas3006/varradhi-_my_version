@@ -34,6 +34,7 @@ import '../models/video_item.dart';
 import '../repositories/video_repository.dart';
 import 'video_player_screen.dart';
 import 'notifications_screen.dart';
+import 'spotlight_screen.dart';
 
 enum HeroCardKind { liveStream, breakingArticle }
 
@@ -1135,7 +1136,36 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   );
                 },
               ),
-],
+
+              // Spotlight opens as its own route, with its own lifecycle —
+              // the reader leaves Home rather than Spotlight living inside a
+              // tab. Back or Close returns here.
+              Container(
+                margin: const EdgeInsets.only(left: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: IconButton(
+                  tooltip: AppState.instance.language == 'Telugu'
+                      ? 'స్పాట్‌లైట్'
+                      : 'Spotlight',
+                  icon: const Icon(Icons.auto_awesome_rounded,
+                      color: AppColors.primary),
+                  onPressed: () {
+                    // pushSafe, matching the app's other pushes: it debounces
+                    // a double tap into one route.
+                    AppNavigator.pushSafe(
+                      context,
+                      MaterialPageRoute(
+                        settings: const RouteSettings(name: '/spotlight'),
+                        builder: (_) => const SpotlightScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ),
