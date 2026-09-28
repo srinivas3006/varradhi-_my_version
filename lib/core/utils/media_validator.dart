@@ -36,11 +36,11 @@ class MediaValidationResult {
 /// Production validator enforcing backend media constraints for UGC.
 ///
 /// Backend configuration constraints verified:
-/// - MAX_IMAGE_MB: 10
+/// - MAX_IMAGE_MB: 5 (UGC upload handover, 2026-09-28)
 /// - MAX_VIDEO_MB: 50
 /// - UGC_MAX_MEDIA_ITEMS: 10
 class MediaValidator {
-  static const int maxImageBytes = 10 * 1024 * 1024; // 10 MB
+  static const int maxImageBytes = 5 * 1024 * 1024; // 5 MB
   static const int maxVideoBytes = 50 * 1024 * 1024; // 50 MB
   static const int maxMediaItems = 10;
 
@@ -54,7 +54,7 @@ class MediaValidator {
   static const Set<String> allowedVideoExtensions = {
     'mp4',
     'mov',
-    'mkv',
+    'webm', // backend accepts .mp4 .mov .webm; .mkv is rejected
   };
 
   /// Validates a single image file on disk.
@@ -62,7 +62,7 @@ class MediaValidator {
     return _validateFile(
       filePath: filePath,
       maxSizeBytes: maxImageBytes,
-      maxMbLabel: '10 MB',
+      maxMbLabel: '5 MB',
       allowedExtensions: allowedImageExtensions,
       mediaLabel: 'Image',
     );

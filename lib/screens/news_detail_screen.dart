@@ -446,35 +446,30 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        article.category.isNotEmpty
-                            ? article.category
-                            : 'General',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
+                      // Only what the API sends — no hard-coded "General"
+                      // or "VARADHI Desk" placeholders.
+                      if (article.category.isNotEmpty)
+                        Text(
+                          article.category,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                      Text(
-                        article.authorName.isNotEmpty &&
-                                !article.authorName
-                                    .toLowerCase()
-                                    .contains('john')
-                            ? article.authorName
-                            : (article.source.isNotEmpty
-                                ? article.source
-                                : 'VARADHI Desk'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                      if (article.byline.isNotEmpty)
+                        Text(
+                          article.byline,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),

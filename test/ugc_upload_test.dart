@@ -128,7 +128,7 @@ void main() {
   }
 
   group('MediaValidator Tests', () {
-    test('Valid JPEG image within 10MB passes', () async {
+    test('Valid JPEG image within 5MB passes', () async {
       final file = File('${tempDir.path}/photo.jpg');
       file.writeAsBytesSync(List.filled(1024 * 50, 1)); // 50 KB
 
@@ -189,15 +189,24 @@ void main() {
       expect(result.errorMessage, contains('missing file extension'));
     });
 
-    test('Oversized image (>10MB) returns invalid', () async {
+    test('Oversized image (>5MB, backend limit) returns invalid', () async {
       final file = File('${tempDir.path}/huge.jpg');
-      // 11 MB
-      file.writeAsBytesSync(List.filled(11 * 1024 * 1024, 1));
+      // 6 MB: passed the old 10 MB check, then failed on upload.
+      file.writeAsBytesSync(List.filled(6 * 1024 * 1024, 1));
 
       final result = await MediaValidator.validateImage(file.path);
       expect(result.isValid, isFalse);
       expect(result.errorMessage, contains('too large'));
-      expect(result.errorMessage, contains('10 MB'));
+      expect(result.errorMessage, contains('5 MB'));
+    });
+
+    test('video formats match the backend: webm yes, mkv no', () async {
+      final webm = File('${tempDir.path}/clip.webm')
+        ..writeAsBytesSync(List.filled(1024, 1));
+      final mkv = File('${tempDir.path}/clip.mkv')
+        ..writeAsBytesSync(List.filled(1024, 1));
+      expect((await MediaValidator.validateVideo(webm.path)).isValid, isTrue);
+      expect((await MediaValidator.validateVideo(mkv.path)).isValid, isFalse);
     });
 
     test('Images batch validation handles multiple files and caps at 10', () async {

@@ -387,6 +387,19 @@ void main() {
       expect(api.idTokensSeen, isEmpty);
     });
 
+    test('an unset-up Firebase project shows its reason on screen', () async {
+      // Production on 2026-09-28: Authentication was never initialised, so
+      // Firebase answered CONFIGURATION_NOT_FOUND behind a generic message.
+      gateway.sendError = FirebaseAuthException(
+          code: 'internal-error',
+          message: 'An internal error has occurred. [ CONFIGURATION_NOT_FOUND ]');
+      c.setMobile('9876543210');
+      await c.sendCode();
+      expect(c.canUseFallback, isTrue);
+      expect(c.errorMessage,
+          contains('internal-error · CONFIGURATION_NOT_FOUND'));
+    });
+
     test('Firebase misconfigured → backend SMS fallback with 10 digits',
         () async {
       gateway.sendError = FirebaseAuthException(code: 'app-not-authorized');

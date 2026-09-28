@@ -43,6 +43,10 @@ class UgcController extends ChangeNotifier {
   String? _errorMessage;
   UgcErrorKind? _errorKind;
   String? _submissionId;
+
+  /// Set when POST /submit/ got no response, so it may or may not exist on
+  /// the server. Cleared once My Submissions has been checked.
+  DateTime? _unconfirmedSubmitAt;
   CancelToken? _cancelToken;
 
   // Draft recovery flag
@@ -260,6 +264,7 @@ class UgcController extends ChangeNotifier {
     _selectedImagePaths.clear();
     _selectedVideoPath = null;
     _submissionId = null;
+    _unconfirmedSubmitAt = null;
     _status = UgcUploadStatus.idle;
     _uploadProgress = 0.0;
     _errorMessage = null;
@@ -415,11 +420,41 @@ class UgcController extends ChangeNotifier {
     // IMAGE|VIDEO|SHORT_VIDEO); lowercase fails serializer validation.
     final mediaType = _type == PostType.image ? 'IMAGE' : 'VIDEO';
 
+    // 4-pre. The last submit timed out, so it may have been created. Never
+    // re-POST blindly (it is not idempotent): look for it in My Submissions
+    // first and continue with that id if it is there.
+    final unconfirmedAt = _unconfirmedSubmitAt;
+    if ((_submissionId == null || _submissionId!.isEmpty) &&
+        unconfirmedAt != null) {
+      _status = UgcUploadStatus.submitting;
+      notifyListeners();
+      try {
+        final existing = await _ugcRepository.findRecentSubmission(
+          title: _title,
+          since: unconfirmedAt.subtract(const Duration(minutes: 2)),
+        );
+        _unconfirmedSubmitAt = null;
+        if (existing != null) {
+          _submissionId = existing;
+          _autoSaveDraft();
+        }
+      } catch (_) {
+        _status = UgcUploadStatus.failed;
+        _errorKind = UgcErrorKind.network;
+        _errorMessage = _t(
+            'మునుపటి సమర్పణ స్థితిని నిర్ధారించలేకపోయాము. కనెక్షన్ తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.',
+            'Could not confirm the previous submit. Check your connection and try again.');
+        notifyListeners();
+        return false;
+      }
+    }
+
     // 4. Submission creation (POST /api/v1/ugc/submit/) if submissionId doesn't exist
     if (_submissionId == null || _submissionId!.isEmpty) {
       _status = UgcUploadStatus.submitting;
       notifyListeners();
 
+      final attemptAt = DateTime.now();
       try {
         final submissionPayload = {
           'mobile': mobile,
@@ -443,6 +478,11 @@ class UgcController extends ChangeNotifier {
             (response['submission_id'] ?? response['id'])?.toString();
         _autoSaveDraft();
       } catch (e) {
+        // No response (timeout / dropped connection): the server may still
+        // have created it. The next attempt checks before re-posting.
+        if (UgcApiError.from(e).kind == UgcErrorKind.network) {
+          _unconfirmedSubmitAt = attemptAt;
+        }
         return _failFromBackend(
             e,
             _t('వార్తను సమర్పించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.',
@@ -547,6 +587,7 @@ class UgcController extends ChangeNotifier {
     // upload its media into this one.
     _lastCompletedSubmissionId = _submissionId;
     _submissionId = null;
+    _unconfirmedSubmitAt = null;
 
     // Register local post in AppState for immediate dashboard reflection
     AppState.instance.submitReporterPost(

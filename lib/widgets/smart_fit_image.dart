@@ -1,23 +1,20 @@
-import 'dart:ui' as ui;
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// A news photo that never looks zoomed or stretched in its frame.
+/// A news photo that fills its frame edge to edge, Way2News style — no
+/// blurred bands, no letterboxing, never stretched (aspect is kept; only
+/// the overflow is trimmed).
 ///
-/// When the photo's shape is close to the frame's, it fills the frame
-/// (`BoxFit.cover`, trimming only a sliver). When the shapes differ a lot —
-/// a wide 16:9 photo or a tall portrait in a near-square slot — cover would
-/// crop heavily and read as "zoomed in", so the whole photo is shown
-/// (`BoxFit.contain`) over a blurred copy of itself instead of bare bars.
+/// Where the trim falls depends on the photo's shape: a photo taller than
+/// the frame keeps its upper part (faces and headlines sit high in news
+/// photos, and a centred crop cut heads off); anything else is centred.
 class SmartFitImage extends StatefulWidget {
   const SmartFitImage({
     super.key,
     required this.imageUrl,
     this.maxDecodeWidth = 1080,
-    this.coverTolerance = 0.25,
   });
 
   final String imageUrl;
@@ -25,17 +22,14 @@ class SmartFitImage extends StatefulWidget {
   /// Decode width cap, as memCacheWidth elsewhere.
   final int maxDecodeWidth;
 
-  /// How far the photo's aspect may differ from the frame's (as a fraction)
-  /// and still be shown with cover.
-  final double coverTolerance;
-
-  /// Whether [imageAspect] should fill a [frameAspect] frame (cover) rather
-  /// than be shown whole (contain). Aspects are width / height.
+  /// Crop anchor for an [imageAspect] photo in a [frameAspect] frame
+  /// (both width / height).
   @visibleForTesting
-  static bool shouldCover(
-      double imageAspect, double frameAspect, double tolerance) {
-    if (imageAspect <= 0 || frameAspect <= 0) return true;
-    return ((imageAspect / frameAspect) - 1).abs() <= tolerance;
+  static Alignment alignmentFor(double imageAspect, double frameAspect) {
+    if (imageAspect <= 0 || frameAspect <= 0) return Alignment.center;
+    return imageAspect < frameAspect
+        ? const Alignment(0, -0.4) // taller than the frame: keep the top
+        : Alignment.center;
   }
 
   @override
@@ -126,28 +120,15 @@ class _SmartFitImageState extends State<SmartFitImage> {
     }
 
     return LayoutBuilder(builder: (context, constraints) {
-      final frameAspect = constraints.hasBoundedHeight &&
-              constraints.maxHeight > 0
-          ? constraints.maxWidth / constraints.maxHeight
-          : aspect;
-      if (SmartFitImage.shouldCover(
-          aspect, frameAspect, widget.coverTolerance)) {
-        return Image(image: provider, fit: BoxFit.cover, gaplessPlayback: true);
-      }
-      return RepaintBoundary(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Same decoded image, blurred to fill the frame edge to edge.
-            ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: Image(
-                  image: provider, fit: BoxFit.cover, gaplessPlayback: true),
-            ),
-            const ColoredBox(color: Color(0x33000000)),
-            Image(image: provider, fit: BoxFit.contain, gaplessPlayback: true),
-          ],
-        ),
+      final frameAspect =
+          constraints.hasBoundedHeight && constraints.maxHeight > 0
+              ? constraints.maxWidth / constraints.maxHeight
+              : aspect;
+      return Image(
+        image: provider,
+        fit: BoxFit.cover,
+        alignment: SmartFitImage.alignmentFor(aspect, frameAspect),
+        gaplessPlayback: true,
       );
     });
   }

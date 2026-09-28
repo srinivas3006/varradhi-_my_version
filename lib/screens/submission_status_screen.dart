@@ -38,7 +38,8 @@ class SubmissionStatusScreen extends StatefulWidget {
   State<SubmissionStatusScreen> createState() => _SubmissionStatusScreenState();
 }
 
-class _SubmissionStatusScreenState extends State<SubmissionStatusScreen> {
+class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
+    with WidgetsBindingObserver {
   SubmissionStatus? _status;
   String? _error;
   bool _loading = true;
@@ -58,13 +59,29 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     super.dispose();
+  }
+
+  /// Handover §6: stop polling while the app is in the background; pick up
+  /// with a fresh read when the reader comes back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final s = _status;
+      if (s != null && s.isProcessing && _poll == null) _load(fromPoll: true);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _poll?.cancel();
+      _poll = null;
+    }
   }
 
   Future<void> _load({bool fromPoll = false}) async {
@@ -91,8 +108,15 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen> {
 
   void _schedulePoll(SubmissionStatus status) {
     _poll?.cancel();
+    _poll = null;
     if (!status.isProcessing || _pollCount >= _maxPolls) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden) {
+      return; // resumed() restarts it
+    }
     _poll = Timer(_pollEvery, () {
+      _poll = null;
       _pollCount++;
       _load(fromPoll: true);
     });

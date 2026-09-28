@@ -433,11 +433,25 @@ class UgcPhoneVerificationController extends ChangeNotifier {
         // operation-not-allowed, internal-error, …: Firebase cannot serve
         // this install. The backend SMS flow does not depend on it.
         canUseFallback = true;
+        // The code is shown so support can tell a console problem
+        // (CONFIGURATION_NOT_FOUND = Authentication never set up,
+        // BILLING_NOT_ENABLED, app-not-authorized = missing SHA) from a
+        // device one without needing a USB log.
         _setError(
             UgcErrorKind.unknown,
-            _t('ప్రస్తుతం ఈ విధానంలో OTP పంపడం సాధ్యం కాలేదు. SMS ద్వారా OTP పొందండి.',
-                'We could not send the OTP this way right now. Get it by SMS instead.'));
+            '${_t('ప్రస్తుతం ఈ విధానంలో OTP పంపడం సాధ్యం కాలేదు. SMS ద్వారా OTP పొందండి.',
+                'We could not send the OTP this way right now. Get it by SMS instead.')}'
+            ' (${firebaseErrorDetail(e)})');
     }
+  }
+
+  /// Short, support-readable form of a Firebase error: its code plus the
+  /// server reason when Firebase buries it in the message (e.g.
+  /// `internal-error · CONFIGURATION_NOT_FOUND`).
+  @visibleForTesting
+  static String firebaseErrorDetail(FirebaseAuthException e) {
+    final reason = RegExp(r'\b[A-Z][A-Z_]{5,}\b').firstMatch(e.message ?? '');
+    return reason == null ? e.code : '${e.code} · ${reason.group(0)}';
   }
 
   void _handleBackendError(UgcApiError e, {bool afterFirebaseSignIn = false}) {

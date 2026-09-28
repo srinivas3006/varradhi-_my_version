@@ -169,7 +169,14 @@ class UgcApiError extends AppException {
     final errors = data['errors'];
     if (errors is Map) {
       final msg = errors['message'] ?? errors['detail'];
-      if (msg != null) return msg.toString();
+      if (msg != null) {
+        // "Media validation failed." carries the per-file reasons in
+        // errors.details.errors — show them, not just the headline.
+        final perFile = fileReasons(errors['details']);
+        return perFile.isEmpty
+            ? msg.toString()
+            : '$msg\n${perFile.join('\n')}';
+      }
       final details = errors['details'];
       if (details is Map && details['detail'] != null) {
         return details['detail'].toString();
@@ -178,5 +185,36 @@ class UgcApiError extends AppException {
       return errors.first.toString();
     }
     return (data['message'] ?? data['detail'])?.toString();
+  }
+
+  /// Per-file reasons from `errors.details.errors`, one line each, e.g.
+  /// "photo2.jpg: File too large." Accepts a list of strings, a list of
+  /// maps (file/filename/name/index + error/message/reason), or a map of
+  /// file → reason(s). Empty when there are none.
+  static List<String> fileReasons(dynamic details) {
+    final raw = details is Map ? details['errors'] : null;
+    String reasonOf(dynamic v) =>
+        v is List ? v.map((e) => '$e').join(', ') : '$v';
+    final out = <String>[];
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is Map) {
+          final who = item['file'] ??
+              item['filename'] ??
+              item['name'] ??
+              (int.tryParse('${item['index']}') != null
+                  ? '#${int.parse('${item['index']}') + 1}'
+                  : null);
+          final why = item['error'] ?? item['message'] ?? item['reason'];
+          if (why == null) continue;
+          out.add(who == null ? reasonOf(why) : '$who: ${reasonOf(why)}');
+        } else if (item != null) {
+          out.add('$item');
+        }
+      }
+    } else if (raw is Map) {
+      raw.forEach((k, v) => out.add('$k: ${reasonOf(v)}'));
+    }
+    return out;
   }
 }

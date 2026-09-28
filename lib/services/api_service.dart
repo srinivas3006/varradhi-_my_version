@@ -1803,56 +1803,88 @@ class ApiService {
     return SubmissionStatus.parse(response.data);
   }
 
+  /// My Submissions, one page. Cursor-paginated (handover §7): the next
+  /// page is fetched with the cursor from `meta.next`, never `page=2`.
+  /// Throws on failure so callers can tell "none" from "offline".
+  Future<({List<ReporterPost> posts, String? nextCursor})>
+      getReporterSubmissionsPage({
+    String? status,
+    String? cursor,
+    int pageSize = 20,
+  }) async {
+    final query = <String, dynamic>{'page_size': pageSize};
+    if (status != null && status.isNotEmpty && status.toLowerCase() != 'all') {
+      query['status'] = status.toLowerCase();
+    }
+    if (cursor != null && cursor.isNotEmpty) query['cursor'] = cursor;
+    final response = await _dio.get('/api/v1/ugc/reporter/submissions/',
+        queryParameters: query);
+    final body = response.data is Map ? response.data as Map : const {};
+    final List data = body['data'] is List ? body['data'] as List : const [];
+    final meta = body['meta'] is Map ? body['meta'] as Map : const {};
+    return (
+      posts: data.whereType<Map>().map(_reporterPostFromJson).toList(),
+      nextCursor: cursorFrom(meta['next'] ?? meta['next_cursor']),
+    );
+  }
+
+  /// First page of My Submissions; empty on failure.
   Future<List<ReporterPost>> getReporterSubmissions({
     String? status,
     int pageSize = 20,
   }) async {
     try {
-      // Cursor-paginated (handover §1): never send `page`.
-      final query = <String, dynamic>{
-        'page_size': pageSize,
-      };
-      if (status != null &&
-          status.isNotEmpty &&
-          status.toLowerCase() != 'all') {
-        query['status'] = status.toLowerCase();
-      }
-      final response = await _dio.get('/api/v1/ugc/reporter/submissions/',
-          queryParameters: query);
-      final List data = response.data['data'] ?? [];
-      return data.map((json) {
-        PostStatus postStatus = PostStatus.pending;
-        final raw = (json['status'] ?? '').toString().toLowerCase();
-        if (raw == 'approved') {
-          postStatus = PostStatus.approved;
-        } else if (raw == 'published') {
-          postStatus = PostStatus.published;
-        } else if (raw == 'rejected') {
-          postStatus = PostStatus.rejected;
-        } else {
-          postStatus = PostStatus.pending;
-        }
-
-        return ReporterPost(
-          id: json['id'] ?? '',
-          reporterName: json['uploader'] ?? 'Me',
-          type:
-              json['content_type']?.toString().toUpperCase() == 'VIDEO'
-                  ? PostType.video
-                  : PostType.image,
-          caption: json['title'] ?? '',
-          category: json['category'] ?? 'local',
-          mediaUrl: json['thumbnail_url'] ?? json['media_url'] ?? '',
-          status: postStatus,
-          submittedAt: json['created_at'] != null
-              ? DateTime.parse(json['created_at'])
-              : DateTime.now(),
-          rejectionReason: json['rejection_reason'],
-        );
-      }).toList();
+      return (await getReporterSubmissionsPage(
+              status: status, pageSize: pageSize))
+          .posts;
     } catch (_) {
       return [];
     }
+  }
+
+  /// `meta.next` may be a bare cursor or a full URL carrying `?cursor=`.
+  static String? cursorFrom(Object? next) {
+    final raw = next?.toString().trim() ?? '';
+    if (raw.isEmpty || raw == 'null') return null;
+    if (raw.startsWith('http') || raw.startsWith('/')) {
+      return Uri.tryParse(raw)?.queryParameters['cursor'];
+    }
+    return raw;
+  }
+
+  static ReporterPost _reporterPostFromJson(Map json) {
+    // reporter_status (pending | published | rejected) is the
+    // reporter-facing value; status (PENDING_REVIEW, APPROVED, …) is the
+    // fallback for older payloads.
+    final raw = (json['reporter_status'] ?? json['status'] ?? '')
+        .toString()
+        .toLowerCase();
+    final postStatus = switch (raw) {
+      'approved' => PostStatus.approved,
+      'published' => PostStatus.published,
+      'rejected' => PostStatus.rejected,
+      _ => PostStatus.pending,
+    };
+    return ReporterPost(
+      id: json['id']?.toString() ?? '',
+      reporterName: json['uploader']?.toString() ?? 'Me',
+      type: json['content_type']?.toString().toUpperCase() == 'VIDEO'
+          ? PostType.video
+          : PostType.image,
+      caption: json['title']?.toString() ?? '',
+      category: json['category']?.toString() ?? 'local',
+      // Videos get their thumbnail after async processing; until then the
+      // thumbnail is "" and the media URL is the better preview.
+      mediaUrl: [json['thumbnail_url'], json['media_url']]
+          .map((v) => v?.toString() ?? '')
+          .firstWhere((v) => v.isNotEmpty, orElse: () => ''),
+      status: postStatus,
+      submittedAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+              DateTime.now(),
+      rejectionReason:
+          (json['review_note'] ?? json['rejection_reason'])?.toString(),
+    );
   }
 
   Future<bool> reportUgcSubmission({

@@ -84,6 +84,30 @@ class UgcRepository {
     }
   }
 
+  /// After a submit whose outcome is unknown (timeout, dropped connection),
+  /// finds the submission it may have created: same title, created since
+  /// [since]. Returns its id, or null if none. Throws when My Submissions
+  /// cannot be read — the caller must not re-POST blindly then.
+  ///
+  /// POST /submit/ is not idempotent (handover §8), so this check comes
+  /// before any second attempt.
+  Future<String?> findRecentSubmission({
+    required String title,
+    required DateTime since,
+  }) async {
+    final page = await ApiService.instance
+        .getReporterSubmissionsPage(status: 'pending', pageSize: 10);
+    final wanted = title.trim();
+    for (final post in page.posts) {
+      if (post.id.isNotEmpty &&
+          post.caption.trim() == wanted &&
+          !post.submittedAt.isBefore(since)) {
+        return post.id;
+      }
+    }
+    return null;
+  }
+
   /// Uploads a single media file associated with a submission.
   Future<Map<String, dynamic>> uploadMedia({
     required String submissionId,

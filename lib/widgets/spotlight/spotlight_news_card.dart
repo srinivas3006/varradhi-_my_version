@@ -348,9 +348,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           ),
                                         );
                                       },
-                                      // Fills the frame when the photo's
-                                      // shape allows, otherwise shows it
-                                      // whole — never zoomed or stretched.
+                                      // Fills the frame edge to edge — no
+                                      // blur bands, never stretched.
                                       child: SmartFitImage(
                                         imageUrl:
                                             (article.mediaItems.isNotEmpty &&
@@ -414,15 +413,13 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           ),
 
                           // Category pill — inside the top-left corner.
-                          Positioned(
-                            top: _mediaInset,
-                            left: _mediaInset,
-                            child: _CategoryPill(
-                              label: article.category.isNotEmpty
-                                  ? article.category
-                                  : 'వారధి',
+                          // Shown only when the API sends a category.
+                          if (article.category.isNotEmpty)
+                            Positioned(
+                              top: _mediaInset,
+                              left: _mediaInset,
+                              child: _CategoryPill(label: article.category),
                             ),
-                          ),
 
                           // Multi-media count — top-right, clear of the
                           // attribution block.
@@ -484,34 +481,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 6),
-
-                      // Headline — immediately below the square. Bold, with
-                      // generous leading for the height of Telugu clusters
-                      // (vowel signs above, ottulu below).
-                      Transform.translate(
-                        offset: Offset(0, headlineOffset),
-                        child: Text(
-                          article.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textHeightBehavior: const TextHeightBehavior(
-                            applyHeightToFirstAscent: false,
-                            applyHeightToLastDescent: false,
-                          ),
-                          style: GoogleFonts.notoSansTelugu(
-                            fontSize: 19.0,
-                            fontWeight: FontWeight.w700,
-                            color: isDark
-                                ? AppColors.readingTitleDark
-                                : const Color(0xFF1E1E1E),
-                            height: 1.45,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ),
                       const SizedBox(height: 8),
 
+                      // Listen + time sit directly under the image, above the headline.
                       // Meta Row: Audio/Listen + Time (Utility)
                       Transform.translate(
                         offset: Offset(0, bodyOffset),
@@ -683,6 +655,32 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                               ],
                             ),
                           ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Headline — below the Listen row. Bold, with
+                      // generous leading for the height of Telugu clusters
+                      // (vowel signs above, ottulu below).
+                      Transform.translate(
+                        offset: Offset(0, headlineOffset),
+                        child: Text(
+                          article.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textHeightBehavior: const TextHeightBehavior(
+                            applyHeightToFirstAscent: false,
+                            applyHeightToLastDescent: false,
+                          ),
+                          style: GoogleFonts.notoSansTelugu(
+                            fontSize: 19.0,
+                            fontWeight: FontWeight.w700,
+                            color: isDark
+                                ? AppColors.readingTitleDark
+                                : const Color(0xFF1E1E1E),
+                            height: 1.45,
+                            letterSpacing: 0.2,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -1431,36 +1429,14 @@ class _CategoryPill extends StatelessWidget {
   }
 }
 
-/// Reporter attribution along the bottom inside edge of the square.
-///
-/// Left: reporter name and designation. Right: the story's location pin.
-/// Text only — no logo or link — so the photo reads clean.
+/// Attribution along the bottom inside edge of the image: the reporter's
+/// name (left) and the story's location (right) — only what the API sends.
+/// No hard-coded "News Desk / Editorial Team / Reporter" text; when neither
+/// is known, nothing is drawn.
 class _ReporterAttribution extends StatelessWidget {
   const _ReporterAttribution({required this.article});
 
   final NewsArticle article;
-
-  bool get _telugu => AppState.instance.language == 'Telugu';
-
-  bool get _isDesk {
-    final name = article.authorName.trim().toLowerCase();
-    return name.isEmpty ||
-        name == 'varadhi desk' ||
-        name == 'vaaradhi desk' ||
-        name == 'vaaradhi' ||
-        name == 'varadhi' ||
-        name.contains('@');
-  }
-
-  String get _name {
-    if (_isDesk) return _telugu ? 'వారధి న్యూస్ డెస్క్' : 'Vaaradhi News Desk';
-    return article.authorName.trim();
-  }
-
-  String get _designation {
-    if (_isDesk) return _telugu ? 'ఎడిటోరియల్ టీమ్' : 'Editorial Team';
-    return _telugu ? 'రిపోర్టర్' : 'Reporter';
-  }
 
   /// Most specific place first, up to two levels ("Kesaram, Suryapet").
   String get _location {
@@ -1484,44 +1460,27 @@ class _ReporterAttribution extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = article.byline;
     final location = _location;
+    if (name.isEmpty && location.isEmpty) return const SizedBox.shrink();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Left: name + designation
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  shadows: _shadow,
+          child: name.isEmpty
+              ? const SizedBox.shrink()
+              : Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    shadows: _shadow,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _designation,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xE6FFFFFF),
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w500,
-                  shadows: _shadow,
-                ),
-              ),
-            ],
-          ),
         ),
-
-        // Right: location pin
         if (location.isNotEmpty) ...[
           const SizedBox(width: 10),
           ConstrainedBox(

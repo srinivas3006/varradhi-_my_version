@@ -19,6 +19,13 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   bool _isLoading = true;
   List<ReporterPost> _posts = [];
 
+  /// Cursor for the next page (from `meta.next`); null when all are loaded.
+  String? _nextCursor;
+  bool _loadingMore = false;
+
+  /// Bumped on every fresh load so a late page from an old filter is dropped.
+  int _generation = 0;
+
   @override
   void initState() {
     super.initState();
@@ -26,23 +33,55 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   }
 
   Future<void> _fetchSubmissions() async {
-    setState(() => _isLoading = true);
+    final generation = ++_generation;
+    setState(() {
+      _isLoading = true;
+      _loadingMore = false;
+    });
     try {
-      final remotePosts = await ApiService.instance.getReporterSubmissions(
+      final page = await ApiService.instance.getReporterSubmissionsPage(
         status: _selectedFilter == 'all' ? null : _selectedFilter,
       );
-      if (mounted) {
+      if (mounted && generation == _generation) {
         setState(() {
-          _posts = remotePosts;
+          _posts = page.posts;
+          _nextCursor = page.nextCursor;
           _isLoading = false;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
         setState(() {
           _posts = [];
+          _nextCursor = null;
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  /// Next page, appended. Only the cursor is sent — never `page=2`.
+  Future<void> _loadMore() async {
+    final cursor = _nextCursor;
+    if (cursor == null || _loadingMore || _isLoading) return;
+    final generation = _generation;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await ApiService.instance.getReporterSubmissionsPage(
+        status: _selectedFilter == 'all' ? null : _selectedFilter,
+        cursor: cursor,
+      );
+      if (!mounted || generation != _generation) return;
+      final seen = _posts.map((p) => p.id).toSet();
+      setState(() {
+        _posts = [..._posts, ...page.posts.where((p) => seen.add(p.id))];
+        _nextCursor = page.nextCursor;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      // Keep what is loaded; scrolling again retries.
+      if (mounted && generation == _generation) {
+        setState(() => _loadingMore = false);
       }
     }
   }
@@ -233,12 +272,33 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                         : RefreshIndicator(
                             onRefresh: _fetchSubmissions,
                             color: AppColors.primary,
-                            child: ListView.separated(
+                            // Near the end of the list, fetch the next
+                            // cursor page.
+                            child: NotificationListener<ScrollNotification>(
+                              onNotification: (n) {
+                                if (n.metrics.extentAfter < 400) _loadMore();
+                                return false;
+                              },
+                              child: ListView.separated(
                               physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.all(16),
-                        itemCount: displayPosts.length,
+                        itemCount: displayPosts.length + (_loadingMore ? 1 : 0),
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
+                          if (index >= displayPosts.length) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.primary),
+                                ),
+                              ),
+                            );
+                          }
                           final post = displayPosts[index];
                           // Tap → backend status, next action, review note.
                           return GestureDetector(
@@ -373,6 +433,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                           );
                         },
                       ),
+                            ),
                     ),
               ),
             ],

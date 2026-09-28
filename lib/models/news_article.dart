@@ -304,6 +304,25 @@ class NewsArticle {
         : 'article';
   }
 
+  /// The real author name from the API, or '' when the story carries only a
+  /// desk placeholder (or an email). Screens show nothing then, rather than
+  /// hard-coded "News Desk / Editorial Team" text.
+  String get byline {
+    final name = authorName.trim();
+    final lower = name.toLowerCase();
+    const placeholders = {
+      'varadhi desk',
+      'vaaradhi desk',
+      'varadhi',
+      'vaaradhi',
+      'null',
+    };
+    if (name.isEmpty || lower.contains('@') || placeholders.contains(lower)) {
+      return '';
+    }
+    return name;
+  }
+
   static String _sanitizeAuthor(String? raw) {
     if (raw == null) return 'VARADHI Desk';
     final trimmed = raw.trim();
