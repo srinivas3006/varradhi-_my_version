@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/widgets/news_article_video_player.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/widgets/news_article_video_player.dart';
 
 void main() {
   group('Video Preview Thumbnail Resolution Tests', () {

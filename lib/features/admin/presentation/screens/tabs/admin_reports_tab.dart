@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../data/models/admin_report_model.dart';
 import '../../../data/models/admin_ugc_options.dart';
 import '../../controllers/admin_load_status.dart';
 import '../../controllers/admin_reports_controller.dart';
@@ -48,6 +49,28 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
         return Column(
           children: [
             const SizedBox(height: 8),
+            // Two separate backend queues (handover §17.5).
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: SegmentedButton<AdminReportSource>(
+                key: const Key('admin_reports_source'),
+                segments: const [
+                  ButtonSegment(
+                    value: AdminReportSource.desk,
+                    icon: Icon(Icons.newspaper_rounded),
+                    label: Text('డెస్క్ వార్తలు'),
+                  ),
+                  ButtonSegment(
+                    value: AdminReportSource.citizen,
+                    icon: Icon(Icons.campaign_outlined),
+                    label: Text('పౌర వార్తలు'),
+                  ),
+                ],
+                selected: {c.source},
+                onSelectionChanged: (s) => c.setSource(s.first),
+              ),
+            ),
+            const SizedBox(height: 8),
             AdminFilterChipRow<String>(
               options: AdminUgcOptions.reportStatuses.map((s) => AdminFilterChipOption(s, _reportStatusLabel(s))).toList(),
               selected: c.statusFilter,
@@ -66,7 +89,7 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
       return const AdminStatusState(
         icon: Icons.report_gmailerrorred_rounded,
         title: 'నివేదికలు లోడ్ అవుతున్నాయి',
-        message: 'రిపోర్ట్ చేసిన యూజీసీ వివరాలు తెస్తున్నాం.',
+        message: 'రిపోర్ట్ చేసిన వార్తల వివరాలు తెస్తున్నాం.',
         isLoading: true,
       );
     }

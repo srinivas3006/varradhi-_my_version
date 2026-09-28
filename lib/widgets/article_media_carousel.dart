@@ -4,6 +4,7 @@ import 'package:visibility_detector/visibility_detector.dart';
 import '../models/news_article.dart';
 import '../theme/app_theme.dart';
 import 'news_article_video_player.dart';
+import 'smart_fit_image.dart';
 
 /// The detail screen's horizontal media pager, shared with Spotlight and UGC.
 /// The parent owns geometry; this widget owns only its internal media index.
@@ -15,6 +16,10 @@ class ArticleMediaCarousel extends StatefulWidget {
   final VoidCallback? onDoubleTap;
   final BoxFit fit;
   final bool showWatermark;
+
+  /// Puts the page dots at the top edge — for callers that overlay their
+  /// own content along the bottom of the media.
+  final bool dotsAtTop;
   const ArticleMediaCarousel(
       {super.key,
       required this.article,
@@ -23,7 +28,8 @@ class ArticleMediaCarousel extends StatefulWidget {
       this.onTap,
       this.onDoubleTap,
       this.fit = BoxFit.cover,
-      this.showWatermark = true});
+      this.showWatermark = true,
+      this.dotsAtTop = false});
   @override
   State<ArticleMediaCarousel> createState() => _ArticleMediaCarouselState();
 }
@@ -61,7 +67,11 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
         fit: widget.fit,
       );
     }
-    final imageWidget = CachedNetworkImage(
+    // Cover-fitted slots get the same never-zoomed treatment as the
+    // single-image card; other fits are honoured as asked.
+    final Widget imageWidget = widget.fit == BoxFit.cover
+        ? SmartFitImage(imageUrl: item.url)
+        : CachedNetworkImage(
       imageUrl: item.url,
       fit: widget.fit,
       placeholder: (_, __) => Container(color: AppColors.chipBg),
@@ -113,7 +123,8 @@ class _ArticleMediaCarouselState extends State<ArticleMediaCarousel> {
                 // Without dots there is nothing telling the reader more
                 // images exist, so every one after the first went unseen.
                 Positioned(
-                  bottom: 10,
+                  top: widget.dotsAtTop ? 18 : null,
+                  bottom: widget.dotsAtTop ? null : 10,
                   left: 0,
                   right: 0,
                   child: IgnorePointer(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -33,6 +34,7 @@ class ThemeAndLocaleNotifier extends ChangeNotifier {
 class AppState extends ChangeNotifier {
   static const _secureStorage = FlutterSecureStorage();
   static const _authTokenKey = 'authToken';
+  static const _ugcMobileKey = 'ugc_verified_mobile';
   static const _refreshTokenKey = 'refreshToken';
   static const _installationSecretKey = 'installation_secret';
   static const _sessionIdKey = 'session_id';
@@ -46,6 +48,7 @@ class AppState extends ChangeNotifier {
   Set<String> likedItemIds = {};
   Set<String> dislikedItemIds = {};
   Set<String> bookmarkedItemIds = {};
+  Set<String> blockedUserIds = {};
   Map<String, List<String>> localComments = {};
 
   AppState._internal();
@@ -97,6 +100,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await _persist();
   }
+
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -155,15 +159,13 @@ class AppState extends ChangeNotifier {
         await _secureStorage.delete(key: _installationSecretKey);
       }
     } catch (e) {
-      debugPrint('[AppState] Failed to persist installation secret in secure storage: $e');
+      debugPrint(
+          '[AppState] Failed to persist installation secret in secure storage: $e');
     }
+    // Clean up any legacy plaintext secret from SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (secret != null && secret.isNotEmpty) {
-        await prefs.setString(_installationSecretKey, secret);
-      } else {
-        await prefs.remove(_installationSecretKey);
-      }
+      await prefs.remove(_installationSecretKey);
     } catch (_) {}
     notifyListeners();
   }
@@ -173,7 +175,8 @@ class AppState extends ChangeNotifier {
     try {
       await _secureStorage.write(key: _deviceIdKey, value: id);
     } catch (e) {
-      debugPrint('[AppState] Failed to persist device ID in secure storage: $e');
+      debugPrint(
+          '[AppState] Failed to persist device ID in secure storage: $e');
     }
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -185,7 +188,6 @@ class AppState extends ChangeNotifier {
   /// Preserves the stable device ID. Backend enforces that the same FCM token
   /// cannot be registered under a new device_id.
   Future<String> regenerateDeviceId() async {
-    debugPrint('[AppState] Preserving stable deviceId: $deviceId');
     return deviceId;
   }
 
@@ -228,6 +230,11 @@ class AppState extends ChangeNotifier {
   /// True if the user has already been prompted for location permission
   /// in the feed. Ensures we only ask once.
   bool locationPrompted = false;
+  int locationPromptShownCount = 0;
+  int? locationPromptLastShownAtMs;
+  int? locationPromptDismissedAtMs;
+  int? locationPermissionDeniedAtMs;
+  bool locationPermissionDeniedForever = false;
 
   /// True if the user successfully granted location permissions and we fetched real GPS data
   bool hasValidLocation = false;
@@ -245,14 +252,54 @@ class AppState extends ChangeNotifier {
 
   // ---- Reporter Program state ----
 
-  /// True once the user has registered for the Reporter Program. This is
-  /// instant (no approval needed) — only individual posts need admin review.
+  /// True once the signed-in account has registered for the Reporter
+  /// Program. This is instant (no approval needed) — only individual posts
+  /// need admin review. Cleared on logout; restored per account by
+  /// [refreshRolesFromServer].
   bool isReporter = false;
 
-  /// True once the user has completed the ONE-TIME OTP check that's
-  /// required before their very first post submission. Never asked again
-  /// after that.
-  bool uploadVerified = false;
+  /// Accounts (by user id) that joined as reporter on this device. The
+  /// backend has no reporter flag, so this is what keeps "Join as reporter"
+  /// from showing again after logging out and back in.
+  final Set<String> _reporterAccountIds = {};
+  static const _reporterAccountsKey = 'reporter_account_ids';
+
+  /// Whether the Post tab should skip the "Join as reporter" screen. A
+  /// verified UGC mobile means the account already went through it.
+  bool get hasJoinedAsReporter => isReporter || uploadVerified;
+
+  /// UGC phone verification (one-time per account). Cached only for UX —
+  /// the backend is the source of truth and re-demands verification with
+  /// "Mobile number is not verified." if this ever drifts.
+  bool ugcMobileVerified = false;
+
+  /// The 10-digit mobile the backend returned when verification succeeded.
+  /// Every UGC submit / upload-media call must send exactly this.
+  String ugcVerifiedMobile = '';
+
+  /// Set when the backend answers "Daily upload limit reached."; uploads stay
+  /// disabled until this moment (local midnight).
+  DateTime? ugcUploadLockedUntil;
+
+  /// Set when the backend answers "Uploader is blocked.". The backend block
+  /// lasts until an admin lifts it; the app has no endpoint that reports the
+  /// unblock, so it allows one submit probe per day — the backend re-blocks
+  /// it if the block still stands, and an unblocked reporter gets through.
+  DateTime? ugcBlockedAt;
+
+  static const _ugcBlockCooldown = Duration(hours: 24);
+
+  /// True when the account has a usable verified UGC mobile.
+  bool get uploadVerified =>
+      ugcMobileVerified && ugcVerifiedMobile.length == 10;
+
+  bool get isUgcDailyLimitActive =>
+      ugcUploadLockedUntil != null &&
+      DateTime.now().isBefore(ugcUploadLockedUntil!);
+
+  bool get isUgcUploaderBlocked =>
+      ugcBlockedAt != null &&
+      DateTime.now().difference(ugcBlockedAt!) < _ugcBlockCooldown;
 
   /// 1 token = ₹5. Reporters can request a redeem once this reaches 100.
   int reporterTokens = 0;
@@ -293,9 +340,27 @@ class AppState extends ChangeNotifier {
     userPhone = prefs.getString('userPhone') ?? userPhone;
     profileImagePath = prefs.getString('profileImagePath');
     isReporter = prefs.getBool('isReporter') ?? false;
-    uploadVerified = prefs.getBool('uploadVerified') ?? false;
+    _reporterAccountIds
+      ..clear()
+      ..addAll(prefs.getStringList(_reporterAccountsKey) ?? const []);
+    ugcMobileVerified = prefs.getBool('ugc_mobile_verified') ?? false;
+    // The number itself lives in encrypted storage (read below); a plaintext
+    // copy from older builds is migrated and then removed.
+    final legacyUgcMobile = prefs.getString('ugc_verified_mobile') ?? '';
+    final lockedMs = prefs.getInt('ugc_upload_locked_until_ms');
+    ugcUploadLockedUntil =
+        lockedMs == null ? null : DateTime.fromMillisecondsSinceEpoch(lockedMs);
+    final blockedMs = prefs.getInt('ugc_blocked_at_ms');
+    ugcBlockedAt = blockedMs == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(blockedMs);
+    // The legacy flag was set by an OTP sheet that verified a placeholder
+    // number, so it proves nothing about the real mobile. Drop it.
+    await prefs.remove('uploadVerified');
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
     readingFontSize = prefs.getDouble('readingFontSize') ?? 19.0;
+    notifications = _decodeLocalInbox(prefs.getString(_localInboxKey));
+    _loadDeviceSavedStories(prefs);
 
     // Read deviceId from secure storage first, fallback to shared_preferences
     try {
@@ -316,7 +381,8 @@ class AppState extends ChangeNotifier {
       await _secureStorage.write(key: _deviceIdKey, value: deviceId);
     } catch (_) {}
 
-    // Read installationSecret from secure storage first, fallback to shared_preferences
+    // Read installationSecret from secure storage.
+    // If a legacy plaintext secret exists in shared_preferences, migrate it to secure storage and purge plaintext.
     try {
       installationSecret =
           await _secureStorage.read(key: _installationSecretKey);
@@ -324,21 +390,29 @@ class AppState extends ChangeNotifier {
       installationSecret = null;
     }
     if (installationSecret == null || installationSecret!.isEmpty) {
-      installationSecret = prefs.getString(_installationSecretKey);
+      final legacySecret = prefs.getString(_installationSecretKey);
+      if (legacySecret != null && legacySecret.isNotEmpty) {
+        installationSecret = legacySecret;
+        try {
+          await _secureStorage.write(
+              key: _installationSecretKey, value: legacySecret);
+        } catch (_) {}
+      }
     }
-    if (installationSecret != null && installationSecret!.isNotEmpty) {
-      await prefs.setString(_installationSecretKey, installationSecret!);
-      try {
-        await _secureStorage.write(
-            key: _installationSecretKey, value: installationSecret!);
-      } catch (_) {}
-    }
+    // Always purge plaintext copy from SharedPreferences to avoid leakage in device backups
+    await prefs.remove(_installationSecretKey);
 
     // Auth tokens come from secure storage
     try {
       authToken = await _secureStorage.read(key: _authTokenKey);
       refreshToken = await _secureStorage.read(key: _refreshTokenKey);
       sessionId = await _secureStorage.read(key: _sessionIdKey);
+      // UGC verified mobile: encrypted storage, scoped to this account.
+      ugcVerifiedMobile =
+          await _secureStorage.read(key: _ugcMobileKey) ?? legacyUgcMobile;
+      if (legacyUgcMobile.isNotEmpty) {
+        await _secureStorage.write(key: _ugcMobileKey, value: legacyUgcMobile);
+      }
     } catch (e) {
       debugPrint(
           '[AppState] Secure storage auth read failed (keystore reset or corrupted): $e');
@@ -350,6 +424,8 @@ class AppState extends ChangeNotifier {
     // If we don't actually have a token, don't trust a stale isLoggedIn flag.
     if (authToken == null) {
       isLoggedIn = false;
+      // Whoever logs in next gets their own reporter status on login.
+      isReporter = false;
     }
 
     final themeStr = prefs.getString('themeMode');
@@ -364,6 +440,13 @@ class AppState extends ChangeNotifier {
     preferredCategories = prefs.getStringList('preferredCategories') ?? [];
     hasPromptedPreferences = prefs.getBool('hasPromptedPreferences') ?? false;
     locationPrompted = prefs.getBool('locationPrompted') ?? false;
+    locationPromptShownCount =
+        prefs.getInt('locationPromptShownCount') ?? (locationPrompted ? 1 : 0);
+    locationPromptLastShownAtMs = prefs.getInt('locationPromptLastShownAtMs');
+    locationPromptDismissedAtMs = prefs.getInt('locationPromptDismissedAtMs');
+    locationPermissionDeniedAtMs = prefs.getInt('locationPermissionDeniedAtMs');
+    locationPermissionDeniedForever =
+        prefs.getBool('locationPermissionDeniedForever') ?? false;
     hasValidLocation = prefs.getBool('hasValidLocation') ?? false;
     pushNotificationsEnabled =
         prefs.getBool('pushNotificationsEnabled') ?? true;
@@ -372,6 +455,7 @@ class AppState extends ChangeNotifier {
     dislikedItemIds = (prefs.getStringList('dislikedItemIds') ?? []).toSet();
     bookmarkedItemIds =
         (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
+    blockedUserIds = (prefs.getStringList('blockedUserIds') ?? []).toSet();
   }
 
   Future<void> _persist() async {
@@ -381,8 +465,7 @@ class AppState extends ChangeNotifier {
     if (profileImageUrl != null && profileImageUrl!.isNotEmpty) {
       await prefs.setString('profileImageUrl', profileImageUrl!);
     }
-    await prefs.setBool(
-        'content_language_prompted', contentLanguagePrompted);
+    await prefs.setBool('content_language_prompted', contentLanguagePrompted);
     if (_contentLanguage == null) {
       await prefs.remove('content_language');
     } else {
@@ -430,12 +513,48 @@ class AppState extends ChangeNotifier {
     await prefs.setStringList('preferredCategories', preferredCategories);
     await prefs.setBool('hasPromptedPreferences', hasPromptedPreferences);
     await prefs.setBool('isReporter', isReporter);
-    await prefs.setBool('uploadVerified', uploadVerified);
+    await prefs.setStringList(
+        _reporterAccountsKey, _reporterAccountIds.toList());
+    await prefs.setBool('ugc_mobile_verified', ugcMobileVerified);
+    await prefs.remove('ugc_verified_mobile'); // kept in secure storage
+    if (ugcUploadLockedUntil != null) {
+      await prefs.setInt('ugc_upload_locked_until_ms',
+          ugcUploadLockedUntil!.millisecondsSinceEpoch);
+    } else {
+      await prefs.remove('ugc_upload_locked_until_ms');
+    }
+    if (ugcBlockedAt != null) {
+      await prefs.setInt(
+          'ugc_blocked_at_ms', ugcBlockedAt!.millisecondsSinceEpoch);
+    } else {
+      await prefs.remove('ugc_blocked_at_ms');
+    }
     await prefs.setInt('reporterTokens', reporterTokens);
     await prefs.setStringList('likedItemIds', likedItemIds.toList());
     await prefs.setStringList('dislikedItemIds', dislikedItemIds.toList());
     await prefs.setStringList('bookmarkedItemIds', bookmarkedItemIds.toList());
     await prefs.setBool('locationPrompted', locationPrompted);
+    await prefs.setInt('locationPromptShownCount', locationPromptShownCount);
+    if (locationPromptLastShownAtMs != null) {
+      await prefs.setInt(
+          'locationPromptLastShownAtMs', locationPromptLastShownAtMs!);
+    } else {
+      await prefs.remove('locationPromptLastShownAtMs');
+    }
+    if (locationPromptDismissedAtMs != null) {
+      await prefs.setInt(
+          'locationPromptDismissedAtMs', locationPromptDismissedAtMs!);
+    } else {
+      await prefs.remove('locationPromptDismissedAtMs');
+    }
+    if (locationPermissionDeniedAtMs != null) {
+      await prefs.setInt(
+          'locationPermissionDeniedAtMs', locationPermissionDeniedAtMs!);
+    } else {
+      await prefs.remove('locationPermissionDeniedAtMs');
+    }
+    await prefs.setBool(
+        'locationPermissionDeniedForever', locationPermissionDeniedForever);
     await prefs.setBool('hasValidLocation', hasValidLocation);
     await prefs.setBool('pushNotificationsEnabled', pushNotificationsEnabled);
     await prefs.setDouble('readingFontSize', readingFontSize);
@@ -525,7 +644,9 @@ class AppState extends ChangeNotifier {
       // default language regardless of what they had chosen.
       final serverLang = (me['preferred_language'] ??
               me['preferredLanguage'] ??
-              (me['profile'] is Map ? me['profile']['preferred_language'] : null))
+              (me['profile'] is Map
+                  ? me['profile']['preferred_language']
+                  : null))
           ?.toString()
           .toLowerCase()
           .trim();
@@ -558,7 +679,7 @@ class AppState extends ChangeNotifier {
         if (parsed != null) await setReadingFontSize(parsed);
       }
 
-      if (me['is_reporter'] == true) isReporter = true;
+      await _restoreReporterStatus(me);
       if (me['tokens'] != null) {
         reporterTokens =
             int.tryParse(me['tokens'].toString()) ?? reporterTokens;
@@ -605,8 +726,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Marks onboarding (language + location) as done. Login stays optional/
-  /// skippable on every future launch, matching Way2News's "no login
-  /// required" behavior — only language+location gate the splash skip.
+  /// skippable on every future launch — only language+location gate the splash skip.
   void completeOnboarding([String? selectedLanguage]) {
     hasOnboarded = true;
     final normalizedLanguage = selectedLanguage?.trim();
@@ -620,8 +740,48 @@ class AppState extends ChangeNotifier {
 
   void markLocationPrompted() {
     locationPrompted = true;
+    locationPromptShownCount += 1;
+    locationPromptLastShownAtMs = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
     _persist();
+  }
+
+  void markLocationPromptDismissed() {
+    locationPrompted = true;
+    locationPromptDismissedAtMs = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+    _persist();
+  }
+
+  void markLocationPermissionDenied({bool forever = false}) {
+    locationPrompted = true;
+    locationPermissionDeniedAtMs = DateTime.now().millisecondsSinceEpoch;
+    locationPermissionDeniedForever = forever;
+    notifyListeners();
+    _persist();
+  }
+
+  bool shouldAutoPromptLocation({DateTime? now}) {
+    if (hasValidLocation || locationPermissionDeniedForever) return false;
+    if (locationPromptShownCount >= 2) return false;
+
+    final current = now ?? DateTime.now();
+    bool olderThan(int? epochMs, Duration cooldown) {
+      if (epochMs == null) return true;
+      final date = DateTime.fromMillisecondsSinceEpoch(epochMs);
+      return current.difference(date) >= cooldown;
+    }
+
+    if (!olderThan(locationPromptDismissedAtMs, const Duration(days: 3))) {
+      return false;
+    }
+    if (!olderThan(locationPermissionDeniedAtMs, const Duration(days: 7))) {
+      return false;
+    }
+    if (!olderThan(locationPromptLastShownAtMs, const Duration(hours: 12))) {
+      return false;
+    }
+    return true;
   }
 
   void setLanguage(String lang) {
@@ -723,6 +883,7 @@ class AppState extends ChangeNotifier {
     this.villageId = villageId;
     hasOnboarded = true;
     hasValidLocation = true;
+    locationPermissionDeniedForever = false;
     AdRepository.instance.clearCache();
     ApiService.instance.clearFeedCache();
     notifyListeners();
@@ -839,7 +1000,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-
   void setReaction(String itemId, String reaction) {
     if (itemId.isEmpty) return;
     final r = reaction.toLowerCase();
@@ -940,22 +1100,173 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  Future<void> fetchNotifications() async {
+  // ---- Saved citizen posts kept on the device ----
+  //
+  // Until the backend can bookmark UGC, a saved citizen post is stored here
+  // (whole story, so the Bookmarks screen can show and open it offline).
+
+  static const _deviceSavedKey = 'device_saved_stories_v1';
+  final Map<String, Map<String, dynamic>> _deviceSavedStories = {};
+
+  /// Newest first.
+  List<NewsArticle> get deviceSavedStories => _deviceSavedStories.values
+      .map((json) => NewsArticle.fromJson(json)..isBookmarked = true)
+      .toList()
+      .reversed
+      .toList();
+
+  void _loadDeviceSavedStories(SharedPreferences prefs) {
+    _deviceSavedStories.clear();
+    final raw = prefs.getString(_deviceSavedKey);
+    if (raw == null || raw.isEmpty) return;
     try {
-      final remote = await ApiService.instance.getNotifications();
-      if (remote.isNotEmpty) {
-        notifications = remote;
-        notifyListeners();
+      final map = jsonDecode(raw);
+      if (map is Map) {
+        map.forEach((k, v) {
+          if (v is Map) {
+            _deviceSavedStories[k.toString()] = Map<String, dynamic>.from(v);
+          }
+        });
       }
     } catch (_) {}
   }
+
+  Future<void> _persistDeviceSavedStories() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_deviceSavedKey, jsonEncode(_deviceSavedStories));
+    } catch (e) {
+      debugPrint('[AppState] saving device stories failed: $e');
+    }
+  }
+
+  Future<void> saveStoryOnDevice(NewsArticle story) async {
+    final id = story.id.isNotEmpty ? story.id : story.slug;
+    if (id.isEmpty) return;
+    _deviceSavedStories.remove(id); // re-insert = newest
+    _deviceSavedStories[id] = story.toJson();
+    setBookmarked(id, true);
+    await _persistDeviceSavedStories();
+  }
+
+  Future<void> removeDeviceSavedStory(String id) async {
+    if (_deviceSavedStories.remove(id) == null) return;
+    notifyListeners();
+    await _persistDeviceSavedStories();
+  }
+
+  bool isSavedOnDevice(String id) => _deviceSavedStories.containsKey(id);
+
+  // ---- Notification inbox (no login required) ----
+  //
+  // The inbox works for guests: the backend inbox is fetched with the
+  // device's X-Device-ID (and the account token when logged in), and every
+  // push the app receives is also kept on the device, so a reader who never
+  // logs in still has a history of what they were sent.
+
+  static const _localInboxKey = 'local_notification_inbox_v1';
+  static const _localInboxMax = 60;
+
+  static List<AppNotification> _decodeLocalInbox(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is! List) return [];
+      return list
+          .whereType<Map>()
+          .map((m) => AppNotification.fromJson(Map<String, dynamic>.from(m)))
+          .where((n) => n.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _saveLocalInbox() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final capped = notifications.take(_localInboxMax).toList();
+      await prefs.setString(
+          _localInboxKey, jsonEncode(capped.map((n) => n.toJson()).toList()));
+    } catch (e) {
+      debugPrint('[AppState] saving notification inbox failed: $e');
+    }
+  }
+
+  /// Same notification, whichever id each side used.
+  static String _inboxKey(AppNotification n) =>
+      (n.notificationId?.isNotEmpty ?? false) ? n.notificationId! : n.id;
+
+  /// Records a push the app just received (foreground, or opened from the
+  /// tray). Safe to call twice for the same message.
+  Future<void> recordPushNotification({
+    required Map<String, dynamic> data,
+    String? title,
+    String? body,
+    String? messageId,
+  }) async {
+    final notificationId = data['notification_id']?.toString();
+    final id = notificationId ??
+        'push_${messageId ?? DateTime.now().millisecondsSinceEpoch}';
+    final incoming = AppNotification.fromJson({
+      ...data,
+      'id': id,
+      if (notificationId != null) 'notification_id': notificationId,
+      'title': title ?? data['title']?.toString() ?? '',
+      'body': body ?? data['body']?.toString() ?? '',
+      'created_at':
+          data['created_at']?.toString() ?? DateTime.now().toIso8601String(),
+      'is_read': false,
+    });
+    if (incoming.title.isEmpty && incoming.message.isEmpty) return;
+
+    final key = _inboxKey(incoming);
+    if (notifications.any((n) => _inboxKey(n) == key)) return;
+    notifications = [incoming, ...notifications];
+    notifyListeners();
+    await _saveLocalInbox();
+  }
+
+  /// Loads the backend inbox and merges it with pushes kept on the device.
+  /// The backend copy wins for anything both sides have; a local read mark
+  /// is never undone by a stale server flag.
+  Future<void> fetchNotifications() async {
+    try {
+      final remote = await ApiService.instance.getNotifications();
+      final readLocally = {
+        for (final n in notifications)
+          if (n.isRead) _inboxKey(n),
+      };
+      final remoteKeys = <String>{};
+      for (final n in remote) {
+        final key = _inboxKey(n);
+        remoteKeys.add(key);
+        if (readLocally.contains(key)) n.isRead = true;
+      }
+      final merged = [
+        ...remote,
+        ...notifications.where((n) => !remoteKeys.contains(_inboxKey(n))),
+      ]..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      notifications = merged;
+      notifyListeners();
+      await _saveLocalInbox();
+    } catch (_) {}
+  }
+
+  /// Only ids the backend issued can be marked read on the server; locally
+  /// generated push ids stay on the device.
+  static bool _isServerNotification(AppNotification n) =>
+      !n.id.startsWith('push_');
 
   void markNotificationRead(String id) {
     final index = notifications.indexWhere((n) => n.id == id);
     if (index != -1 && !notifications[index].isRead) {
       notifications[index].isRead = true;
       notifyListeners();
-      ApiService.instance.markNotificationRead(id);
+      if (_isServerNotification(notifications[index])) {
+        ApiService.instance.markNotificationRead(id);
+      }
+      unawaited(_saveLocalInbox());
     }
   }
 
@@ -965,10 +1276,15 @@ class AppState extends ChangeNotifier {
       if (!n.isRead) {
         n.isRead = true;
         changed = true;
-        ApiService.instance.markNotificationRead(n.id);
+        if (_isServerNotification(n)) {
+          ApiService.instance.markNotificationRead(n.id);
+        }
       }
     }
-    if (changed) notifyListeners();
+    if (changed) {
+      notifyListeners();
+      unawaited(_saveLocalInbox());
+    }
   }
 
   /// Avatar URL the backend holds, when it has one.
@@ -1012,9 +1328,8 @@ class AppState extends ChangeNotifier {
         imageFile: isLocalFile ? File(imagePath) : null,
       );
 
-      final serverImage = (updated['profile_image'] ??
-              updated['profileImage'])
-          ?.toString();
+      final serverImage =
+          (updated['profile_image'] ?? updated['profileImage'])?.toString();
       if (serverImage != null && serverImage.startsWith('http')) {
         profileImageUrl = serverImage;
         // The local copy has served its purpose; the server URL is canonical
@@ -1048,6 +1363,21 @@ class AppState extends ChangeNotifier {
     userId = null;
     userName = 'Guest User';
     userPhone = '';
+    // Device-kept saves belong to the account that made them.
+    for (final id in _deviceSavedStories.keys) {
+      bookmarkedItemIds.remove(id);
+    }
+    _deviceSavedStories.clear();
+    unawaited(_persistDeviceSavedStories());
+    // The reporter role belongs to the account too; it is restored per
+    // account on the next login (see _restoreReporterStatus).
+    isReporter = false;
+    // UGC verification belongs to the account, not the device.
+    ugcMobileVerified = false;
+    ugcVerifiedMobile = '';
+    await _writeUgcMobile(null);
+    ugcUploadLockedUntil = null;
+    ugcBlockedAt = null;
     sessionId = null;
     await _secureStorage.delete(key: _sessionIdKey);
     await _clearAuthToken();
@@ -1068,7 +1398,6 @@ class AppState extends ChangeNotifier {
     unawaited(NotificationService.instance.registerAsGuest());
   }
 
-
   Future<void> logoutAllDevices() async {
     final tokenToRevoke = await _clearLocalSession();
     if (tokenToRevoke != null && tokenToRevoke.isNotEmpty) {
@@ -1081,8 +1410,39 @@ class AppState extends ChangeNotifier {
 
   final Map<String, int> userAddedComments = {};
 
+  bool isUserBlocked(String? idOrUsername) {
+    if (idOrUsername == null || idOrUsername.isEmpty) return false;
+    return blockedUserIds.contains(idOrUsername);
+  }
+
+  Future<void> blockUser(String idOrUsername) async {
+    if (idOrUsername.isEmpty) return;
+    blockedUserIds.add(idOrUsername);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('blockedUserIds', blockedUserIds.toList());
+    notifyListeners();
+  }
+
+  Future<void> unblockUser(String idOrUsername) async {
+    if (idOrUsername.isEmpty) return;
+    blockedUserIds.remove(idOrUsername);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('blockedUserIds', blockedUserIds.toList());
+    notifyListeners();
+  }
+
   List<Comment> getComments(String articleId) {
-    return articleComments[articleId] ?? [];
+    final list = articleComments[articleId] ?? [];
+    if (blockedUserIds.isEmpty) return list;
+    return list
+        .where((c) => !isUserBlocked(c.authorId) && !isUserBlocked(c.username))
+        .map((c) {
+      if (c.replies.isNotEmpty) {
+        c.replies.removeWhere(
+            (r) => isUserBlocked(r.authorId) || isUserBlocked(r.username));
+      }
+      return c;
+    }).toList();
   }
 
   int getDisplayCommentCount(String articleId, int baseCount) {
@@ -1193,19 +1553,94 @@ class AppState extends ChangeNotifier {
   /// needed for the role itself — only individual posts need review.
   void registerAsReporter() {
     isReporter = true;
+    final id = userId;
+    if (id != null && id.isNotEmpty) _reporterAccountIds.add(id);
     notifyListeners();
     _persist();
   }
 
-  /// Permanently marks the account as upload-verified after successful OTP verification.
-  void markUploadVerified() {
-    uploadVerified = true;
+  /// Decides whether the signed-in account has already joined as reporter,
+  /// so "Join as reporter" is not shown again. In order: the backend's own
+  /// flag if it ever sends one, this device's record for the account, then
+  /// the reporter dashboard — any past submission means they joined.
+  Future<void> _restoreReporterStatus(Map<String, dynamic> me) async {
+    final id = userId;
+    var joined = isReporter ||
+        me['is_reporter'] == true ||
+        (id != null && _reporterAccountIds.contains(id));
+    if (!joined) {
+      try {
+        final dash = await ApiService.instance.getReporterDashboard();
+        final total = int.tryParse('${dash['total_submissions'] ?? 0}') ?? 0;
+        joined = total > 0;
+      } catch (e) {
+        // No reporter profile yet, or offline: leave the flag as it is.
+        debugPrint('[AppState] reporter dashboard probe: $e');
+      }
+    }
+    if (!joined) return;
+    isReporter = true;
+    if (id != null && id.isNotEmpty) _reporterAccountIds.add(id);
+  }
+
+  /// Records the backend-confirmed UGC mobile. [mobile] must be the
+  /// 10-digit value the backend returned (or verified, in the SMS fallback).
+  Future<void> markUgcMobileVerified(String mobile) async {
+    ugcMobileVerified = true;
+    ugcVerifiedMobile = mobile;
     notifyListeners();
-    _persist();
+    await _writeUgcMobile(mobile);
+    await _persist();
+  }
+
+  /// Forgets the cached verification, e.g. after the backend says the
+  /// mobile is not (or no longer) verified.
+  Future<void> clearUgcVerification() async {
+    ugcMobileVerified = false;
+    ugcVerifiedMobile = '';
+    notifyListeners();
+    await _writeUgcMobile(null);
+    await _persist();
+  }
+
+  Future<void> _writeUgcMobile(String? mobile) async {
+    try {
+      if (mobile == null || mobile.isEmpty) {
+        await _secureStorage.delete(key: _ugcMobileKey);
+      } else {
+        await _secureStorage.write(key: _ugcMobileKey, value: mobile);
+      }
+    } catch (e) {
+      debugPrint('[AppState] secure write of UGC mobile failed: $e');
+    }
+  }
+
+  /// "Daily upload limit reached." — lock uploads until local midnight.
+  Future<void> markUgcDailyLimitReached() async {
+    final now = DateTime.now();
+    ugcUploadLockedUntil = DateTime(now.year, now.month, now.day + 1);
+    notifyListeners();
+    await _persist();
+  }
+
+  /// "Uploader is blocked."
+  Future<void> markUgcUploaderBlocked() async {
+    ugcBlockedAt = DateTime.now();
+    notifyListeners();
+    await _persist();
+  }
+
+  /// A submission went through, so any earlier limit/block no longer holds.
+  Future<void> clearUgcUploadRestrictions() async {
+    if (ugcUploadLockedUntil == null && ugcBlockedAt == null) return;
+    ugcUploadLockedUntil = null;
+    ugcBlockedAt = null;
+    notifyListeners();
+    await _persist();
   }
 
   /// Creates a new post in "pending review" state. Call only after
-  /// confirming `uploadVerified` is true (verify via OTP first if not).
+  /// confirming `uploadVerified` is true (verify the phone first if not).
   ReporterPost submitReporterPost({
     required PostType type,
     required String caption,

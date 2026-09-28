@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/video_item.dart';
-import 'package:way2news_clone/screens/shorts_viewer_screen.dart';
+import 'package:vaaradhi/models/video_item.dart';
+import 'package:vaaradhi/screens/shorts_viewer_screen.dart';
 
 VideoItem _short(String id) => VideoItem.fromJson({
       'id': id,

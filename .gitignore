@@ -47,6 +47,7 @@ app.*.map.json
 # Android release signing credentials must stay local.
 /android/key.properties
 /android/app/key.properties
+/key*.properties
 *.jks
 *.keystore
 

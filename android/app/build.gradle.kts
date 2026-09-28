@@ -58,6 +58,15 @@ android {
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")
             } else {
+                val isReleaseBuild = gradle.startParameter.taskNames.any {
+                    it.contains("Release", ignoreCase = true) || it.contains("bundle", ignoreCase = true)
+                }
+                if (isReleaseBuild) {
+                    throw GradleException(
+                        "Release build attempted without key.properties or valid keystore. " +
+                        "Create android/key.properties before building release."
+                    )
+                }
                 signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true

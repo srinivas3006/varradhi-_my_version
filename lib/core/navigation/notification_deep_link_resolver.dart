@@ -65,8 +65,10 @@ class NotificationDeepLinkResolver {
     //
     // Paths are /article/{slug}/, /poster/{id}/, /video/{id}/, /poll/{id}/
     // and /ugc/{id}/ — the trailing slash leaves an empty last segment,
-    // which is dropped here.
-    if ((scheme == 'https' || scheme == 'http') &&
+    // which is dropped here, and the query string is ignored. HTTPS only:
+    // App Links are verified over HTTPS, and a plain-http link is not one
+    // the site issues.
+    if (scheme == 'https' &&
         (host == 'vaaradhinews.com' || host == 'www.vaaradhinews.com')) {
       final parts = segments.where((s) => s.isNotEmpty).toList();
       if (parts.length >= 2) {
@@ -161,7 +163,22 @@ class NotificationDeepLinkResolver {
         data['notification_id']?.toString() ?? data['id']?.toString();
     final deepLink = data['deep_link']?.toString() ?? data['click_action']?.toString();
 
-    // 1. If explicit deep_link is present, prioritize it
+    // 1. content_type with content_slug or content_id (schema v2). These
+    // name the content directly, so they win over the deep_link string.
+    final declaredType = data['content_type']?.toString().trim().toLowerCase();
+    final hasDeclaredIdentifier =
+        (data['content_slug']?.toString().trim().isNotEmpty ?? false) ||
+            (data['content_id']?.toString().trim().isNotEmpty ?? false);
+    if (declaredType != null &&
+        declaredType.isNotEmpty &&
+        hasDeclaredIdentifier) {
+      final structured = _resolveStructured(data, declaredType, notificationId);
+      if (structured.type != NotificationTargetType.unknown) {
+        return structured;
+      }
+    }
+
+    // 2. Parse deep_link
     if (deepLink != null && deepLink.trim().isNotEmpty) {
       final fromUri = resolveFromUri(
         deepLink,
@@ -173,7 +190,7 @@ class NotificationDeepLinkResolver {
       }
     }
 
-    // 2. Fall back to structured backend payload fields
+    // 3. Older payload spellings.
     //
     // `content_type` is only one of the spellings the backend uses. Reading
     // it alone meant a payload keyed `type` or `entity_type` resolved to
@@ -185,13 +202,26 @@ class NotificationDeepLinkResolver {
             data['notification_type'])
         ?.toString()
         .toLowerCase();
+    return _resolveStructured(data, contentType, notificationId);
+  }
+
+  /// Resolves a payload from its type field plus slug/id fields. Returns
+  /// unknown when they do not address anything.
+  static NotificationTarget _resolveStructured(
+    Map<String, dynamic> data,
+    String? contentType,
+    String? notificationId,
+  ) {
     final contentSlug = data['content_slug']?.toString() ?? data['slug']?.toString();
     final contentId = data['content_id']?.toString() ?? data['article_id']?.toString() ?? data['id']?.toString();
     final categorySlug = data['category_slug']?.toString() ?? data['category']?.toString();
 
-    // Category target
+    // Category target. A category field on a typed payload (an article or
+    // poster tagged with its section) is metadata, not the destination.
     if (contentType == 'category' ||
-        (categorySlug != null && categorySlug.isNotEmpty && contentType != 'article')) {
+        (categorySlug != null &&
+            categorySlug.isNotEmpty &&
+            contentType == null)) {
       final cat = (categorySlug != null && categorySlug.isNotEmpty)
           ? categorySlug
           : contentSlug;
@@ -207,16 +237,14 @@ class NotificationDeepLinkResolver {
     // Article target
     if (contentType == 'article' ||
         contentType == 'news' ||
-        contentType == 'quote' ||
         contentType == 'breaking' ||
-        // No dedicated video target exists; a video notification opens the
-        // story that carries it. 'ugc' is deliberately NOT here — it has its
-        // own branch below, and listing it here shadowed that.
-        contentType == 'video' ||
+        // 'ugc', 'video' and 'quote' are deliberately NOT here — each has its
+        // own branch below, and listing them here shadowed those.
         (contentSlug != null && contentSlug.isNotEmpty && contentType == null)) {
-      final slug = (contentSlug != null && contentSlug.isNotEmpty)
-          ? contentSlug
-          : contentId;
+      // Slug only. The detail API is /api/v1/articles/{slug}/ — an id there
+      // is always a 404. With no slug, deep_link (which carries it) or the
+      // inbox is the fallback.
+      final slug = contentSlug;
       if (slug != null && slug.isNotEmpty) {
         return NotificationTarget.article(
           slugOrId: slug,
@@ -237,6 +265,41 @@ class NotificationDeepLinkResolver {
           originalPayload: data,
         );
       }
+    }
+
+    // Poll target
+    if (contentType == 'poll') {
+      final pId =
+          (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      if (pId != null && pId.isNotEmpty) {
+        return NotificationTarget.poll(
+          pollId: pId,
+          notificationId: notificationId,
+          originalPayload: data,
+        );
+      }
+    }
+
+    // Video / Short target — opens the Reels viewer, not an article.
+    if (contentType == 'video' || contentType == 'short') {
+      final vId =
+          (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      if (vId != null && vId.isNotEmpty) {
+        return NotificationTarget.video(
+          videoId: vId,
+          notificationId: notificationId,
+          originalPayload: data,
+        );
+      }
+    }
+
+    // Quotes have no detail screen; the daily quote lives in the Home feed.
+    if (contentType == 'quote') {
+      return NotificationTarget.screen(
+        screenName: 'home',
+        notificationId: notificationId,
+        originalPayload: data,
+      );
     }
 
     // Admin moderation target. Checked before plain UGC so a moderation
@@ -332,30 +395,37 @@ class NotificationDeepLinkResolver {
         }
         break;
 
-      // A video or Short opens the story that carries it; there is no
-      // dedicated video target, and the article screen already plays it.
+      // A video or Short opens the Reels viewer. The id is a video id, not
+      // an article slug, so routing it to the article screen always 404'd.
       case 'video':
       case 'short':
         if (segments.isNotEmpty && segments[0].isNotEmpty) {
-          return NotificationTarget.article(
-            slugOrId: segments[0],
+          return NotificationTarget.video(
+            videoId: segments[0],
             notificationId: notificationId,
             originalPayload: originalPayload,
           );
         }
         break;
 
-      // Polls live in the feed rather than on their own screen, so a poll
-      // link opens the feed. Replace with a poll target once one exists.
       case 'poll':
         if (segments.isNotEmpty && segments[0].isNotEmpty) {
-          return NotificationTarget.screen(
-            screenName: 'home',
+          return NotificationTarget.poll(
+            pollId: segments[0],
             notificationId: notificationId,
             originalPayload: originalPayload,
           );
         }
         break;
+
+      // Quotes have no detail screen; they are the daily card in the Home
+      // feed. /quote/* is an internal notification route, not an App Link.
+      case 'quote':
+        return NotificationTarget.screen(
+          screenName: 'home',
+          notificationId: notificationId,
+          originalPayload: originalPayload,
+        );
 
       case 'ugc':
         // e.g. varadhi://ugc/reporter/dashboard or varadhi://ugc/submit or varadhi://ugc/{id}

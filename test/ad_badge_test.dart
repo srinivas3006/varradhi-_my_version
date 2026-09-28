@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/widgets/ads/ad_badge.dart';
+import 'package:vaaradhi/widgets/ads/ad_badge.dart';
 
 void main() {
   testWidgets('renders the disclosure text', (tester) async {

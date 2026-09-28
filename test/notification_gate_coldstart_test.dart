@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/navigation/notification_deep_link_resolver.dart';
-import 'package:way2news_clone/core/navigation/notification_navigation_gate.dart';
-import 'package:way2news_clone/models/notification_target.dart';
+import 'package:vaaradhi/core/navigation/notification_deep_link_resolver.dart';
+import 'package:vaaradhi/core/navigation/notification_navigation_gate.dart';
+import 'package:vaaradhi/models/notification_target.dart';
 
-NotificationTarget _article(String id) =>
+NotificationTarget _article(String slug) =>
     NotificationDeepLinkResolver.resolveFromPayload(
-        {'type': 'article', 'content_id': id});
+        {'type': 'article', 'content_slug': slug});
 
 void main() {
   final gate = NotificationNavigationGate.instance;
@@ -92,7 +92,7 @@ void main() {
   group('public destinations do not demand login', () {
     test('article, video and category targets are guest-reachable', () {
       for (final payload in [
-        {'type': 'article', 'content_id': '1'},
+        {'type': 'article', 'content_slug': 'a-1'},
         {'type': 'video', 'content_id': '2'},
         {'type': 'category', 'category_slug': 'sports'},
       ]) {
@@ -139,9 +139,33 @@ void main() {
       expect(t.identifier, 'sub-1');
     });
 
-    test('a video link opens the story carrying it', () {
-      expect(resolve('https://vaaradhinews.com/video/v1/').type,
-          NotificationTargetType.article);
+    test('a video link opens the Reels viewer', () {
+      final t = resolve('https://vaaradhinews.com/video/v1/');
+      expect(t.type, NotificationTargetType.video);
+      expect(t.identifier, 'v1');
+    });
+
+    test('a poll link resolves to the poll, not Home', () {
+      final t = resolve('https://vaaradhinews.com/poll/p-1/');
+      expect(t.type, NotificationTargetType.poll);
+      expect(t.identifier, 'p-1');
+    });
+
+    test('query parameters and a missing trailing slash are ignored', () {
+      final t = resolve(
+          'https://vaaradhinews.com/article/some-slug?utm_source=whatsapp');
+      expect(t.type, NotificationTargetType.article);
+      expect(t.identifier, 'some-slug');
+    });
+
+    test('plain http is rejected', () {
+      expect(resolve('http://vaaradhinews.com/article/x/').type,
+          NotificationTargetType.unknown);
+    });
+
+    test('an API URL is not treated as a share link', () {
+      expect(resolve('https://api.vaaradhinews.com/api/v1/articles/x/').type,
+          NotificationTargetType.unknown);
     });
 
     test('an unrelated host is not hijacked', () {

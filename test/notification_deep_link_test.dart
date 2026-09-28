@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/navigation/notification_deep_link_resolver.dart';
-import 'package:way2news_clone/core/navigation/notification_navigation_gate.dart';
-import 'package:way2news_clone/models/app_notification.dart';
-import 'package:way2news_clone/models/notification_target.dart';
-import 'package:way2news_clone/services/deep_link_service.dart';
+import 'package:vaaradhi/core/navigation/notification_deep_link_resolver.dart';
+import 'package:vaaradhi/core/navigation/notification_navigation_gate.dart';
+import 'package:vaaradhi/models/app_notification.dart';
+import 'package:vaaradhi/models/notification_target.dart';
+import 'package:vaaradhi/services/deep_link_service.dart';
+import 'package:vaaradhi/services/notification_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -303,6 +304,58 @@ void main() {
 
       // Immediate subsequent tap on exact same target within dedup window is suppressed
       expect(gate.acquireDispatchLock(target), isFalse);
+    });
+
+    test('schema v2: content_type + content_slug beat deep_link', () {
+      final target = NotificationDeepLinkResolver.resolveFromPayload({
+        'notification_id': 'n-1',
+        'deep_link': '/article/stale-slug',
+        'content_type': 'article',
+        'content_id': 'a-uuid',
+        'content_slug': 'fresh-slug',
+        'notification_type': 'breaking',
+        'schema_version': '2',
+      });
+      expect(target.type, NotificationTargetType.article);
+      expect(target.identifier, 'fresh-slug');
+      expect(target.notificationId, 'n-1');
+    });
+
+    test('schema v2: deep_link is used when content fields do not resolve', () {
+      final target = NotificationDeepLinkResolver.resolveFromPayload({
+        'deep_link': '/poster/p-7',
+        'notification_type': 'breaking',
+      });
+      expect(target.type, NotificationTargetType.poster);
+      expect(target.identifier, 'p-7');
+    });
+
+    test('a poster payload with a category field stays a poster', () {
+      final target = NotificationDeepLinkResolver.resolveFromPayload({
+        'content_type': 'poster',
+        'content_id': 'p-1',
+        'category': 'sports',
+      });
+      expect(target.type, NotificationTargetType.poster);
+    });
+
+    test('a quote notification opens the Home feed', () {
+      final target = NotificationDeepLinkResolver.resolveFromPayload({
+        'content_type': 'quote',
+        'content_id': 'q-1',
+        'deep_link': '/quote/q-1',
+      });
+      expect(target.type, NotificationTargetType.screen);
+      expect(target.screenName, 'home');
+    });
+
+    test('an unroutable tap opens the notification inbox', () {
+      final target = NotificationService.targetForTap({
+        'notification_id': 'n-9',
+        'title': 'Hello',
+      });
+      expect(target.type, NotificationTargetType.screen);
+      expect(target.screenName, 'notifications');
     });
 
     test('Nested JSON string payload is safely unwrapped', () {

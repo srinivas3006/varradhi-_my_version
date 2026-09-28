@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/feed/feed_block.dart';
-import 'package:way2news_clone/core/feed/feed_engine.dart';
-import 'package:way2news_clone/core/feed/feed_block_renderer.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/models/category.dart';
-import 'package:way2news_clone/models/poll.dart';
+import 'package:vaaradhi/core/feed/feed_block.dart';
+import 'package:vaaradhi/core/feed/feed_engine.dart';
+import 'package:vaaradhi/core/feed/feed_block_renderer.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/models/category.dart';
+import 'package:vaaradhi/models/poll.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

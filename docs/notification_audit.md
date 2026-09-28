@@ -57,7 +57,7 @@ A complete search was performed across the project for Firebase and notification
   2. `SystemChrome.setPreferredOrientations(...)`
   3. `NotificationService.instance.initEarly(messengerKey: ..., navigatorKey: ...)`
   4. `AppState.instance.init()`
-  5. `runApp(const Way2NewsCloneApp())`
+  5. `runApp(const VaaradhiApp())`
 - **Current Issue**: In `initEarly`, `getInitialMessage()` is checked and uses `WidgetsBinding.instance.addPostFrameCallback((_) { handleNotificationPayload(initialMessage.data); });`.
   - At this exact moment, `SplashScreen` is being pushed as `home`.
   - The postFrameCallback executes while `SplashScreen` is animating, pushing `NewsDetailScreen` over the splash screen.

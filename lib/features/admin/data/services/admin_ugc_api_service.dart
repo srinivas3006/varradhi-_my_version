@@ -135,21 +135,40 @@ class AdminUgcApiService {
     String? cursor,
     int pageSize = 20,
     String? status,
+    AdminReportSource source = AdminReportSource.citizen,
   }) async {
-    final response = await _dio.get(AdminApiEndpoints.reports, queryParameters: {
-      'page_size': pageSize,
-      if (cursor != null) 'cursor': cursor,
-      if (status != null) 'status': status,
-    });
+    final desk = source == AdminReportSource.desk;
+    final response = await _dio.get(
+        desk ? AdminApiEndpoints.articleReports : AdminApiEndpoints.reports,
+        queryParameters: {
+          'page_size': pageSize,
+          if (cursor != null) 'cursor': cursor,
+          // Desk queue statuses are lowercase (pending/reviewed/dismissed).
+          if (status != null) 'status': desk ? status.toLowerCase() : status,
+        });
     return AdminPaginatedResponse<AdminReportModel>.fromJson(response.data, AdminReportModel.fromJson);
   }
 
-  Future<void> reviewReport(String id) async {
-    await _dio.post(AdminApiEndpoints.reviewReport(id));
+  Future<void> reviewReport(String id,
+      {AdminReportSource source = AdminReportSource.citizen,
+      String? notes}) async {
+    await _dio.post(
+      source == AdminReportSource.desk
+          ? AdminApiEndpoints.reviewArticleReport(id)
+          : AdminApiEndpoints.reviewReport(id),
+      data: {if (notes != null && notes.isNotEmpty) 'notes': notes},
+    );
   }
 
-  Future<void> dismissReport(String id) async {
-    await _dio.post(AdminApiEndpoints.dismissReport(id));
+  Future<void> dismissReport(String id,
+      {AdminReportSource source = AdminReportSource.citizen,
+      String? notes}) async {
+    await _dio.post(
+      source == AdminReportSource.desk
+          ? AdminApiEndpoints.dismissArticleReport(id)
+          : AdminApiEndpoints.dismissReport(id),
+      data: {if (notes != null && notes.isNotEmpty) 'notes': notes},
+    );
   }
 
   Future<AdminReporterProfileModel> getReporterProfile(String userId) async {

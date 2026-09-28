@@ -1,6 +1,5 @@
 // ignore_for_file: deprecated_member_use
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,14 +8,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../services/sharing/share_content_builder.dart';
 import 'sharing/share_sheet.dart';
 
-/// One poster page.
-///
-/// Laid out the way the reference feed does it: a label row above, the
-/// creative in a rounded card that fits it whole, and the title with a share
-/// action below. The poster is not full-bleed, because a poster is a thing
-/// you are meant to send to someone — it reads as an object on the page
-/// rather than a background, and `BoxFit.contain` keeps its edges intact,
-/// which cropping would destroy.
+/// One poster page in Spotlight: the creative fills the whole screen, with a
+/// label row on a top scrim and the title plus the single Share action on a
+/// bottom scrim.
 class PosterCard extends StatefulWidget {
   /// Poster id, so the card can build its canonical public URL. Without it
   /// there is nothing to share but the raw image link.
@@ -113,29 +107,9 @@ class _PosterCardState extends State<PosterCard> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Blurred, darkened copy of the poster behind it, the same trick
-          // the sponsored card uses. It fills the screen so the card reads as
-          // a wallpaper rather than a thumbnail on a grey slab, while the
-          // poster itself stays uncropped in front — these are designed
-          // sheets whose branding sits right at the edges.
-          if (_imageUrl.isNotEmpty)
-            IgnorePointer(
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
-                child: CachedNetworkImage(
-                  imageUrl: _imageUrl,
-                  fit: BoxFit.cover,
-                  color: Colors.black.withValues(alpha: 0.5),
-                  colorBlendMode: BlendMode.darken,
-                  placeholder: (_, __) => const ColoredBox(color: Colors.black),
-                  errorWidget: (_, __, ___) =>
-                      const ColoredBox(color: Colors.black),
-                ),
-              ),
-            ),
-
-          // The poster, full height. No fixed box and no side gutters: the
-          // creative takes every pixel its own shape allows.
+          // The poster, full screen: edge to edge, top to bottom, no
+          // letterbox. Cover fills the whole page; the scrims below keep the
+          // chrome legible. Sharing still sends the full, uncropped image.
           Positioned.fill(
             child: PageView.builder(
               controller: _pageController,
@@ -144,9 +118,10 @@ class _PosterCardState extends State<PosterCard> {
               onPageChanged: (i) => setState(() => _index = i),
               itemBuilder: (_, i) => CachedNetworkImage(
                 imageUrl: _images[i],
-                // Contain, not cover: a poster is shared whole, so cropping
-                // its edges defeats the point of the slot.
-                fit: BoxFit.contain,
+                fit: BoxFit.cover,
+                alignment: Alignment.topCenter,
+                width: double.infinity,
+                height: double.infinity,
                 placeholder: (_, __) => const Center(
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white70),

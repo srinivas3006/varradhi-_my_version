@@ -11,7 +11,7 @@ import '../core/widgets/flip_page_view.dart';
 import '../widgets/spotlight/spotlight_news_card.dart';
 import '../widgets/spotlight/spotlight_shimmer_card.dart';
 import '../widgets/spotlight/news_language_sheet.dart';
-import '../widgets/spotlight/location_prompt_sheet.dart';
+import '../services/location_permission_coordinator.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/info_card.dart';
 import '../widgets/poll_card.dart';
@@ -38,6 +38,14 @@ class SpotlightScreenView extends StatefulWidget {
   final String? initialCategory;
   final bool isLocal;
 
+  /// True when this is Home's persistent tab content rather than a pushed
+  /// route. Suppresses the internal back-button handling and redirects the
+  /// header's Profile/Post buttons through [onOpenProfile]/[onOpenPost]
+  /// instead of pushing duplicate screens — HomeScreen owns both concerns
+  /// when embedded.
+  final bool embedded;
+  final VoidCallback? onOpenProfile;
+  final VoidCallback? onOpenPost;
 
   const SpotlightScreenView({
     super.key,
@@ -45,6 +53,9 @@ class SpotlightScreenView extends StatefulWidget {
     this.initialStoryIndex,
     this.initialCategory,
     this.isLocal = false,
+    this.embedded = false,
+    this.onOpenProfile,
+    this.onOpenPost,
   });
 
   @override
@@ -67,6 +78,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   Timer? _dwellTimer;
   Timer? _locationPromptTimer;
   bool _hasPromptedLocationThisSession = false;
+  bool _isLanguageSheetShowing = false;
 
   @override
   void initState() {
@@ -79,10 +91,15 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     );
     // Ask which news language before anything location-related: it decides
     // what the very first feed request asks for.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) NewsLanguageSheet.showIfNeeded(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      _isLanguageSheetShowing = true;
+      await NewsLanguageSheet.showIfNeeded(context);
+      _isLanguageSheetShowing = false;
     });
-    _scheduleGentleLocationPrompt();
+    // No location prompt on entry — Home/Spotlight load with whatever
+    // location is already known. The soft prompt only appears once the
+    // reader has actually engaged (see _handlePageChanged).
     // A deep link can ask for a specific story. The feed is empty at this
     // point, so jump once as soon as it arrives.
     _controller.addListener(_jumpToInitialStoryOnce);
@@ -141,38 +158,27 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     );
   }
 
-  void _scheduleGentleLocationPrompt() {
-    final state = AppState.instance;
-    if (state.hasValidLocation || _hasPromptedLocationThisSession) {
+  /// Soft-prompts for location once the reader has actually engaged with
+  /// Spotlight — never on entry. Gated on the shared cooldown policy so this
+  /// can't stack with a prompt already shown elsewhere in the app, and on
+  /// there being no TTS/video playing or other sheet open so it never
+  /// interrupts something the reader is mid-way through.
+  Future<void> _maybeShowGentleLocationPrompt() async {
+    if (_hasPromptedLocationThisSession) return;
+    if (AppState.instance.hasValidLocation) return;
+    if (SpotlightMediaCoordinator.instance.hasActiveMedia) return;
+    if (_isLanguageSheetShowing) return;
+    if (!await LocationPermissionCoordinator.shouldShowAutomaticPrompt()) {
       return;
     }
+    if (!mounted) return;
 
-    // Prompt location gently 1.8 seconds after app enters Spotlight if location is not set yet
-    _locationPromptTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (!mounted) return;
-      if (AppState.instance.hasValidLocation ||
-          _hasPromptedLocationThisSession) {
-        return;
-      }
-      if (AppTtsService.instance.isPlaying) return;
-
-      _hasPromptedLocationThisSession = true;
-      _showGentleLocationPrompt();
-    });
-  }
-
-  Future<void> _showGentleLocationPrompt() async {
-    final state = AppState.instance;
-    state.markLocationPrompted();
-
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const LocationPromptSheet(),
+    _hasPromptedLocationThisSession = true;
+    final changed = await LocationPermissionCoordinator.requestCurrentLocation(
+      context,
+      reason: LocationPromptReason.spotlight,
     );
-
-    if (result == true && mounted) {
+    if (changed && mounted) {
       _controller.updateLocation();
     }
   }
@@ -227,17 +233,14 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
     // Dwell logic: only consider meaningful read if user forward-swipes and stays >= 2 seconds
     if (!isSwipingBack && index < _controller.state.feed.length) {
-      // After user actively reads past the first 2 stories, gently prompt for location
+      // After the reader has actively read past the first few stories,
+      // gently offer to personalize with their location.
       if (index >= 2 &&
-          !AppState.instance.locationPrompted &&
           !AppState.instance.hasValidLocation &&
           !_hasPromptedLocationThisSession) {
-        _hasPromptedLocationThisSession = true;
         _locationPromptTimer?.cancel();
-        Future.delayed(const Duration(milliseconds: 1800), () {
-          if (mounted && !AppTtsService.instance.isPlaying) {
-            _showGentleLocationPrompt();
-          }
+        _locationPromptTimer = Timer(const Duration(milliseconds: 1800), () {
+          _maybeShowGentleLocationPrompt();
         });
       }
     }
@@ -253,8 +256,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           transitionDuration: const Duration(milliseconds: 300),
-          pageBuilder: (_, __, ___) =>
-              const HomeScreen(openSpotlightOnStart: false),
+          pageBuilder: (_, __, ___) => const HomeScreen(),
           transitionsBuilder: (_, anim, __, child) =>
               FadeTransition(opacity: anim, child: child),
         ),
@@ -273,7 +275,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       MaterialPageRoute(
         builder: (_) => NewsDetailScreen(
           article: article,
-          slug: article.slug.isNotEmpty ? article.slug : article.id,
+          slug: article.slug,
         ),
       ),
     );
@@ -402,16 +404,15 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
             key: ValueKey(item.id),
             ad: item.adBanner!,
             active: isCurrent,
-            exposureKey:
-                'spotlight_${_controller.state.generation}_${item.id}',
+            exposureKey: 'spotlight_${_controller.state.generation}_${item.id}',
             onClose: () => _controller.removeAdAt(index),
             durationSeconds: item.adBanner!.displayDurationSeconds > 0
                 ? item.adBanner!.displayDurationSeconds
                 : 5,
             placementZone: 'feed');
-        // Same treatment as the poll: a sponsored card leaves most of a tall
-        // screen unused, so the remainder goes to trending rather than blank.
-        child = _withTrending(index, child);
+        // Full page: the ad is immersive (chrome hidden), so it gets the whole
+        // screen. Wrapping it with the trending strip squeezed the creative
+        // into what was left above the strip and a 76pt spacer.
         break;
 
       case SpotlightType.poster:
@@ -672,6 +673,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 onPressed: () {
                   HapticFeedback.lightImpact();
                   _controller.resetOverlayTimer();
+                  if (widget.embedded && widget.onOpenProfile != null) {
+                    widget.onOpenProfile!();
+                    return;
+                  }
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -758,7 +763,20 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                               _controller.resetOverlayTimer();
                               _controller.toggleMode(true);
                               if (!AppState.instance.hasValidLocation) {
-                                _showGentleLocationPrompt();
+                                // Tapping Local is explicit intent — ask
+                                // right away, ignoring the automatic-prompt
+                                // cooldown, and skip the later dwell prompt.
+                                _hasPromptedLocationThisSession = true;
+                                _locationPromptTimer?.cancel();
+                                LocationPermissionCoordinator
+                                    .requestCurrentLocation(
+                                  context,
+                                  reason: LocationPromptReason.localNews,
+                                ).then((changed) {
+                                  if (changed && mounted) {
+                                    _controller.updateLocation();
+                                  }
+                                });
                               }
                             },
                             child: Center(
@@ -802,6 +820,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     _controller.resetOverlayTimer();
+                    if (widget.embedded && widget.onOpenPost != null) {
+                      widget.onOpenPost!();
+                      return;
+                    }
                     requireAuth(
                       context,
                       () => Navigator.push(
@@ -890,18 +912,23 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
             ),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: widget.embedded
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(
-                key: const Key('spotlight_home_btn'),
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  _closeSpotlight();
-                },
-                icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                    color: Colors.white, size: 22),
-                tooltip: 'వెనుకకు',
-              ),
+              // Embedded as Home's own tab content, there is nowhere for
+              // this to "close" to — back navigation belongs to HomeScreen.
+              if (!widget.embedded)
+                IconButton(
+                  key: const Key('spotlight_home_btn'),
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    _closeSpotlight();
+                  },
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                      color: Colors.white, size: 22),
+                  tooltip: 'వెనుకకు',
+                ),
               IconButton(
                 onPressed: () {
                   HapticFeedback.mediumImpact();
@@ -921,17 +948,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
   @override
   Widget build(BuildContext context) {
-    final canPop = Navigator.of(context).canPop();
-
-    return PopScope(
-      canPop: canPop,
-      onPopInvokedWithResult: (didPop, _) {
-        AppTtsService.instance.stop();
-        if (!didPop) {
-          _closeSpotlight();
-        }
-      },
-      child: AnimatedBuilder(
+    final content = AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
           final state = _controller.state;
@@ -964,11 +981,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                                 // refreshFeed() is the same call the
                                 // bottom-bar button already makes.
                                 onRefresh: _controller.refreshFeed,
-                                edgeOffset:
-                                    MediaQuery.paddingOf(context).top,
+                                edgeOffset: MediaQuery.paddingOf(context).top,
                                 child: FlipPageView(
-                                key: ValueKey(
-                                    'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                                  key: ValueKey(
+                                      'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
                                   controller: _pageController,
                                   itemCount: state.feed.length,
                                   onPageChanged: _handlePageChanged,
@@ -985,63 +1001,63 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   valueListenable: _controller.overlayVisible,
                   builder: (context, showOverlays, _) => Stack(
                     children: [
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  top: showOverlays ? 0 : -140,
-                  left: 0,
-                  right: 0,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    opacity: showOverlays ? 1.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !showOverlays,
-                      child: _keepChromeAlive(_buildTopOverlay(state)),
-                    ),
-                  ),
-                ),
-
-                // 3. Local Location Strip (Only visible when Local mode is active and overlays shown)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  top: (showOverlays && state.isLocalNews)
-                      ? MediaQuery.of(context).padding.top + 70
-                      : -100,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      opacity:
-                          (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
-                      child: IgnorePointer(
-                        ignoring: !(showOverlays && state.isLocalNews),
-                        child: _keepChromeAlive(_buildLocationStrip()),
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        top: showOverlays ? 0 : -140,
+                        left: 0,
+                        right: 0,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          opacity: showOverlays ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: !showOverlays,
+                            child: _keepChromeAlive(_buildTopOverlay(state)),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
 
-                // 4. Bottom Docked Control Bar Overlay (< Back on left, Refresh on right)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeOutCubic,
-                  bottom: showOverlays ? 0 : -140,
-                  left: 0,
-                  right: 0,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    opacity: showOverlays ? 1.0 : 0.0,
-                    child: IgnorePointer(
-                      ignoring: !showOverlays,
-                      child: _keepChromeAlive(_buildBottomOverlay()),
-                    ),
-                  ),
-                ),
+                      // 3. Local Location Strip (Only visible when Local mode is active and overlays shown)
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        top: (showOverlays && state.isLocalNews)
+                            ? MediaQuery.of(context).padding.top + 70
+                            : -100,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            opacity:
+                                (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
+                            child: IgnorePointer(
+                              ignoring: !(showOverlays && state.isLocalNews),
+                              child: _keepChromeAlive(_buildLocationStrip()),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // 4. Bottom Docked Control Bar Overlay (< Back on left, Refresh on right)
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOutCubic,
+                        bottom: showOverlays ? 0 : -140,
+                        left: 0,
+                        right: 0,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          opacity: showOverlays ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: !showOverlays,
+                            child: _keepChromeAlive(_buildBottomOverlay()),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1049,7 +1065,25 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
             ),
           );
         },
-      ),
+      );
+
+    // Embedded as Home's own tab content, back navigation belongs to
+    // HomeScreen's PopScope — a second one here would fire alongside it on
+    // every back press instead of instead of it.
+    if (widget.embedded) {
+      return content;
+    }
+
+    final canPop = Navigator.of(context).canPop();
+    return PopScope(
+      canPop: canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        AppTtsService.instance.stop();
+        if (!didPop) {
+          _closeSpotlight();
+        }
+      },
+      child: content,
     );
   }
 }

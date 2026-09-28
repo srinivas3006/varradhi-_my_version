@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -113,7 +114,9 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
 
     final uri = Uri.tryParse(widget.ad.destinationUrl);
     if (uri == null) {
-      debugPrint('[Ad] unparseable destination: ${widget.ad.destinationUrl}');
+      if (kDebugMode) {
+        debugPrint('[Ad] unparseable destination');
+      }
       return;
     }
 
@@ -125,14 +128,17 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
       final launched =
           await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!launched) {
-        debugPrint('[Ad] launch refused for $uri, retrying in-app');
+        if (kDebugMode) {
+          debugPrint('[Ad] launch refused, retrying in-app');
+        }
         await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
       }
     } catch (e) {
-      debugPrint('[Ad] could not open $uri: $e');
+      if (kDebugMode) {
+        debugPrint('[Ad] could not open destination: $e');
+      }
     }
   }
-
 
   @override
   void dispose() {
@@ -141,9 +147,14 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
     super.dispose();
   }
 
+  /// Height of the "Ad" / "Skip" row (14 top offset + ~32 pill + gap). The
+  /// creative starts below it so the disclosure never covers the artwork.
+  static const double _chromeRowHeight = 54;
+
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return AdViewabilityDetector(
       ad: widget.ad,
@@ -180,53 +191,64 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _handleAdTap,
-              child: Center(
-                // 9:16 box for the creative. The card itself stays full-bleed
-                // with the blurred backdrop behind, but the ad is drawn into
-                // a fixed portrait frame so every creative lands the same
-                // shape regardless of the device it is on.
-                child: AspectRatio(
-                  aspectRatio: 9 / 16,
-                  child: widget.ad.videoUrl.isNotEmpty
-                    ? AdActivityScope(
-                        active: widget.active,
-                        child: VideoAdCard(
-                            ad: widget.ad,
-                            placementZone: widget.placementZone,
-                            exposureKey: widget.exposureKey ?? widget.ad.id))
-                    : CachedNetworkImage(
-                        imageUrl: widget.ad.imageUrl,
-                        // Contain, not cover. A full-screen creative is a
-                        // poster: its call to action — a phone number, a
-                        // WhatsApp button — sits near the edge, and cover
-                        // crops whatever does not match the device ratio, so
-                        // the one part of the ad that has to survive is the
-                        // first thing lost. The blurred backdrop behind fills
-                        // the letterbox so it still reads as full-bleed.
-                        fit: BoxFit.contain,
-                        placeholder: (context, url) => const Center(
-                          child:
-                              CircularProgressIndicator(color: Colors.white70),
-                        ),
-                        errorWidget: (context, url, error) => Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.campaign_rounded,
-                                size: 64, color: Colors.white54),
-                            const SizedBox(height: 12),
-                            Text(
-                              widget.ad.title,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+              // The creative gets the whole page between the disclosure/skip
+              // row and the home indicator. A fixed 9:16 frame used to sit
+              // inside that, which shrank any creative on screens taller or
+              // wider than 9:16 and left a band of backdrop around it.
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: topPadding + _chromeRowHeight,
+                  bottom: bottomPadding + 12,
                 ),
+                child: widget.ad.videoUrl.isNotEmpty
+                    ? Center(
+                        // Video keeps a portrait frame so the player has a
+                        // stable size to lay out against.
+                        child: AspectRatio(
+                          aspectRatio: 9 / 16,
+                          child: AdActivityScope(
+                              active: widget.active,
+                              child: VideoAdCard(
+                                  ad: widget.ad,
+                                  placementZone: widget.placementZone,
+                                  exposureKey:
+                                      widget.exposureKey ?? widget.ad.id)),
+                        ),
+                      )
+                    : CachedNetworkImage(
+                          width: double.infinity,
+                          height: double.infinity,
+                          imageUrl: widget.ad.imageUrl,
+                          // Contain, not cover. A full-screen creative is a
+                          // poster: its call to action — a phone number, a
+                          // WhatsApp button — sits near the edge, and cover
+                          // crops whatever does not match the device ratio, so
+                          // the one part of the ad that has to survive is the
+                          // first thing lost. The blurred backdrop behind fills
+                          // the letterbox so it still reads as full-bleed.
+                          fit: BoxFit.contain,
+                          placeholder: (context, url) => const Center(
+                            child: CircularProgressIndicator(
+                                color: Colors.white70),
+                          ),
+                          errorWidget: (context, url, error) => Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.campaign_rounded,
+                                  size: 64, color: Colors.white54),
+                              const SizedBox(height: 12),
+                              Text(
+                                widget.ad.title,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
               ),
             ),
 
@@ -333,7 +355,6 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
               ),
             ),
 
-            // Bottom-Right: Floating Circular White Share Button
           ],
         ),
       ),

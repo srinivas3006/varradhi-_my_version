@@ -16,22 +16,49 @@ class AdminReportsController extends ChangeNotifier {
 
   String statusFilter = 'ALL';
 
+  /// Which queue is on screen. Actions always go to this queue's endpoints.
+  AdminReportSource source = AdminReportSource.citizen;
+
+  void setSource(AdminReportSource value) {
+    if (value == source) return;
+    source = value;
+    _items.clear();
+    _nextCursor = null;
+    _hasMore = true;
+    loadInitial();
+  }
+
   List<AdminReportModel> get items => List.unmodifiable(_items);
   AdminLoadStatus get status => _status;
   String? get errorMessage => _errorMessage;
   bool get hasMore => _hasMore;
 
+  /// Set when the source/filter changes while a request is in flight; the
+  /// stale response is dropped and the current queue loads afterwards.
+  bool _reloadPending = false;
+
   Future<void> loadInitial() async {
-    if (_isFetching) return;
+    if (_isFetching) {
+      _reloadPending = true;
+      return;
+    }
     _isFetching = true;
     _status = AdminLoadStatus.loading;
     _errorMessage = null;
     notifyListeners();
 
+    final requestedSource = source;
+    final requestedFilter = statusFilter;
     try {
       final response = await _repository
-          .getReports(status: statusFilter == 'ALL' ? null : statusFilter)
+          .getReports(
+              status: requestedFilter == 'ALL' ? null : requestedFilter,
+              source: requestedSource)
           .timeout(_requestTimeout);
+      if (requestedSource != source || requestedFilter != statusFilter) {
+        _reloadPending = true;
+        return;
+      }
       _items
         ..clear()
         ..addAll(response.items);
@@ -44,6 +71,10 @@ class AdminReportsController extends ChangeNotifier {
     } finally {
       _isFetching = false;
       notifyListeners();
+      if (_reloadPending) {
+        _reloadPending = false;
+        loadInitial();
+      }
     }
   }
 
@@ -57,9 +88,18 @@ class AdminReportsController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final requestedSource = source;
       final response = await _repository
-          .getReports(cursor: _nextCursor, status: statusFilter == 'ALL' ? null : statusFilter)
+          .getReports(
+              cursor: _nextCursor,
+              status: statusFilter == 'ALL' ? null : statusFilter,
+              source: requestedSource)
           .timeout(_requestTimeout);
+      // A page from the other queue must never be appended here.
+      if (requestedSource != source) {
+        _status = AdminLoadStatus.loaded;
+        return;
+      }
       _items.addAll(response.items);
       _nextCursor = response.next;
       _hasMore = response.hasMore;
@@ -74,6 +114,10 @@ class AdminReportsController extends ChangeNotifier {
     } finally {
       _isFetching = false;
       notifyListeners();
+      if (_reloadPending) {
+        _reloadPending = false;
+        loadInitial();
+      }
     }
   }
 
@@ -94,7 +138,7 @@ class AdminReportsController extends ChangeNotifier {
   }
 
   Future<void> reviewReport(String id) async {
-    await _repository.reviewReport(id);
+    await _repository.reviewReport(id, source: source);
     final index = _items.indexWhere((e) => e.id == id);
     if (index != -1) {
       final old = _items[index];
@@ -113,7 +157,7 @@ class AdminReportsController extends ChangeNotifier {
   }
 
   Future<void> dismissReport(String id) async {
-    await _repository.dismissReport(id);
+    await _repository.dismissReport(id, source: source);
     final index = _items.indexWhere((e) => e.id == id);
     if (index != -1) {
       final old = _items[index];

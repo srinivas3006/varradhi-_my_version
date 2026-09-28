@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

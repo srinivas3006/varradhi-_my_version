@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/poster_images.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
+import 'package:vaaradhi/models/poster_images.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
 
 /// Verbatim from GET /api/v1/posters/ — cover and gallery entry differ.
 const _real = {

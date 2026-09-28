@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/network/api_response.dart';
-import 'package:way2news_clone/core/state/feed_state.dart';
-import 'package:way2news_clone/core/utils/date_parser.dart';
-import 'package:way2news_clone/core/utils/url_normalizer.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/repositories/feed_repository.dart';
+import 'package:vaaradhi/core/network/api_response.dart';
+import 'package:vaaradhi/core/state/feed_state.dart';
+import 'package:vaaradhi/core/utils/date_parser.dart';
+import 'package:vaaradhi/core/utils/url_normalizer.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/repositories/feed_repository.dart';
 
 class MockHttpClientAdapter implements HttpClientAdapter {
   final Future<ResponseBody> Function(RequestOptions options) handler;

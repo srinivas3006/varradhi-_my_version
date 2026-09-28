@@ -25,6 +25,22 @@ class ShareContentBuilder {
         '${Uri.encodeComponent(id)}/';
   }
 
+  /// The API's `share_url`, if it is an https URL on the brand domain.
+  /// Anything else is ignored so a bad payload can never make the app share
+  /// a foreign link; the caller then builds the canonical URL itself.
+  static String? trustedShareUrl(Object? raw) {
+    final value = raw?.toString().trim() ?? '';
+    if (value.isEmpty) return null;
+    final uri = Uri.tryParse(value);
+    final brandHost = Uri.parse(ShareBrandConfig.website).host;
+    if (uri == null || uri.scheme != 'https') return null;
+    final host = uri.host.toLowerCase();
+    final ok = host == brandHost ||
+        host == 'www.$brandHost' ||
+        host.endsWith('.$brandHost');
+    return ok ? value : null;
+  }
+
   static ShareContent fromArticle(NewsArticle article) {
     final type =
         article.isUgc ? ShareContentType.ugc : ShareContentType.article;
@@ -44,7 +60,8 @@ class ShareContentBuilder {
       videoUrl: article.effectiveVideoUrl.isEmpty
           ? null
           : article.effectiveVideoUrl,
-      canonicalUrl: canonicalUrl(type, identifier),
+      canonicalUrl: trustedShareUrl(article.shareUrl) ??
+          canonicalUrl(type, identifier),
       creator: article.authorName.isEmpty ? null : article.authorName,
       category: article.category,
       // NewsArticle carries no privacy flag: the feed only returns published
@@ -66,7 +83,8 @@ class ShareContentBuilder {
       title: (poster['title'] ?? 'Poster').toString().trim(),
       description: (poster['description'] ?? '').toString().trim(),
       imageUrl: images?.toString(),
-      canonicalUrl: canonicalUrl(ShareContentType.poster, id),
+      canonicalUrl: trustedShareUrl(poster['share_url']) ??
+          canonicalUrl(ShareContentType.poster, id),
       category: poster['category']?.toString(),
     );
   }
@@ -94,7 +112,8 @@ class ShareContentBuilder {
       title: video.title.trim(),
       imageUrl: video.thumbnailUrl.isEmpty ? null : video.thumbnailUrl,
       videoUrl: video.youtubeUrl ?? video.videoUrl,
-      canonicalUrl: canonicalUrl(type, video.id),
+      canonicalUrl:
+          trustedShareUrl(video.shareUrl) ?? canonicalUrl(type, video.id),
       category: video.channel.isEmpty ? null : video.channel,
     );
   }

@@ -1,11 +1,11 @@
-import 'package:way2news_clone/core/ads/ad_insertion.dart';
-import 'package:way2news_clone/core/ads/ad_placement.dart';
-import 'package:way2news_clone/core/ads/ad_type_resolver.dart';
-import 'package:way2news_clone/core/state/feed_state.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
-import 'package:way2news_clone/models/unified_feed_item.dart';
+import 'package:vaaradhi/core/ads/ad_insertion.dart';
+import 'package:vaaradhi/core/ads/ad_placement.dart';
+import 'package:vaaradhi/core/ads/ad_type_resolver.dart';
+import 'package:vaaradhi/core/state/feed_state.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
+import 'package:vaaradhi/models/unified_feed_item.dart';
 
 void require(bool value, String reason) {
   if (!value) throw StateError(reason);

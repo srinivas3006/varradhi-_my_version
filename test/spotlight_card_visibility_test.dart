@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/widgets/flip_page_view.dart';
+import 'package:vaaradhi/core/widgets/flip_page_view.dart';
 
 /// Regression cover for the blank-screen bug.
 ///

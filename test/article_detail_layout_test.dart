@@ -21,8 +21,10 @@ void main() {
           greaterThan(code.indexOf('_buildReactionSection')));
     });
 
-    test('bookmark is still reachable from the header', () {
-      expect(code, contains('Icons.bookmark_rounded'));
+    test('bookmark is reachable from the header ⋮ sheet', () {
+      expect(code, contains('Icons.more_vert_rounded'));
+      expect(code, contains('StoryOptionsSheet.show'));
+      expect(code, contains('case StoryOption.bookmark'));
     });
   });
 
@@ -31,13 +33,10 @@ void main() {
       expect(code, contains("BannerAdSlot(placementZone: 'article')"));
     });
 
-    test('it is no longer gated behind the UGC check', () {
-      // It sat inside `if (!_isUgc)`, so community posts never carried one.
-      final gate = code.indexOf('if (!_isUgc) ...[');
-      final slot = code.indexOf("BannerAdSlot(placementZone: 'article')");
-      final gateEnd = code.indexOf('],', gate);
-      expect(slot, greaterThan(gateEnd),
-          reason: 'the slot must sit outside the UGC-only block');
+    test('nothing on the screen is gated on citizen vs desk', () {
+      // Citizen posts and desk articles render identically.
+      expect(code, isNot(contains('if (!_isUgc)')));
+      expect(code, isNot(contains('if (_isUgc) ...[')));
     });
   });
 

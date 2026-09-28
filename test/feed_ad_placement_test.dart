@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/services/ad_manager.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/services/ad_manager.dart';
 
 void main() {
   group('Feed Presentation Placement Tests', () {

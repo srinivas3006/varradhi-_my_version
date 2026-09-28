@@ -4,11 +4,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/errors/app_exception.dart';
-import 'package:way2news_clone/core/network/api_response.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/repositories/news_article_repository.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/errors/app_exception.dart';
+import 'package:vaaradhi/core/network/api_response.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/repositories/news_article_repository.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 /// Lightweight mock adapter for Dio without third-party dependencies.
 class TestMockAdapter implements HttpClientAdapter {

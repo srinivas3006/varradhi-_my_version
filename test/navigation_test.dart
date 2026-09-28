@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/navigation/app_navigator.dart';
-import 'package:way2news_clone/core/navigation/app_navigator_observer.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/screens/create_post_screen.dart';
-import 'package:way2news_clone/screens/home_screen.dart';
-import 'package:way2news_clone/screens/spotlight_screen.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/navigation/app_navigator.dart';
+import 'package:vaaradhi/core/navigation/app_navigator_observer.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/screens/create_post_screen.dart';
+import 'package:vaaradhi/screens/home_screen.dart';
+import 'package:vaaradhi/screens/spotlight_screen.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class NavTestMockAdapter implements HttpClientAdapter {
   @override
@@ -126,7 +126,7 @@ void main() {
 
   group('HomeScreen Root PopScope & Back Navigation Policy', () {
     testWidgets(
-        'Back from secondary tab switches back to primary tab (NewsFeedTab)',
+        'Back from secondary tab switches back to primary tab (Home)',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1080, 1920);
       tester.view.devicePixelRatio = 1.0;
@@ -134,7 +134,8 @@ void main() {
 
       await tester.pumpWidget(
         const MaterialApp(
-          home: HomeScreen(initialTabIndex: 3), // Local tab (Spotlight=1, Post=2)
+          home: HomeScreen(
+              initialTabIndex: 4), // Profile (Home=0, Main=1, Post=2, Local=3)
         ),
       );
       await tester.pump();
@@ -421,6 +422,55 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CreatePostScreen), findsOneWidget);
+    });
+
+    testWidgets(
+        'as the Post tab, reporter onboarding has no close button and fits '
+        'a small phone at large text', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(720, 1280);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+      addTearDown(() => tester.view.resetDevicePixelRatio());
+      AppState.instance.isLoggedIn = true;
+      AppState.instance.authToken = 'test-token';
+      AppState.instance.isReporter = false;
+
+      await tester.pumpWidget(const MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(1.3)),
+          child: CreatePostScreen(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // A close button here popped Home, the app's root route.
+      expect(find.byIcon(Icons.close), findsNothing);
+      expect(find.text('రిపోర్టింగ్‌ను ప్రారంభించండి'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'no overflow');
+    });
+
+    testWidgets('pushed as a route, reporter onboarding can be closed',
+        (WidgetTester tester) async {
+      AppState.instance.isLoggedIn = true;
+      AppState.instance.authToken = 'test-token';
+      AppState.instance.isReporter = false;
+
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CreatePostScreen())),
+            child: const Text('Open Create'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('Open Create'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+      expect(find.byType(CreatePostScreen), findsNothing);
+      expect(find.text('Open Create'), findsOneWidget);
     });
   });
 }

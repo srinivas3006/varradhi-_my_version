@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/navigation/auth_guard.dart';
 import '../../services/tts_service.dart';
 import '../../screens/news_detail_screen.dart';
@@ -10,12 +10,13 @@ import '../../state/app_state.dart';
 import '../../utils/share_service.dart';
 import '../../theme/app_theme.dart';
 import '../../screens/comments_screen.dart';
-import '../../services/api_service.dart';
 import '../../repositories/news_article_repository.dart';
 import '../news_article_video_player.dart';
 import '../article_media_carousel.dart';
+import '../smart_fit_image.dart';
 import '../../spotlight/spotlight_media_coordinator.dart';
-import '../watermark/watermark_banner.dart';
+import 'story_options_sheet.dart';
+import '../../services/content_engagement_service.dart';
 
 class SpotlightNewsCard extends StatefulWidget {
   final NewsArticle article;
@@ -59,43 +60,54 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   int _detailGeneration = 0;
 
   bool _downloadingPoster = false;
+  bool _posterDownloaded = false;
 
   /// Guards against a double-tap firing two toggles that cancel out.
   bool _bookmarkInFlight = false;
 
-  /// Generates the branded PNG poster and hands it to the share sheet, where
-  /// both platforms expose "save to device" next to every social app.
+  /// Generates the branded poster and writes it to the gallery.
   Future<void> _downloadPoster(NewsArticle article) async {
+    if (_downloadingPoster || _posterDownloaded) return;
+    HapticFeedback.lightImpact();
     setState(() => _downloadingPoster = true);
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final result = await ShareService.downloadPoster(article);
       if (!mounted) return;
       final telugu = AppState.instance.language == 'Telugu';
-      final String message;
-      switch (result) {
-        case ShareService.downloadSaved:
-          message = telugu
-              ? 'గ్యాలరీలో సేవ్ చేయబడింది'
-              : 'Saved to your gallery';
-          break;
-        case ShareService.downloadPermissionDenied:
-          message = telugu
-              ? 'సేవ్ చేయడానికి గ్యాలరీ అనుమతి కావాలి'
-              : 'Gallery permission is needed to save';
-          break;
-        default:
-          message = telugu
-              ? 'పోస్టర్ సేవ్ చేయడం విఫలమైంది'
-              : 'Could not save the poster';
+      if (result == ShareService.downloadSaved) {
+        setState(() => _posterDownloaded = true);
+        HapticFeedback.lightImpact();
+        Fluttertoast.showToast(
+          msg: "గ్యాలరీలో సేవ్ చేయబడింది / Saved to your gallery",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.green.shade700,
+          textColor: Colors.white,
+          fontSize: 15.0,
+        );
+      } else if (result == ShareService.downloadPermissionDenied) {
+        Fluttertoast.showToast(
+          msg: telugu
+              ? "సేవ్ చేయడానికి గ్యాలరీ అనుమతి కావాలి"
+              : "Gallery permission is needed to save",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.orange.shade800,
+          textColor: Colors.white,
+          fontSize: 15.0,
+        );
+      } else {
+        Fluttertoast.showToast(
+          msg: telugu
+              ? "పోస్టర్ సేవ్ చేయడం విఫలమైంది"
+              : "Could not save the poster",
+          toastLength: Toast.LENGTH_SHORT,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.red.shade700,
+          textColor: Colors.white,
+          fontSize: 15.0,
+        );
       }
-      messenger
-        ..removeCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ));
     } finally {
       if (mounted) setState(() => _downloadingPoster = false);
     }
@@ -104,10 +116,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   @override
   void initState() {
     super.initState();
-    // Fetch full article detail (content) using slug or id from feed item.
-    final slugToFetch = widget.article.slug.isNotEmpty
-        ? widget.article.slug
-        : widget.article.id;
+    // Fetch full article detail by slug. The detail API takes the slug only
+    // — /articles/{id}/ is a 404 — so an item without one keeps its feed copy.
+    final slugToFetch = widget.article.slug;
     if (!widget.article.isUgc && slugToFetch.isNotEmpty) {
       _fetchArticleDetail(slugToFetch);
     }
@@ -118,13 +129,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.article.id != widget.article.id ||
         oldWidget.article.slug != widget.article.slug) {
+      _posterDownloaded = false;
       ++_detailGeneration;
       _detailArticle = null;
       _isLoadingDetail = false;
       _detailError = null;
-      final slug = widget.article.slug.isNotEmpty
-          ? widget.article.slug
-          : widget.article.id;
+      final slug = widget.article.slug;
       if (!widget.article.isUgc && slug.isNotEmpty) {
         _fetchArticleDetail(slug);
       }
@@ -159,9 +169,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       MaterialPageRoute(
         builder: (_) => NewsDetailScreen(
           article: _detailArticle ?? widget.article,
-          slug: widget.article.slug.isNotEmpty
-              ? widget.article.slug
-              : widget.article.id,
+          slug: widget.article.slug,
         ),
       ),
     );
@@ -216,20 +224,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     // available, so large-text users are not left with phone-sized copy.
     final requestedScale =
         MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
-    // One fixed aspect, so the same photo is cropped identically on every
-    // device. The previous rule asked for 16:10 and then clamped it to
-    // 38–40% of viewport height — and the clamp won on every phone, so the
-    // image ran from 1.48:1 on a compact screen down to 0.88:1 on a tall
-    // one. It was never 16:10 anywhere except a tablet.
-    //
-    // Height now follows width. A taller screen gets no more image; it gets
-    // more room for the story, which the body below turns into larger type
-    // rather than more lines.
-    const mediaAspect = 16 / 10;
-    final mediaHeight = (screenWidth / mediaAspect)
-        // Still bounded, but only to stop a very wide screen handing the
-        // image half the card.
-        .clamp(0.0, screenHeight * 0.45);
+    // The system status bar gets its own solid black band; the photo starts
+    // strictly below it instead of sitting under the clock and icons.
+    final statusBarHeight = MediaQuery.paddingOf(context).top;
+
+    // Way2News-style frame: full width, a little shorter than square
+    // (width / 1.22), flush against the status band. The square took half
+    // the screen and cropped most photos into a zoomed look; this gives the
+    // headline and body the room back. The cap only engages on a
+    // landscape/very wide screen.
+    final mediaHeight = (screenWidth / _mediaAspect)
+        .clamp(0.0, (screenHeight - statusBarHeight) * 0.55);
 
     // Always fully painted. The feed is a FlipPageView now, which owns the
     // transition and passes no drag values — deriving opacity from them left
@@ -242,7 +247,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final headlineOffset = widget.dragDelta * 1.0;
     final bodyOffset = widget.dragDelta * 0.85;
 
-    return MediaQuery.withClampedTextScaling(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // Light icons on the black status band, in both themes.
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.black,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+      child: MediaQuery.withClampedTextScaling(
       minScaleFactor: 1.0,
       maxScaleFactor: requestedScale,
       child: GestureDetector(
@@ -252,9 +264,18 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         color: Theme.of(context).scaffoldBackgroundColor,
         child: Stack(
           children: [
-            // 1. IMAGE ZONE (Top 38% with Parallax)
+            // 0. STATUS BAR BAND — solid black, sized to the top safe area.
             Positioned(
               top: 0,
+              left: 0,
+              right: 0,
+              height: statusBarHeight,
+              child: const ColoredBox(color: Colors.black),
+            ),
+
+            // 1. IMAGE ZONE — exact square directly below the status band
+            Positioned(
+              top: statusBarHeight,
               left: 0,
               right: 0,
               height: mediaHeight,
@@ -279,6 +300,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   article: article,
                                   active: widget.isCurrent,
                                   fit: BoxFit.cover,
+                                  dotsAtTop: true,
                                   onTap: widget.onTap)
                               : article.isVideo
                                   ? NewsArticleVideoPlayer(
@@ -326,58 +348,88 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                           ),
                                         );
                                       },
-                                      child: CachedNetworkImage(
+                                      // Fills the frame when the photo's
+                                      // shape allows, otherwise shows it
+                                      // whole — never zoomed or stretched.
+                                      child: SmartFitImage(
                                         imageUrl:
                                             (article.mediaItems.isNotEmpty &&
                                                     article.mediaItems.first.url
                                                         .isNotEmpty)
                                                 ? article.mediaItems.first.url
                                                 : article.imageUrl,
-                                        fit: BoxFit.cover,
-                                        memCacheWidth: 480,
-                                        memCacheHeight: 480,
-                                        maxWidthDiskCache: 800,
-                                        maxHeightDiskCache: 800,
-                                        placeholder: (context, url) =>
-                                            Container(color: AppColors.chipBg),
-                                        errorWidget: (context, url, error) =>
-                                            Container(
-                                          color: AppColors.chipBg,
-                                          child: const Icon(
-                                              Icons
-                                                  .image_not_supported_outlined,
-                                              color: AppColors.textMuted),
-                                        ),
                                       ),
                                     ),
-                          // Smooth Gradient Masking (Vignette) for seamless blend
-                          Positioned(
-                            bottom: 0,
+                          // Dark-to-transparent scrim rising from the bottom
+                          // edge, so the white attribution text stays legible
+                          // over any photo. Kept short: the attribution is a
+                          // single text block, not an avatar row.
+                          const Positioned(
                             left: 0,
                             right: 0,
-                            height: 70,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.transparent,
-                                    Theme.of(context)
-                                        .scaffoldBackgroundColor
-                                        .withValues(alpha: 0.6),
-                                    Theme.of(context).scaffoldBackgroundColor,
-                                  ],
-                                  stops: const [0.0, 0.6, 1.0],
+                            bottom: 0,
+                            height: 96,
+                            child: IgnorePointer(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                      Color(0xE6000000),
+                                      Color(0x80000000),
+                                      Color(0x00000000),
+                                    ],
+                                    stops: [0.0, 0.45, 1.0],
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                          // Multi-media Indicator (If multiple photos/videos)
+
+                          // Subtle Left Vertical Watermark (Non-intrusive)
+                          const Positioned(
+                            left: 8,
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: RotatedBox(
+                                  quarterTurns: 3,
+                                  child: Opacity(
+                                    opacity: 0.12,
+                                    child: Text(
+                                      'VAARADHI',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 2.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Category pill — inside the top-left corner.
+                          Positioned(
+                            top: _mediaInset,
+                            left: _mediaInset,
+                            child: _CategoryPill(
+                              label: article.category.isNotEmpty
+                                  ? article.category
+                                  : 'వారధి',
+                            ),
+                          ),
+
+                          // Multi-media count — top-right, clear of the
+                          // attribution block.
                           if (article.mediaItems.length > 1)
                             Positioned(
-                              bottom: 28,
-                              left: 16,
+                              top: _mediaInset,
+                              right: _mediaInset,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 4),
@@ -402,10 +454,16 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 ),
                               ),
                             ),
-                          // No floating mark over the image: the masthead
-                          // band below it is the watermark. The overlay drew
-                          // a corner logo AND rotated text on top of that —
-                          // three marks on one card.
+
+                          // Reporter attribution on the bottom inside edge:
+                          // name + designation on the left, location pin on
+                          // the right. No logo or link — the photo stays clean.
+                          Positioned(
+                            left: _mediaInset,
+                            right: _mediaInset,
+                            bottom: 10,
+                            child: _ReporterAttribution(article: article),
+                          ),
                         ],
                       ),
                     ),
@@ -415,19 +473,44 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
               ),
             ),
 
-            // 2. CONTENT ZONE (Overlaps image slightly)
+            // 2. CONTENT ZONE
             Positioned.fill(
-              top: mediaHeight - 24,
+              top: statusBarHeight + mediaHeight,
               child: Opacity(
                 opacity: textOpacity,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: _bodyGutter),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Masthead band, sitting on the seam between the media
-                      // and the story.
-                      const WatermarkBanner(height: 26),
+                      const SizedBox(height: 6),
+
+                      // Headline — immediately below the square. Bold, with
+                      // generous leading for the height of Telugu clusters
+                      // (vowel signs above, ottulu below).
+                      Transform.translate(
+                        offset: Offset(0, headlineOffset),
+                        child: Text(
+                          article.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textHeightBehavior: const TextHeightBehavior(
+                            applyHeightToFirstAscent: false,
+                            applyHeightToLastDescent: false,
+                          ),
+                          style: GoogleFonts.notoSansTelugu(
+                            fontSize: 19.0,
+                            fontWeight: FontWeight.w700,
+                            color: isDark
+                                ? AppColors.readingTitleDark
+                                : const Color(0xFF1E1E1E),
+                            height: 1.45,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
 
                       // Meta Row: Audio/Listen + Time (Utility)
                       Transform.translate(
@@ -464,24 +547,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             _detailArticle ?? widget.article);
                                       },
                                       child: Container(
+                                        // Slim pill, same height as the
+                                        // time text beside it.
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 6),
+                                            horizontal: 10, vertical: 4),
                                         decoration: BoxDecoration(
                                           color: isPlaying
                                               ? AppColors.primary
-                                              : (isDark
-                                                  ? Colors.white10
-                                                  : Colors.black
-                                                      .withValues(alpha: 0.05)),
+                                              : AppColors.primary
+                                                  .withValues(alpha: 0.08),
                                           borderRadius:
-                                              BorderRadius.circular(20),
-                                          border: Border.all(
-                                            color: isPlaying
-                                                ? AppColors.primary
-                                                : (isDark
-                                                    ? Colors.white24
-                                                    : Colors.black12),
-                                          ),
+                                              BorderRadius.circular(14),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -500,15 +576,13 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               Icon(
                                                 isPlaying
                                                     ? Icons.stop_circle_rounded
-                                                    : Icons.volume_up_rounded,
-                                                size: 16,
+                                                    : Icons.headphones_rounded,
+                                                size: 15,
                                                 color: isPlaying
                                                     ? Colors.white
-                                                    : (isDark
-                                                        ? Colors.white
-                                                        : Colors.black87),
+                                                    : AppColors.primary,
                                               ),
-                                            const SizedBox(width: 6),
+                                            const SizedBox(width: 5),
                                             Text(
                                               isLoading
                                                   ? (AppState.instance.language == 'Telugu' ? 'లోడ్ అవుతోంది...' : 'Loading...')
@@ -520,9 +594,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                                 fontWeight: FontWeight.w700,
                                                 color: isPlaying
                                                     ? Colors.white
-                                                    : (isDark
-                                                        ? Colors.white
-                                                        : Colors.black87),
+                                                    : AppColors.primary,
                                               ),
                                             ),
                                           ],
@@ -585,91 +657,6 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   ),
                                   const SizedBox(width: 6),
                                 ],
-                                if (article.isUgc) ...[
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: Colors.amber.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                          color: Colors.amber.withValues(alpha: 0.4)),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.person_pin_circle_rounded,
-                                            size: 11, color: Colors.amber),
-                                        const SizedBox(width: 3),
-                                        Text(
-                                          article.authorName.isNotEmpty
-                                              ? article.authorName
-                                              : 'సిటిజెన్ రిపోర్ట్',
-                                          style: const TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.amber,
-                                              fontWeight: FontWeight.w800),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                ],
-                                if (article.village != null &&
-                                    article.village!.isNotEmpty) ...[
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.location_on,
-                                            size: 10, color: AppColors.primary),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          article.village!,
-                                          style: const TextStyle(
-                                              fontSize: 11,
-                                              color: AppColors.primary,
-                                              fontWeight: FontWeight.w700),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                ] else if (article.district != null &&
-                                    article.district!.isNotEmpty) ...[
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.location_on,
-                                            size: 10, color: AppColors.primary),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          article.district!,
-                                          style: const TextStyle(
-                                              fontSize: 11,
-                                              color: AppColors.primary,
-                                              fontWeight: FontWeight.w700),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                ],
                                 Text(
                                   article.timeAgo,
                                   style: TextStyle(
@@ -680,7 +667,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       fontWeight: FontWeight.w400),
                                 ),
                                 if (widget.pageCount > 0) ...[
-                                  const Spacer(),
+                                  // A Spacer here sat in a min-size Row with
+                                  // unbounded width — a flex layout error.
+                                  const SizedBox(width: 10),
                                   Text(
                                     '${widget.pageIndex + 1} of ${widget.pageCount} Pages',
                                     style: TextStyle(
@@ -696,46 +685,6 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 14),
-
-                      // Headline with Noto Sans Telugu shaping
-                      Transform.translate(
-                        offset: Offset(0, headlineOffset),
-                        child: Text(
-                          article.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.notoSansTelugu(
-                            fontSize: 20.0,
-                            fontWeight: FontWeight.w700,
-                            color: isDark
-                                ? AppColors.readingTitleDark
-                                : const Color(0xFF212121),
-                            height: 1.4,
-                            letterSpacing: 0.0,
-                          ),
-                        ),
-                      ),
-                      if (article.authorName.isNotEmpty &&
-                          article.authorName != 'VARADHI Desk') ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.person_pin_rounded,
-                                size: 13,
-                                color: isDark ? Colors.white60 : Colors.black54),
-                            const SizedBox(width: 4),
-                            Text(
-                              article.authorName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white60 : Colors.black54,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                       const SizedBox(height: 10),
 
                       // Body Text with Dynamic Auto-Adjusting & Adaptive "Read More"
@@ -791,13 +740,16 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // on the tallest device, so taller screens
                                 // still show somewhat more text — they just
                                 // show it at a readable size.
-                                const double bodyLineHeight = 1.65;
+                                // Larger and airier than before (was 14.8pt
+                                // at 1.42) so older readers can read it
+                                // comfortably — Way2News reference.
+                                const double bodyLineHeight = 1.55;
                                 const double referenceBody = 214.0; // compact
-                                const double referenceFont = 15.0;
+                                const double referenceFont = 17.2;
 
                                 final fitted = referenceFont *
                                     (constraints.maxHeight / referenceBody)
-                                        .clamp(1.0, 1.30);
+                                        .clamp(1.0, 1.20);
 
                                 // The reader's own size setting stays a
                                 // preference, applied as a ratio around the
@@ -811,19 +763,19 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // Bounded so neither a tiny nor a huge screen
                                 // produces type nobody can read.
                                 final effectiveFontSize =
-                                    (fitted * preference).clamp(14.0, 21.0);
+                                    (fitted * preference).clamp(16.5, 19.0);
 
                                 final textStyle = GoogleFonts.notoSansTelugu(
                                   fontSize: effectiveFontSize,
                                   color: isDark
                                       ? AppColors.readingBodyDark
-                                      : const Color(0xFF424242),
+                                      : const Color(0xFF333333),
                                   height: bodyLineHeight,
                                   fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.2,
+                                  letterSpacing: 0.1,
                                 );
 
-                                const double reservedForButton = 44.0;
+                                const double reservedForButton = 34.0;
 
                                 // Ask the engine for the real line metrics
                                 // rather than assuming fontSize * height.
@@ -833,9 +785,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // taller than the nominal figure, so the
                                 // estimate ran high and pushed the Read More
                                 // button off its line.
+                                // The same span is measured and painted, so
+                                // the paragraph gaps are counted in the fit.
+                                final bodySpan =
+                                    _paragraphSpan(toShow, textStyle);
                                 final textPainter = TextPainter(
-                                  text:
-                                      TextSpan(text: toShow, style: textStyle),
+                                  text: bodySpan,
                                   textDirection: Directionality.of(context),
                                 )..layout(maxWidth: constraints.maxWidth);
 
@@ -872,29 +827,36 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      toShow,
+                                    Text.rich(
+                                      bodySpan,
                                       maxLines: dynamicMaxLines,
                                       overflow: TextOverflow.ellipsis,
+                                      // Justified Telugu opened wide gaps
+                                      // between words; start-aligned reads
+                                      // evenly.
                                       textAlign: TextAlign.start,
+                                      textHeightBehavior:
+                                          const TextHeightBehavior(
+                                        applyHeightToFirstAscent: false,
+                                        applyHeightToLastDescent: false,
+                                      ),
                                       style: textStyle,
                                     ),
                                     if (shouldShowReadMore) ...[
-                                      const SizedBox(height: 8),
+                                      const SizedBox(height: 6),
+                                      // Compact link-style pill: a quiet
+                                      // cue, not a second headline.
                                       GestureDetector(
                                         onTap: _navigateToDetail,
                                         behavior: HitTestBehavior.opaque,
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
-                                              horizontal: 14, vertical: 7),
+                                              horizontal: 10, vertical: 4),
                                           decoration: BoxDecoration(
                                             color: AppColors.primary
-                                                .withValues(alpha: 0.12),
+                                                .withValues(alpha: 0.08),
                                             borderRadius:
-                                                BorderRadius.circular(16),
-                                            border: Border.all(
-                                                color: AppColors.primary
-                                                    .withValues(alpha: 0.35)),
+                                                BorderRadius.circular(12),
                                           ),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
@@ -903,17 +865,17 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                                 AppState.instance.language ==
                                                         'Telugu'
                                                     ? 'ఇంకా చదవండి'
-                                                    : 'Read More',
+                                                    : 'Read more',
                                                 style: const TextStyle(
-                                                  fontSize: 13.5,
-                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
                                                   color: AppColors.primary,
                                                 ),
                                               ),
-                                              const SizedBox(width: 4),
+                                              const SizedBox(width: 3),
                                               const Icon(
                                                   Icons.arrow_forward_rounded,
-                                                  size: 14,
+                                                  size: 12,
                                                   color: AppColors.primary),
                                             ],
                                           ),
@@ -991,10 +953,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                                         // 2. Sync to backend (guest or authenticated)
                                         try {
-                                          final res = await ApiService.instance.postArticleReaction(
-                                            targetId,
-                                            nextReaction,
-                                          );
+                                          // Same call for desk and citizen stories.
+                                          final res = await ContentEngagementService
+                                              .instance
+                                              .react(article, nextReaction);
                                           if (mounted) {
                                             setState(() {
                                               final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
@@ -1088,10 +1050,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
                                         // 2. Sync to backend (guest or authenticated)
                                         try {
-                                          final res = await ApiService.instance.postArticleReaction(
-                                            targetId,
-                                            nextReaction,
-                                          );
+                                          // Same call for desk and citizen stories.
+                                          final res = await ContentEngagementService
+                                              .instance
+                                              .react(article, nextReaction);
                                           if (mounted) {
                                             setState(() {
                                               final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
@@ -1159,28 +1121,31 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   _buildActionIcon(
                                     icon: _downloadingPoster
                                         ? Icons.hourglass_top_rounded
-                                        : Icons.download_rounded,
-                                    color: isDark
-                                        ? AppColors.readingMetaDark
-                                        : const Color(0xFF6B7280),
+                                        : (_posterDownloaded
+                                            ? Icons.check_circle_rounded
+                                            : Icons.download_rounded),
+                                    color: _posterDownloaded
+                                        ? Colors.green
+                                        : (isDark
+                                            ? AppColors.readingMetaDark
+                                            : const Color(0xFF6B7280)),
                                     label: '',
                                     onTap: () {
-                                      if (_downloadingPoster) return;
+                                      if (_downloadingPoster || _posterDownloaded) return;
                                       _downloadPoster(article);
                                     },
                                   ),
-                                // Share (Center, Prominent)
+                                // Share (Center, Prominent Red Circle)
                                 GestureDetector(
                                   onTap: widget.onShare,
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.1),
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.primary,
                                       shape: BoxShape.circle,
                                     ),
                                     child: const Icon(Icons.share_rounded,
-                                        color: AppColors.primary, size: 24),
+                                        color: Colors.white, size: 22),
                                   ),
                                 ),
                                 // Comment (Opens directly without auth gate)
@@ -1208,41 +1173,23 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     );
                                   },
                                 ),
-                                // Save / Bookmark
-                                AnimatedBuilder(
-                                  animation: AppState.instance,
-                                  builder: (context, _) {
-                                    final targetId = article.id.isNotEmpty
-                                        ? article.id
-                                        : article.slug;
-                                    // article.isBookmarked is the reader's
-                                    // saved state from the backend; the local
-                                    // set is the optimistic overlay. Reading
-                                    // only the set meant a bookmark made in
-                                    // an earlier session never showed.
-                                    final isSaved = article.isBookmarked ||
-                                        AppState.instance
-                                            .isBookmarked(targetId) ||
-                                        (widget.article.id.isNotEmpty &&
-                                            AppState.instance.isBookmarked(
-                                                widget.article.id));
-                                    return _buildActionIcon(
-                                      icon: isSaved
-                                          ? Icons.bookmark_rounded
-                                          : Icons.bookmark_border_rounded,
-                                      color: isSaved
-                                          ? AppColors.primary
-                                          : (isDark
-                                              ? AppColors.readingMetaDark
-                                              : const Color(0xFF6B7280)),
-                                      label: '',
-                                      onTap: () => _handleBookmarkTap(
-                                        targetId: targetId,
-                                        isSaved: isSaved,
-                                        article: article,
-                                      ),
-                                    );
-                                  },
+                                // More (⋮): Report Story + Bookmark live in
+                                // a bottom sheet instead of the bar.
+                                Semantics(
+                                  button: true,
+                                  label: AppState.instance.language ==
+                                          'Telugu'
+                                      ? 'మరిన్ని ఎంపికలు'
+                                      : 'More options',
+                                  child: _buildActionIcon(
+                                    key: const Key('spotlight_more_btn'),
+                                    icon: Icons.more_vert_rounded,
+                                    color: isDark
+                                        ? AppColors.readingMetaDark
+                                        : const Color(0xFF6B7280),
+                                    label: '',
+                                    onTap: () => _showMoreSheet(article),
+                                  ),
                                 ),
                               ],
                             ),
@@ -1258,7 +1205,70 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         ),
       ),
       ),
+      ),
     );
+  }
+
+  /// Inset of the overlays inside the square (spec: 32px on a ~2.75x
+  /// 1080px-wide screen ≈ 12 logical px).
+  static const double _mediaInset = 12.0;
+
+  /// Width / height of the media frame (Way2News reference ≈ 1.22).
+  static const double _mediaAspect = 1.22;
+
+  /// Left/right gutter of the headline and body (spec: ~48px ≈ 18 logical
+  /// px).
+  static const double _bodyGutter = 18.0;
+
+  /// Gap between paragraphs (spec: 24px ≈ 9 logical px).
+  static const double _paragraphGap = 9.0;
+
+  /// Body text with a fixed gap between paragraphs. Runs of blank lines
+  /// collapse to one gap. The gap is an empty line set at [_paragraphGap],
+  /// so the TextPainter that fits the copy measures it exactly.
+  static TextSpan _paragraphSpan(String text, TextStyle style) {
+    final paragraphs = text
+        .split(RegExp(r'\n\s*\n|\r\n\s*\r\n'))
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (paragraphs.length <= 1) return TextSpan(text: text, style: style);
+    final gap = style.copyWith(fontSize: _paragraphGap, height: 1.0);
+    return TextSpan(style: style, children: [
+      for (var i = 0; i < paragraphs.length; i++) ...[
+        if (i > 0) ...[
+          const TextSpan(text: '\n'),
+          TextSpan(text: '\n', style: gap),
+        ],
+        TextSpan(text: paragraphs[i]),
+      ],
+    ]);
+  }
+
+  /// ⋮ in the action bar: Report Story and Bookmark.
+  Future<void> _showMoreSheet(NewsArticle article) async {
+    HapticFeedback.selectionClick();
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    final isSaved = article.isBookmarked ||
+        AppState.instance.isBookmarked(targetId) ||
+        (widget.article.id.isNotEmpty &&
+            AppState.instance.isBookmarked(widget.article.id));
+
+    final choice = await StoryOptionsSheet.show(
+      context,
+      isBookmarked: isSaved,
+    );
+    if (!mounted || choice == null) return;
+
+    switch (choice) {
+      case StoryOption.bookmark:
+        _handleBookmarkTap(
+            targetId: targetId, isSaved: isSaved, article: article);
+        break;
+      case StoryOption.report:
+        await StoryActions.report(context, article);
+        break;
+    }
   }
 
   void _handleBookmarkTap({
@@ -1309,9 +1319,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
     var failed = false;
     try {
-      final success = await ApiService.instance.toggleBookmark(targetId);
-      if (!success) {
+      final saved = await ContentEngagementService.instance
+          .setSaved(article, nowSaved: nowSaved);
+      if (saved == null) {
         failed = true;
+      } else if (saved != nowSaved) {
+        // The server's toggle is the truth; adopt it.
+        AppState.instance.setBookmarked(targetId, saved);
+        if (mounted) setState(() => article.isBookmarked = saved);
       }
     } catch (e) {
       debugPrint('[SpotlightNewsCard] Bookmark sync failed: $e');
@@ -1353,12 +1368,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   }
 
   Widget _buildActionIcon({
+    Key? key,
     required IconData icon,
     required Color color,
     required String label,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
+      key: key,
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Column(
@@ -1380,5 +1397,159 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     if (count <= 0) return '';
     if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}k';
     return count.toString();
+  }
+}
+
+/// Category tag in the top-left corner of the square.
+class _CategoryPill extends StatelessWidget {
+  const _CategoryPill({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(color: Color(0x40000000), blurRadius: 6),
+        ],
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// Reporter attribution along the bottom inside edge of the square.
+///
+/// Left: reporter name and designation. Right: the story's location pin.
+/// Text only — no logo or link — so the photo reads clean.
+class _ReporterAttribution extends StatelessWidget {
+  const _ReporterAttribution({required this.article});
+
+  final NewsArticle article;
+
+  bool get _telugu => AppState.instance.language == 'Telugu';
+
+  bool get _isDesk {
+    final name = article.authorName.trim().toLowerCase();
+    return name.isEmpty ||
+        name == 'varadhi desk' ||
+        name == 'vaaradhi desk' ||
+        name == 'vaaradhi' ||
+        name == 'varadhi' ||
+        name.contains('@');
+  }
+
+  String get _name {
+    if (_isDesk) return _telugu ? 'వారధి న్యూస్ డెస్క్' : 'Vaaradhi News Desk';
+    return article.authorName.trim();
+  }
+
+  String get _designation {
+    if (_isDesk) return _telugu ? 'ఎడిటోరియల్ టీమ్' : 'Editorial Team';
+    return _telugu ? 'రిపోర్టర్' : 'Reporter';
+  }
+
+  /// Most specific place first, up to two levels ("Kesaram, Suryapet").
+  String get _location {
+    final parts = <String>[
+      for (final p in [
+        article.village,
+        article.subdistrict,
+        article.district,
+        article.state,
+      ])
+        if (p != null && p.trim().isNotEmpty) p.trim(),
+    ];
+    final unique = <String>[];
+    for (final p in parts) {
+      if (!unique.contains(p)) unique.add(p);
+    }
+    return unique.take(2).join(', ');
+  }
+
+  static const _shadow = [Shadow(color: Color(0x99000000), blurRadius: 4)];
+
+  @override
+  Widget build(BuildContext context) {
+    final location = _location;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Left: name + designation
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  shadows: _shadow,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _designation,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xE6FFFFFF),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  shadows: _shadow,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Right: location pin
+        if (location.isNotEmpty) ...[
+          const SizedBox(width: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 170),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.location_on_rounded,
+                    size: 13, color: Colors.white, shadows: _shadow),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: Text(
+                    location,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      shadows: _shadow,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }

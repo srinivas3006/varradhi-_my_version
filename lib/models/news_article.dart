@@ -47,6 +47,10 @@ class NewsArticle {
   final bool isFeatured;
   final List<MediaItem> mediaItems;
   final String contentKind;
+
+  /// Public page URL from the API (`share_url`), e.g.
+  /// https://vaaradhinews.com/article/{slug}/. Empty when not sent.
+  final String shareUrl;
   bool isLiked;
 
   /// The reader's existing dislike, as the backend reports it.
@@ -90,6 +94,7 @@ class NewsArticle {
     this.isFeatured = false,
     this.mediaItems = const [],
     this.contentKind = 'article',
+    this.shareUrl = '',
     this.isLiked = false,
     this.isDisliked = false,
     this.isBookmarked = false,
@@ -114,7 +119,30 @@ class NewsArticle {
     );
   }
 
+  /// Fields `GET /api/v1/feed/home/` sends under `metadata` instead of at the
+  /// top level. Without lifting `slug`, every Home article had an empty slug
+  /// and its detail could not be loaded (detail is /articles/{slug}/ only).
+  static const _metadataFallbackKeys = [
+    'slug',
+    'share_url',
+    'is_breaking',
+    'is_featured',
+    'is_bookmarked',
+  ];
+
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
+    final metadata = json['metadata'];
+    if (metadata is Map) {
+      json = Map<String, dynamic>.from(json);
+      for (final key in _metadataFallbackKeys) {
+        final top = json[key];
+        final nested = metadata[key];
+        if ((top == null || top.toString().trim().isEmpty) && nested != null) {
+          json[key] = nested;
+        }
+      }
+    }
+
     String extractString(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
@@ -198,7 +226,7 @@ class NewsArticle {
     return NewsArticle(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
-      slug: json['slug']?.toString() ?? '',
+      slug: extractString(['slug']),
       summary: extractString(['summary', 'description', 'excerpt']),
       body: extractString(['content', 'body', 'content_html', 'body_html']),
       imageUrl: normalizedImgUrl,
@@ -262,6 +290,7 @@ class NewsArticle {
       isFeatured: json['is_featured'] == true,
       mediaItems: parsedMediaItems,
       contentKind: _parseContentKind(json),
+      shareUrl: json['share_url']?.toString() ?? '',
     );
   }
 
@@ -393,6 +422,8 @@ class NewsArticle {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'slug': slug,
+      'author_name': authorName,
       'title': title,
       'summary': summary,
       'content': body,
@@ -420,6 +451,7 @@ class NewsArticle {
       'is_disliked_by_user': isDisliked,
       'is_bookmarked_by_user': isBookmarked,
       'feed_item_type': contentKind,
+      if (shareUrl.isNotEmpty) 'share_url': shareUrl,
       'media_items': mediaItems.map((item) => item.toJson()).toList(),
     };
   }

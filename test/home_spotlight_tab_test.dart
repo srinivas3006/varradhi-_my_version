@@ -4,139 +4,98 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   final home = File('lib/screens/home_screen.dart').readAsStringSync();
-  final feed = File('lib/screens/news_feed_tab.dart').readAsStringSync();
   final view = File('lib/spotlight/spotlight_screen.dart').readAsStringSync();
-  final wrapper =
-      File('lib/screens/spotlight_screen.dart').readAsStringSync();
+  final nav = File('lib/widgets/bottom_nav_bar.dart').readAsStringSync();
+  final splash = File('lib/screens/splash_screen.dart').readAsStringSync();
 
-  group('Spotlight is a screen, not a Home tab', () {
-    test('Home does not mount Spotlight in its tab list', () {
+  group('Home is the hub; Spotlight is pushed over it', () {
+    test('tab 0 is the Home feed, not an embedded Spotlight', () {
       final tabs = home.substring(home.indexOf('final tabs = ['));
-      expect(tabs.substring(0, 800), isNot(contains('SpotlightScreen(')),
-          reason: 'it must be pushed, not embedded');
+      final body = tabs.substring(0, 400);
+      expect(body, contains('NewsFeedTab()'));
+      expect(home, isNot(contains('SpotlightScreenView(')));
     });
 
-    test('the local slot keeps its own tab', () {
-      expect(home, contains('LocalNewsTab()'));
+    test('cold launch opens Spotlight on top of Home', () {
+      expect(splash, contains('HomeScreen(openSpotlightOnStart: true)'));
+      final init = home.substring(home.indexOf('void initState()'));
+      final body = init.substring(0, init.indexOf('\n  }'));
+      expect(body, contains('widget.openSpotlightOnStart'));
+      expect(body, contains('!hadPendingNotification'));
+      expect(body, contains('_openSpotlight(isLocal: false)'));
     });
-  });
 
-  group('Home carries the button that opens it', () {
-    test('the Spotlight button is in the top bar', () {
-      expect(feed, contains('Icons.auto_awesome_rounded'));
-    });
-
-    test('it pushes a route rather than switching a tab', () {
-      final btn = feed.substring(feed.indexOf('Icons.auto_awesome_rounded'));
-      final body = btn.substring(0, 700);
+    test('Spotlight is pushed as a route, so back pops to Home', () {
+      final fn = home.substring(home.indexOf('void _openSpotlight('));
+      final body = fn.substring(0, fn.indexOf('\n  }'));
       expect(body, contains('AppNavigator.pushSafe'));
-      expect(body, contains('MaterialPageRoute'));
-      expect(body, contains('SpotlightScreen()'));
+      expect(body, contains('SpotlightScreen(isLocal: isLocal)'));
     });
 
-    test('the route is named, as the app names its others', () {
-      final btn = feed.substring(feed.indexOf('Icons.auto_awesome_rounded'));
-      expect(btn.substring(0, 700), contains("RouteSettings(name: '/spotlight')"));
-    });
-
-    test('it is labelled in both languages', () {
-      expect(feed, contains('స్పాట్‌లైట్'));
-      expect(feed, contains("'Spotlight'"));
-    });
-
-    test('search and notifications are still there', () {
-      expect(feed, contains('Icons.search_rounded'));
-      expect(feed, contains('Icons.notifications_none_rounded'));
+    test('the retired standalone tabs are not wired into Home', () {
+      expect(home, isNot(contains('LocalNewsTab(')));
+      expect(home, isNot(contains('VideoTab(')));
     });
   });
 
-  group('closing returns to Home', () {
-    test('a pushed Spotlight pops', () {
-      final fn = view.substring(view.indexOf('void _closeSpotlight()'));
-      final body = fn.substring(0, 700);
-      expect(body, contains('canPop()'));
-      expect(body, contains('Navigator.of(context).pop()'));
-    });
-
-    test('a cold-start Spotlight still lands on Home', () {
-      // Opened from a notification there is nothing to pop, so it replaces
-      // itself with Home rather than trapping the reader.
-      final fn = view.substring(view.indexOf('void _closeSpotlight()'));
-      expect(fn.substring(0, 900), contains('HomeScreen(openSpotlightOnStart: false)'));
-    });
-
-    test('playback stops on the way out', () {
-      final fn = view.substring(view.indexOf('void _closeSpotlight()'));
-      final body = fn.substring(0, 400);
-      expect(body, contains('stopAll()'));
-      expect(body, contains('AppTtsService.instance.stop()'));
-    });
-  });
-
-  group('the embed-only escape hatch is gone with the embedding', () {
-    test('no unused embedded flag remains', () {
-      expect(view, isNot(contains('widget.embedded')));
-      expect(wrapper, isNot(contains('embedded')));
-    });
-  });
-
-  group('Spotlight has its own bottom-nav tab', () {
-    final nav = File('lib/widgets/bottom_nav_bar.dart').readAsStringSync();
-    // Order the items are declared in, which is the order they render.
+  group('bottom nav has exactly 5 items', () {
     final keys = RegExp(r"key: '(nav_\w+)'")
         .allMatches(nav)
         .map((m) => m.group(1))
         .toList();
 
-    test('the item sits directly beside Home', () {
-      expect(keys.take(2), ['nav_home', 'nav_spotlight']);
+    test('Home, Main News, Post, Local, Profile, in that order', () {
+      expect(keys, [
+        'nav_home',
+        'nav_main_news',
+        'nav_post',
+        'nav_local',
+        'nav_profile',
+      ]);
     });
 
-    test('Post keeps the centre slot the floating button needs', () {
-      // The Row renders a gap at index 2 and the button label reads
-      // _items[2]; anything else there swallows a real tab.
-      expect(keys[2], 'nav_post');
+    test('the FAB gap and its tap target both use index 2', () {
+      expect(nav, contains('if (index == 2)'));
+      expect(nav, contains('onTap(2)'));
+      expect(nav, contains('currentIndex == 2'));
+      expect(nav, contains('tr(_items[2].key)'));
     });
 
-    test('the other tabs follow unchanged', () {
-      expect(keys.skip(3), ['nav_local', 'nav_video', 'nav_profile']);
-    });
-
-    test('the tab is labelled in both languages', () {
+    test('the tabs are labelled in every language', () {
       final tr =
           File('lib/localization/app_translations.dart').readAsStringSync();
-      expect(tr, contains("'nav_spotlight': 'Spotlight'"));
-      expect(tr, contains("'nav_spotlight': 'స్పాట్‌లైట్'"));
+      for (final key in keys) {
+        expect("'$key':".allMatches(tr).length, 3, reason: key);
+      }
     });
   });
 
-  group('tapping the tab pushes rather than switching the stack', () {
-    test('index 1 pushes the Spotlight route', () {
-      final tap = home.substring(home.indexOf('onTap: (index) {'));
-      final body = tap.substring(0, 900);
-      expect(body, contains('if (index == 1)'));
-      expect(body, contains('AppNavigator.pushSafe'));
-      expect(body, contains('SpotlightScreen()'));
+  group('tapping the nav bar', () {
+    final tap = home.substring(home.indexOf('onTap: (index) {'));
+    final body = tap.substring(0, tap.indexOf('\n          },'));
+
+    test('Main (1) and Local (3) open Spotlight rather than a tab', () {
+      expect(body, contains('if (index == 1 || index == 3)'));
+      expect(body, contains('_openSpotlight(isLocal: index == 3)'));
     });
 
-    test('it leaves _navIndex alone, so Back lands where you were', () {
-      final tap = home.substring(home.indexOf('onTap: (index) {'));
-      final branch = tap.substring(
-          tap.indexOf('if (index == 1)'), tap.indexOf('if (index == 2)'));
-      expect(branch, isNot(contains('_navIndex = 1')),
-          reason: 'selecting the tab would strand the reader on a blank slot');
-    });
-
-    test('the stack slot at index 1 is an empty placeholder', () {
-      final tabs = home.substring(home.indexOf('final tabs = ['));
-      expect(tabs.substring(0, 700), isNot(contains('SpotlightScreen(')));
-    });
-
-    test('Post still requires an account', () {
-      final tap = home.substring(home.indexOf('onTap: (index) {'));
-      final body = tap.substring(0, tap.indexOf('\n          },'));
+    test('Post (2) requires an account before switching', () {
       expect(body, contains('if (index == 2)'));
-      expect(body, contains('requireAuth'));
+      expect(body, contains('_handlePostTap'));
+      final fn = home.substring(home.indexOf('void _handlePostTap()'));
+      expect(fn.substring(0, 200), contains('requireAuth'));
+    });
+  });
+
+  group('pushed Spotlight owns its own back navigation', () {
+    test('the bottom-overlay back arrow shows when not embedded', () {
+      expect(view, contains('if (!widget.embedded)'));
+      expect(view, contains("key: const Key('spotlight_home_btn')"));
+    });
+
+    test('_closeSpotlight pops back to Home', () {
+      final fn = view.substring(view.indexOf('void _closeSpotlight()'));
+      expect(fn.substring(0, 400), contains('Navigator.of(context).pop()'));
     });
   });
 }

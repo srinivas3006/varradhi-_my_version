@@ -1,24 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../core/navigation/auth_guard.dart';
 import '../core/navigation/app_navigator.dart';
+import '../core/navigation/auth_guard.dart';
+import '../core/navigation/notification_navigation_gate.dart';
 import '../widgets/bottom_nav_bar.dart';
 import '../widgets/ads/bottom_sticky_ad_banner.dart';
 import '../models/ad_banner.dart';
 import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
 import 'profile_tab.dart';
-import 'video_tab.dart';
+import 'spotlight_screen.dart';
 import '../services/notification_service.dart';
 import '../services/ad_manager.dart';
 import '../state/app_state.dart';
 
-import 'spotlight_screen.dart';
-import '../core/navigation/notification_navigation_gate.dart';
-import 'local_news_tab.dart';
-
+/// The navigation hub. Home, Post and Profile are tabs; Main News and Local
+/// News open the full-screen Spotlight feed as its own route, so backing out
+/// of Spotlight always lands here rather than closing the app.
 class HomeScreen extends StatefulWidget {
   final int initialTabIndex;
+
+  /// Pushes the Main News Spotlight feed on top as soon as Home mounts, so a
+  /// cold launch opens straight into the feed. Skipped when a notification
+  /// tap is pending — that target wins.
   final bool openSpotlightOnStart;
 
   const HomeScreen({
@@ -72,13 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (widget.openSpotlightOnStart && !hadPendingNotification) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          AppNavigator.pushSafe(
-            context,
-            MaterialPageRoute(
-                builder: (_) => const SpotlightScreen(isLocal: false)),
-          );
-        }
+        if (mounted) _openSpotlight(isLocal: false);
       });
     }
 
@@ -114,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _handleBack(bool didPop) {
     if (didPop) return;
 
-    // 1. If currently on a secondary tab, switch to Tab 0 (NewsFeedTab)
+    // 1. If currently on a secondary tab, switch to Tab 0 (Home)
     if (_navIndex != 0) {
       setState(() {
         _activatedIndices.add(0);
@@ -146,30 +144,52 @@ class _HomeScreenState extends State<HomeScreen> {
     SystemNavigator.pop();
   }
 
+  void _switchTab(int index) {
+    setState(() {
+      _activatedIndices.add(index);
+      _navIndex = index;
+    });
+  }
+
+  /// Opens the full-screen Spotlight feed over Home. _navIndex is left
+  /// alone, so backing out of Spotlight lands on whichever tab it was
+  /// opened from.
+  void _openSpotlight({required bool isLocal}) {
+    AppNavigator.pushSafe(
+      context,
+      MaterialPageRoute(
+        settings: RouteSettings(
+            name: isLocal ? '/spotlight/local' : '/spotlight'),
+        builder: (_) => SpotlightScreen(isLocal: isLocal),
+      ),
+    );
+  }
+
+  void _handlePostTap() {
+    requireAuth(context, () {
+      if (!mounted) return;
+      _switchTab(2);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Secondary tabs are lazily mounted only when first activated, eliminating
-    // UI thread starvation and duplicate network calls on cold launch.
+    // Tabs are lazily mounted only when first activated, eliminating UI
+    // thread starvation and duplicate network calls on cold launch. Indices
+    // line up with the nav bar's; 1 and 3 open Spotlight as a route, so
+    // their slots here are placeholders that are never shown.
     final tabs = [
       _activatedIndices.contains(0)
           ? const NewsFeedTab()
           : const SizedBox.shrink(),
-      // 1 — Spotlight. Never rendered here: tapping its tab pushes the
-      // dedicated screen. The placeholder keeps the stack's indices lined up
-      // with the nav bar's.
-      const SizedBox.shrink(),
+      const SizedBox.shrink(), // 1 — Main News Spotlight (pushed route)
       // 2 — Post, keeping the centre slot the nav bar's floating button
       // renders a gap for.
       _activatedIndices.contains(2)
           ? const CreatePostScreen()
           : const SizedBox.shrink(),
-      _activatedIndices.contains(3)
-          ? const LocalNewsTab()
-          : const SizedBox.shrink(),
+      const SizedBox.shrink(), // 3 — Local News Spotlight (pushed route)
       _activatedIndices.contains(4)
-          ? VideoTab(isActive: _navIndex == 4)
-          : const SizedBox.shrink(),
-      _activatedIndices.contains(5)
           ? const ProfileTab()
           : const SizedBox.shrink(),
     ];
@@ -208,34 +228,15 @@ class _HomeScreenState extends State<HomeScreen> {
         bottomNavigationBar: BottomNavBar(
           currentIndex: _navIndex,
           onTap: (index) {
-            // Spotlight opens as its own route. _navIndex is left alone, so
-            // popping back lands on whichever tab the reader came from —
-            // Home keeps its own state, Spotlight keeps its own stack.
-            if (index == 1) {
-              AppNavigator.pushSafe(
-                context,
-                MaterialPageRoute(
-                  settings: const RouteSettings(name: '/spotlight'),
-                  builder: (_) => const SpotlightScreen(),
-                ),
-              );
+            if (index == 1 || index == 3) {
+              _openSpotlight(isLocal: index == 3);
               return;
             }
-
             if (index == 2) {
-              requireAuth(context, () {
-                if (!mounted) return;
-                setState(() {
-                  _activatedIndices.add(2);
-                  _navIndex = 2;
-                });
-              });
+              _handlePostTap();
               return;
             }
-            setState(() {
-              _activatedIndices.add(index);
-              _navIndex = index;
-            });
+            _switchTab(index);
           },
         ),
       ),

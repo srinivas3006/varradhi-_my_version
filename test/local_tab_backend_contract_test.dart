@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/screens/local_news_tab.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/screens/local_news_tab.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class RecordedRequest {
   final String path;

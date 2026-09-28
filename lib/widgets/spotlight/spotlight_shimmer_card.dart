@@ -7,7 +7,7 @@ class SpotlightShimmerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final imageHeight = size.height * 0.35; // Matches SpotlightNewsCard
+    final imageHeight = (size.width / (16 / 10)).clamp(0.0, size.height * 0.45); // Matches SpotlightNewsCard 16:10 aspect
 
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,

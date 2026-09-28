@@ -4,16 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/navigation/notification_navigation_gate.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/models/notification_target.dart';
-import 'package:way2news_clone/screens/home_screen.dart';
-import 'package:way2news_clone/screens/spotlight_screen.dart';
-import 'package:way2news_clone/spotlight/spotlight_controller.dart';
-import 'package:way2news_clone/spotlight/spotlight_screen.dart';
-import 'package:way2news_clone/state/app_state.dart';
-import 'package:way2news_clone/widgets/spotlight/spotlight_news_card.dart';
+import 'package:vaaradhi/core/navigation/notification_navigation_gate.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/screens/home_screen.dart';
+import 'package:vaaradhi/spotlight/spotlight_controller.dart';
+import 'package:vaaradhi/spotlight/spotlight_screen.dart';
+import 'package:vaaradhi/state/app_state.dart';
+import 'package:vaaradhi/widgets/spotlight/spotlight_news_card.dart';
 
 class SpotlightMockAdapter implements HttpClientAdapter {
   final List<Map<String, dynamic>> articles;
@@ -248,82 +246,55 @@ void main() {
       expect(find.text('Bumper Harvest in Guntur District'), findsOneWidget);
       expect(find.textContaining('Farmers celebrate high chilli yields'),
           findsOneWidget);
-      expect(find.text('Guntur'), findsOneWidget);
+      expect(find.text('Guntur, Andhra Pradesh'), findsOneWidget);
       expect(find.text('Ravi Kumar (Citizen Reporter)'), findsOneWidget);
     });
   });
 
-  group('Spotlight Startup Navigation & Notification Priority', () {
-    testWidgets('HomeScreen with openSpotlightOnStart pushes SpotlightScreen',
-        (tester) async {
+  group('Spotlight opens over the Home hub', () {
+    Future<void> pumpHome(WidgetTester tester, {required bool openOnStart}) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
       ApiClient.instance.dio.httpClientAdapter =
           SpotlightMockAdapter(articles: []);
 
       await tester.pumpWidget(
-        const MaterialApp(
-          home: HomeScreen(openSpotlightOnStart: true),
+        MaterialApp(
+          home: HomeScreen(openSpotlightOnStart: openOnStart),
         ),
       );
-
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
+    }
 
-      expect(find.byType(SpotlightScreen), findsOneWidget);
+    testWidgets('launch pushes the Spotlight feed on top of Home',
+        (tester) async {
+      await pumpHome(tester, openOnStart: true);
+
       expect(find.byType(SpotlightScreenView), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 100));
+      // Pushed, not embedded: it carries its own back arrow.
+      expect(find.byKey(const Key('spotlight_home_btn')), findsOneWidget);
     });
 
-    testWidgets(
-        'HomeScreen suppresses openSpotlightOnStart if pending notification target exists',
+    testWidgets('back from Spotlight lands on Home, not an exit',
         (tester) async {
-      ApiClient.instance.dio.httpClientAdapter =
-          SpotlightMockAdapter(articles: []);
+      await pumpHome(tester, openOnStart: true);
 
-      // Register a pending notification target before HomeScreen mounts
-      NotificationNavigationGate.instance.setPendingTarget(
-        NotificationTarget.article(
-          slugOrId: 'notif-article-999',
-        ),
-      );
-
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: HomeScreen(openSpotlightOnStart: true),
-        ),
-      );
-
+      await tester.tap(find.byKey(const Key('spotlight_home_btn')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
-      // SpotlightScreen should NOT be mounted since notification had priority
-      expect(find.byType(SpotlightScreen), findsNothing);
-    });
-
-    testWidgets('SpotlightScreen top home button exits to HomeScreen cleanly',
-        (tester) async {
-      ApiClient.instance.dio.httpClientAdapter =
-          SpotlightMockAdapter(articles: []);
-
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: HomeScreen(openSpotlightOnStart: true),
-        ),
-      );
-
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(find.byType(SpotlightScreen), findsOneWidget);
-
-      // Tap Home button
-      final homeBtn = find.byKey(const Key('spotlight_home_btn'));
-      expect(homeBtn, findsOneWidget);
-      await tester.tap(homeBtn);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-
-      // Spotlight popped, returned cleanly to HomeScreen root shell
-      expect(find.byType(SpotlightScreen), findsNothing);
+      expect(find.byType(SpotlightScreenView), findsNothing);
       expect(find.byType(HomeScreen), findsOneWidget);
+    });
+
+    testWidgets('Home without the flag does not open Spotlight',
+        (tester) async {
+      await pumpHome(tester, openOnStart: false);
+
+      expect(find.byType(SpotlightScreenView), findsNothing);
     });
   });
 }

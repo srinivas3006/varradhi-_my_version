@@ -1,6 +1,8 @@
 // ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../models/poster_images.dart';
 import '../services/sharing/share_content_builder.dart';
@@ -52,19 +54,28 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
   Widget build(BuildContext context) {
     final title = widget.poster['title'] ?? 'Poster';
 
+    final telugu = AppState.instance.language == 'Telugu';
+
     return Scaffold(
       backgroundColor: Colors.black,
+      // Full screen: the poster runs behind the app bar and status bar.
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.white,
-        title: Text(title, style: const TextStyle(fontSize: 16)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.share_rounded),
-            onPressed: _shareCurrentPoster,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black54, Colors.transparent],
+            ),
           ),
-        ],
+        ),
+        title: Text(title, style: const TextStyle(fontSize: 16)),
+        // No share action here: the bottom button is the one Share control.
       ),
       body: _images.isEmpty
           ? const Center(
@@ -82,10 +93,13 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                   onPageChanged: (idx) => setState(() => _currentIndex = idx),
                   itemBuilder: (context, index) {
                     return InteractiveViewer(
-                      child: Center(
+                      child: SizedBox.expand(
                         child: CachedNetworkImage(
                           imageUrl: _images[index],
-                          fit: BoxFit.contain,
+                          // Cover: edge to edge, no black bands. Pinch to
+                          // zoom still works for detail.
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
                           placeholder: (_, __) => const Center(
                             child: CircularProgressIndicator(color: AppColors.primary),
                           ),
@@ -100,9 +114,28 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                   },
                 ),
 
+                // Scrim so the dots and button read on any artwork.
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 180,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black87, Colors.transparent],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
                 // Indicator and CTA
                 Positioned(
-                  bottom: 30,
+                  bottom: MediaQuery.paddingOf(context).bottom + 20,
                   left: 20,
                   right: 20,
                   child: Column(
@@ -135,9 +168,10 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.share_rounded),
-                        label: const Text(
-                          'Share Greeting',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        label: Text(
+                          telugu ? 'షేర్ చేయండి' : 'Share',
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.bold),
                         ),
                         onPressed: _shareCurrentPoster,
                       ),

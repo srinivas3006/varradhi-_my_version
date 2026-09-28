@@ -31,21 +31,35 @@ void main() {
     });
   });
 
-  group('immersive without cropping the artwork', () {
-    test('a blurred copy of the poster fills the background', () {
-      // Same treatment the sponsored card uses: the screen reads as a
-      // wallpaper while the poster itself stays whole in front.
-      expect(code, contains('ImageFilter.blur'));
-      expect(code, contains('BlendMode.darken'));
+  group('the poster is full screen in Spotlight', () {
+    test('the artwork covers the whole page — no letterbox', () {
+      expect(code, contains('fit: BoxFit.cover'));
+      expect(code, isNot(contains('fit: BoxFit.contain')));
     });
 
-    test('the poster itself is contained, never cropped', () {
-      // These are designed sheets with branding at the very edges.
-      expect(code, contains('fit: BoxFit.contain'));
+    test('no blurred backdrop is needed behind it', () {
+      expect(code, isNot(contains('ImageFilter.blur')));
     });
 
-    test('the blurred layer does not steal taps from the pager', () {
-      expect(code, contains('IgnorePointer'));
+    test('exactly one Share control', () {
+      expect('Icons.share_rounded'.allMatches(code).length, 1);
+    });
+  });
+
+  group('poster detail screen', () {
+    final detail = File('lib/screens/poster_detail_screen.dart')
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('has a single Share control (no duplicate in the app bar)', () {
+      expect('Icons.share_rounded'.allMatches(detail).length, 1);
+    });
+
+    test('runs full screen, edge to edge', () {
+      expect(detail, contains('extendBodyBehindAppBar: true'));
+      expect(detail, contains('fit: BoxFit.cover'));
     });
   });
 

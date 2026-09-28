@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
 import '../core/navigation/app_navigator.dart';
@@ -26,6 +27,8 @@ import '../models/live_news.dart';
 import '../core/errors/app_exception.dart';
 import '../repositories/feed_repository.dart';
 import '../repositories/ugc_repository.dart';
+import '../repositories/home_feed_repository.dart';
+import '../services/analytics_queue.dart';
 import '../core/state/feed_state.dart';
 import 'location_selection_screen.dart';
 import 'poster_detail_screen.dart';
@@ -34,7 +37,6 @@ import '../models/video_item.dart';
 import '../repositories/video_repository.dart';
 import 'video_player_screen.dart';
 import 'notifications_screen.dart';
-import 'spotlight_screen.dart';
 
 enum HeroCardKind { liveStream, breakingArticle }
 
@@ -86,6 +88,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   FeedStatus _feedStatus = FeedStatus.initial;
   String? _feedError;
   String? get _feedLang => AppState.instance.contentLanguage;
+  /// From `GET /api/v1/feed/home/` — the first paint. `personalized` feeds
+  /// the For You rail, `local` the Near You section.
+  List<NewsArticle> _forYou = [];
+  List<NewsArticle> _nearYou = [];
+  bool _bootstrapLite = false;
+  Future<void>? _bootstrapFuture;
   List<NewsArticle> _villageSection = [];
   List<NewsArticle> _mandalSection = [];
   List<NewsArticle> _districtUgc = [];
@@ -116,6 +124,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     _articles = [];
     _recommendedArticles = [];
     _featuredArticles = [];
+    _forYou = [];
+    _nearYou = [];
     _villageSection = [];
     _mandalSection = [];
     _districtUgc = [];
@@ -136,9 +146,15 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     _preferencesIdentity = _feedLocationKey;
     AppState.instance.addListener(_onPreferencesChanged);
     _articles = [];
-    // 1. Critical primary feed requests for first paint.
+    AnalyticsQueue.instance.start();
+    // 1. Critical first paint: one bootstrap call (For You + Near You, served
+    //    instantly from the device copy when there is one) and the first
+    //    page of the latest feed.
+    _bootstrapFuture = _loadHomeBootstrap();
     _loadMore();
     _loadCategories();
+    unawaited(AnalyticsQueue.instance
+        .track('feed_refresh', metadata: {'source': 'launch'}));
 
     // 2. Progressive hydration: defer secondary ancillary metadata past initial frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -163,6 +179,72 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     AppState.instance.removeListener(_onPreferencesChanged);
     _breakingNewsController.dispose();
     super.dispose();
+  }
+
+  /// Home bootstrap: device copy first (instant, works offline), then the
+  /// network — in lite mode when the connection has been slow.
+  Future<void> _loadHomeBootstrap({bool forceRefresh = false}) async {
+    final identity = _feedLocationKey;
+    final app = AppState.instance;
+    final repo = HomeFeedRepository.instance;
+
+    if (_forYou.isEmpty && _nearYou.isEmpty) {
+      final cached = await repo.cached(
+        lang: _feedLang,
+        state: app.stateName,
+        district: app.district,
+        subdistrict: app.subdistrict,
+        village: app.village,
+      );
+      if (cached != null && mounted && identity == _feedLocationKey) {
+        setState(() {
+          _forYou = cached.personalized;
+          _nearYou = cached.local;
+        });
+      }
+    }
+
+    final fresh = await repo.fetch(
+      lang: _feedLang,
+      state: app.stateName,
+      district: app.district,
+      subdistrict: app.subdistrict,
+      village: app.village,
+      forceRefresh: forceRefresh,
+    );
+    if (fresh == null || !mounted || identity != _feedLocationKey) return;
+    setState(() {
+      _forYou = fresh.personalized;
+      _nearYou = fresh.local;
+      _bootstrapLite = fresh.lite;
+    });
+
+    final bulk = fresh.analyticsBulkEndpoint;
+    if (bulk != null && bulk.isNotEmpty) AnalyticsQueue.instance.endpoint = bulk;
+    // The network just answered; a good moment to send what queued offline.
+    unawaited(AnalyticsQueue.instance.flush());
+  }
+
+  /// Opens a Home card. Articles open by slug (detail is
+  /// /api/v1/articles/{slug}/ — never the id). Live streams from
+  /// /feed/home/ have no slug and no article page, so they open Live.
+  void _openStory(NewsArticle article) {
+    AppNavigator.pushSafe(
+      context,
+      MaterialPageRoute(
+        builder: (_) => article.contentKind == 'live'
+            ? const LiveNewsScreen()
+            : NewsDetailScreen(article: article, slug: article.slug),
+      ),
+    );
+  }
+
+  void _trackOpen(NewsArticle article, String section) {
+    unawaited(AnalyticsQueue.instance.track('article_open', metadata: {
+      'article_id': article.id,
+      'content_kind': article.contentKind,
+      'section': section,
+    }));
   }
 
   Future<void> _loadLiveNews() async {
@@ -494,8 +576,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     }
   }
 
+  /// Fallback for the For You rail when the bootstrap has no personalized
+  /// section (older backend, or it failed).
   Future<void> _loadRecommendations() async {
     final queryIdentity = _feedLocationKey;
+    await _bootstrapFuture;
+    if (_forYou.isNotEmpty) return;
     try {
       final recs = await ApiService.instance.getRecommendations(limit: 15);
       if (mounted && queryIdentity == _feedLocationKey) {
@@ -577,6 +663,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   Future<void> _refresh() async {
     final generation = ++_feedGeneration;
     if (mounted) setState(() => _isLoadingMore = false);
+    _bootstrapFuture = _loadHomeBootstrap(forceRefresh: true);
+    unawaited(AnalyticsQueue.instance.track('feed_refresh', metadata: {
+      'source': 'pull',
+      'mode': HomeFeedRepository.instance.prefersLite ? 'lite' : 'full',
+    }));
     try {
       final currentState = FeedState<NewsArticle>.success(
         items: _articles,
@@ -652,12 +743,16 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       _articles = [];
       _featuredArticles = [];
       _recommendedArticles = [];
+      _forYou = [];
+      _nearYou = [];
       _nextCursor = null;
       _hasMore = true;
       _isLoadingMore = false;
       _feedStatus = FeedStatus.loading;
     });
+    _bootstrapFuture = _loadHomeBootstrap();
     await Future.wait([
+      _bootstrapFuture!,
       _loadMore(),
       _loadLocationSections(clearExisting: true),
       _loadFeatured(),
@@ -690,6 +785,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               setState(() {
                 _selectedCategory = isAll ? null : cat?.slug;
               });
+              unawaited(AnalyticsQueue.instance.track('category_select',
+                  metadata: {'category': _selectedCategory ?? 'all'}));
               _refresh();
             },
             child: AnimatedContainer(
@@ -1136,35 +1233,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   );
                 },
               ),
-
-              // Spotlight opens as its own route, with its own lifecycle —
-              // the reader leaves Home rather than Spotlight living inside a
-              // tab. Back or Close returns here.
-              Container(
-                margin: const EdgeInsets.only(left: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: IconButton(
-                  tooltip: AppState.instance.language == 'Telugu'
-                      ? 'స్పాట్‌లైట్'
-                      : 'Spotlight',
-                  icon: const Icon(Icons.auto_awesome_rounded,
-                      color: AppColors.primary),
-                  onPressed: () {
-                    // pushSafe, matching the app's other pushes: it debounces
-                    // a double tap into one route.
-                    AppNavigator.pushSafe(
-                      context,
-                      MaterialPageRoute(
-                        settings: const RouteSettings(name: '/spotlight'),
-                        builder: (_) => const SpotlightScreen(),
-                      ),
-                    );
-                  },
-                ),
-              ),
+              // Spotlight is reached from the bottom navigation (main / local
+              // news tabs), so the header keeps only Search and Notifications.
             ],
           ),
         ),
@@ -1543,50 +1613,189 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  Widget _buildForYouHeader() {
+  /// Section title with the brand gradient mark. [caption] is a quiet
+  /// right-aligned note (e.g. the lite-mode hint).
+  Widget _buildSectionTitle(String title, {String? caption}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primary, AppColors.primaryDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
+          Container(
+            width: 4,
+            height: 18,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(2),
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryDark],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
-              const SizedBox(width: 8),
-              Text(
-                tr('for_you_section'),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
-              ),
-            ],
+            ),
           ),
-          Row(
-            children: [
-              Text(
-                tr('cat_local'),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
-                ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
               ),
-              const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: AppColors.primary),
-            ],
+            ),
+          ),
+          if (caption != null)
+            Text(
+              caption,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textMuted,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Header over the paginated latest feed.
+  Widget _buildLatestHeader() => _buildSectionTitle(
+        AppState.instance.language == 'Telugu' ? 'తాజా వార్తలు' : 'Latest',
+      );
+
+  /// Personalized rail from the home bootstrap: horizontal cards, image on
+  /// top, two-line headline.
+  Widget _buildForYouRail(List<NewsArticle> items) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final telugu = AppState.instance.language == 'Telugu';
+    final cardColor =
+        isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white;
+    final border = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.06);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionTitle(
+            tr('for_you_section'),
+            // Slow connection: the bootstrap came in lite mode.
+            caption: _bootstrapLite
+                ? (telugu ? 'తక్కువ డేటా మోడ్' : 'Data saver')
+                : null,
+          ),
+          SizedBox(
+            height: 232,
+            child: ListView.separated(
+              key: const PageStorageKey('home_for_you_rail'),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: items.length.clamp(0, 12),
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final article = items[index];
+                final image = article.mediaItems.isNotEmpty &&
+                        article.mediaItems.first.thumbnailUrl.isNotEmpty
+                    ? article.mediaItems.first.thumbnailUrl
+                    : article.imageUrl;
+                return SizedBox(
+                  width: 220,
+                  child: Material(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      key: ValueKey('for_you_${article.id}'),
+                      onTap: () {
+                        AdManager.instance.recordContentInteraction();
+                        _trackOpen(article, 'for_you');
+                        _openStory(article);
+                      },
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AspectRatio(
+                              aspectRatio: 16 / 9,
+                              child: image.isEmpty
+                                  ? Container(
+                                      color: AppColors.chipBg,
+                                      child: const Icon(
+                                          Icons.article_outlined,
+                                          color: AppColors.textMuted),
+                                    )
+                                  : CachedNetworkImage(
+                                      imageUrl: image,
+                                      fit: BoxFit.cover,
+                                      memCacheWidth: 480,
+                                      placeholder: (_, __) =>
+                                          Container(color: AppColors.chipBg),
+                                      errorWidget: (_, __, ___) => Container(
+                                        color: AppColors.chipBg,
+                                        child: const Icon(
+                                            Icons.image_not_supported_outlined,
+                                            color: AppColors.textMuted),
+                                      ),
+                                    ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                              child: Text(
+                                article.category.isNotEmpty
+                                    ? article.category.toUpperCase()
+                                    : '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.4,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                              child: Text(
+                                article.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.35,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const Spacer(),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                              child: Text(
+                                article.timeAgo,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -1612,12 +1821,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
           borderRadius: BorderRadius.circular(16),
           onTap: () {
             AdManager.instance.recordContentInteraction();
-            AppNavigator.pushSafe(
-              context,
-              MaterialPageRoute(
-                  builder: (_) =>
-                      NewsDetailScreen(article: article, slug: article.slug)),
-            );
+            _trackOpen(
+                article,
+                item.stableKey.startsWith('section-')
+                    ? 'location_section'
+                    : 'latest');
+            _openStory(article);
           },
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -1872,7 +2081,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
     final globalSection =
         _articles.where((article) => _coverageIs(article, 'global')).toList();
+    // For You: personalized ranking from the bootstrap; recommendations only
+    // as a fallback when the bootstrap has none.
+    final forYou =
+        _forYou.isNotEmpty ? _forYou : _recommendedArticles;
     final sectionIds = {
+      ...forYou.map((article) => article.id),
+      ..._nearYou.map((article) => article.id),
       ..._villageSection.map((article) => article.id),
       ..._mandalSection.map((article) => article.id),
       ...districtSection.map((article) => article.id),
@@ -1880,6 +2095,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       ...globalSection.map((article) => article.id),
     };
     final hasHomeContent = _articles.isNotEmpty ||
+        _forYou.isNotEmpty ||
+        _nearYou.isNotEmpty ||
         _liveNewsList.any((s) => s.isLiveActive) ||
         _villageSection.isNotEmpty ||
         _mandalSection.isNotEmpty ||
@@ -1889,11 +2106,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final breakingNews = _featuredArticles.isNotEmpty
         ? _featuredArticles
         : _articles.take(5).toList();
-    final recommendedSource = _recommendedArticles.isNotEmpty
-        ? _recommendedArticles
-        : _articles.skip(breakingNews == _featuredArticles ? 0 : 5).toList();
-    final recommended = recommendedSource
-        .where((article) => !sectionIds.contains(article.id))
+    // Latest: the paginated feed itself, so scrolling to the end really
+    // loads more. (It used to render the 15 recommendations while
+    // pagination appended to a list nobody displayed.) Nothing shown above
+    // — hero, rail, sections — is repeated here.
+    final heroIds = breakingNews.map((a) => a.id).toSet();
+    final recommended = _articles
+        .where((article) =>
+            !sectionIds.contains(article.id) && !heroIds.contains(article.id))
         .toList();
     final activeStreams = _liveNewsList.where((s) => s.isLiveActive).toList();
     final heroItems = [
@@ -2032,6 +2252,27 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       child: _buildBreakingNewsSection(
                                           heroItems),
                                     ),
+                                    // For You — personalized rail.
+                                    if (forYou.isNotEmpty)
+                                      RepaintBoundary(
+                                        child: _buildForYouRail(forYou),
+                                      ),
+                                    // Near You — the bootstrap's local section.
+                                    _buildLocationSection(
+                                      title: AppState.instance.language ==
+                                              'Telugu'
+                                          ? 'మీ సమీపంలో'
+                                          : 'Near You',
+                                      location:
+                                          AppState.instance.displayLocation,
+                                      icon: Icons.near_me_outlined,
+                                      accent: AppColors.primary,
+                                      articles: _nearYou,
+                                      cardColor: cardColor,
+                                      borderColor: borderColor,
+                                    ),
+                                    // Empty sections are hidden, never shown
+                                    // as an empty "no news yet" card.
                                     if (selectedVillage.isNotEmpty)
                                       _buildLocationSection(
                                         title:
@@ -2042,9 +2283,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         articles: _villageSection,
                                         cardColor: cardColor,
                                         borderColor: borderColor,
-                                        showWhenEmpty: true,
-                                        emptyMessage:
-                                            'ఈ ప్రాంతానికి ఇంకా స్థానిక వార్తలు లేవు. దగ్గరి ప్రాంతాల వార్తలు కింద కనిపిస్తాయి.',
                                       ),
                                     if (_isProgressivelyHydrated) ...[
                                       if (selectedSubdistrict.isNotEmpty)
@@ -2057,9 +2295,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                           articles: _mandalSection,
                                           cardColor: cardColor,
                                           borderColor: borderColor,
-                                          showWhenEmpty: true,
-                                          emptyMessage:
-                                              'ఈ మండలంలో ఇంకా వార్తలు లేవు. జిల్లా మరియు రాష్ట్ర వార్తలు కింద కనిపిస్తాయి.',
                                         ),
                                       if (selectedDistrict.isNotEmpty)
                                         _buildLocationSection(
@@ -2071,7 +2306,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                           articles: districtSection,
                                           cardColor: cardColor,
                                           borderColor: borderColor,
-                                          showWhenEmpty: true,
                                         ),
                                       if (selectedState.isNotEmpty)
                                         _buildLocationSection(
@@ -2082,7 +2316,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                           articles: stateSection,
                                           cardColor: cardColor,
                                           borderColor: borderColor,
-                                          showWhenEmpty: true,
                                         ),
                                       _buildLocationSection(
                                         title: 'జాతీయ / అంతర్జాతీయ వార్తలు',
@@ -2092,7 +2325,6 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         articles: globalSection,
                                         cardColor: cardColor,
                                         borderColor: borderColor,
-                                        showWhenEmpty: true,
                                       ),
                                       if (_dailyQuote != null &&
                                           (_dailyQuote!['text'] != null ||
@@ -2129,7 +2361,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     ],
                                     const SizedBox(height: 16),
                                     if (recommended.isNotEmpty)
-                                      _buildForYouHeader(),
+                                      _buildLatestHeader(),
                                   ],
                                 ),
                               ),

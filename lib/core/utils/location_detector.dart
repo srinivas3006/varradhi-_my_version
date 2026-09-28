@@ -35,7 +35,9 @@ class DetectedPlace {
   final String village;
 
   bool get isEmpty =>
-      state.isEmpty && district.isEmpty && subdistrict.isEmpty &&
+      state.isEmpty &&
+      district.isEmpty &&
+      subdistrict.isEmpty &&
       village.isEmpty;
 
   /// Most specific name first — what to show the reader when confirming.
@@ -84,7 +86,7 @@ class LocationDetector {
   /// a first run that hangs is worse than one that offers manual selection.
   static const _fixTimeout = Duration(seconds: 12);
 
-  Future<LocationDetectResult> detect() async {
+  Future<LocationDetectResult> detect({bool requestPermission = true}) async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       return const LocationDetectResult.failed(
         LocationDetectFailure.serviceDisabled,
@@ -92,7 +94,7 @@ class LocationDetector {
     }
 
     var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
+    if (permission == LocationPermission.denied && requestPermission) {
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.deniedForever) {

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/widgets/watermark/article_watermark_overlay.dart';
+import 'package:vaaradhi/widgets/watermark/article_watermark_overlay.dart';
 
 void main() {
   group('ArticleWatermarkOverlay', () {

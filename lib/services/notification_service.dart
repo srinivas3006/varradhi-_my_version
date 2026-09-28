@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -16,7 +17,9 @@ import '../features/admin/presentation/screens/admin_ugc_screen.dart';
 import '../features/admin/presentation/widgets/admin_access_guard.dart';
 import '../models/notification_target.dart';
 import '../models/news_article.dart';
+import '../models/video_item.dart';
 import '../repositories/news_article_repository.dart';
+import '../repositories/video_repository.dart';
 import '../screens/account_login_screen.dart';
 import '../screens/bookmarks_screen.dart';
 import '../screens/category_screen.dart';
@@ -25,7 +28,9 @@ import '../screens/my_posts_screen.dart';
 import '../screens/news_detail_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/notification_settings_screen.dart';
+import '../screens/poll_detail_screen.dart';
 import '../screens/poster_detail_screen.dart';
+import '../screens/shorts_viewer_screen.dart';
 import '../screens/ugc_feed_screen.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -36,7 +41,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (!kIsWeb) {
     await Firebase.initializeApp();
   }
-  debugPrint("Handling background notification: ${message.messageId}");
+  if (kDebugMode) {
+    debugPrint('Handling background notification');
+  }
 }
 
 class NotificationService {
@@ -105,13 +112,27 @@ class NotificationService {
   /// Neither platform displays a push while the app is open — that is the
   /// app's job — so without this an admin testing with the app in the
   /// foreground sees nothing at all.
+  /// Adds a tray-opened push to the in-app inbox, already read (the reader
+  /// just tapped it). Works without login.
+  Future<void> _recordInInbox(RemoteMessage message) async {
+    final data = Map<String, dynamic>.from(message.data);
+    await AppState.instance.recordPushNotification(
+      data: data,
+      title: message.notification?.title ?? data['title']?.toString(),
+      body: message.notification?.body ?? data['body']?.toString(),
+      messageId: message.messageId,
+    );
+    final id = data['notification_id']?.toString() ??
+        'push_${message.messageId}';
+    AppState.instance.markNotificationRead(id);
+  }
+
   Future<void> _showLocalNotification(RemoteMessage message) async {
     final data = message.data;
     final title = message.notification?.title ??
         data['title']?.toString() ??
         'Vaaradhi News';
-    final body =
-        message.notification?.body ?? data['body']?.toString() ?? '';
+    final body = message.notification?.body ?? data['body']?.toString() ?? '';
 
     await _localNotifications.show(
       id: message.hashCode,
@@ -157,7 +178,9 @@ class NotificationService {
         // recoverable — onTokenRefresh below still delivers one later.
         final token =
             await messaging.getToken().timeout(const Duration(seconds: 3));
-        debugPrint('[Notifications] token acquired: ${token != null}');
+        if (kDebugMode) {
+          debugPrint('[Notifications] token acquired: ${token != null}');
+        }
         if (token != null && token.isNotEmpty) {
           AppState.instance.fcmToken = token;
 
@@ -173,32 +196,46 @@ class NotificationService {
           // updateFcmToken already picks the right contract: guest-device for
           // a guest, token handoff for a signed-in reader.
           unawaited(ApiService.instance.updateFcmToken(token).then((_) {
-            debugPrint('[Notifications] token registered '
-                '(${AppState.instance.isLoggedIn ? 'authenticated' : 'guest'})');
+            if (kDebugMode) {
+              debugPrint('[Notifications] token registered');
+            }
           }).catchError((e) {
-            debugPrint('[Notifications] token registration FAILED: $e');
+            if (kDebugMode) {
+              debugPrint('[Notifications] token registration failed: $e');
+            }
           }));
         }
       } catch (e) {
-        debugPrint('[NotificationService] Early FCM token fetch deferred: $e');
+        if (kDebugMode) {
+          debugPrint(
+              '[NotificationService] Early FCM token fetch deferred: $e');
+        }
       }
 
       // 1. Listen to token refreshes
       messaging.onTokenRefresh.listen((newToken) {
-        debugPrint('[Notifications] token refreshed, re-registering');
+        if (kDebugMode) {
+          debugPrint('[Notifications] token refreshed, re-registering');
+        }
         AppState.instance.fcmToken = newToken;
         ApiService.instance.updateFcmToken(newToken).then((_) {
-          debugPrint('[Notifications] refreshed token registered');
+          if (kDebugMode) {
+            debugPrint('[Notifications] refreshed token registered');
+          }
         }).catchError((e) {
-          debugPrint('[Notifications] token registration FAILED: $e');
+          if (kDebugMode) {
+            debugPrint('[Notifications] token registration failed: $e');
+          }
         });
       });
 
       // 2. Foreground notification handler (Deduplicate & show interactive banner)
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('[Notifications] foreground message ${message.messageId} '
-            'notification=${message.notification != null} '
-            'dataKeys=${message.data.keys.toList()}');
+        if (kDebugMode) {
+          debugPrint('[Notifications] foreground message '
+              'notification=${message.notification != null} '
+              'dataKeys=${message.data.keys.toList()}');
+        }
         final data = message.data;
         final notificationId =
             data['notification_id']?.toString() ?? message.messageId;
@@ -221,6 +258,14 @@ class NotificationService {
             'New Notification';
         final body =
             message.notification?.body ?? data['body']?.toString() ?? '';
+
+        // Keep it in the in-app inbox — for guests too.
+        unawaited(AppState.instance.recordPushNotification(
+          data: Map<String, dynamic>.from(data),
+          title: title,
+          body: body,
+          messageId: message.messageId,
+        ));
 
         messengerKey.currentState?.showSnackBar(
           SnackBar(
@@ -256,21 +301,24 @@ class NotificationService {
 
       // 3. Background tap notification handler (when user taps notification from system tray)
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        debugPrint('App opened from notification: ${message.messageId}');
+        if (kDebugMode) {
+          debugPrint('App opened from notification');
+        }
+        unawaited(_recordInInbox(message));
         handleNotificationPayload(message.data);
       });
 
       // 4. Terminated state launch handler: store in navigation gate
-      final initialMessage =
-          await messaging.getInitialMessage().timeout(const Duration(seconds: 3));
+      final initialMessage = await messaging
+          .getInitialMessage()
+          .timeout(const Duration(seconds: 3));
       if (initialMessage != null) {
-        debugPrint(
-            'Initial notification on launch: ${initialMessage.messageId}');
-        final target = NotificationDeepLinkResolver.resolveFromPayload(
-            initialMessage.data);
-        if (target.type != NotificationTargetType.unknown) {
-          NotificationNavigationGate.instance.setPendingTarget(target);
+        if (kDebugMode) {
+          debugPrint('Initial notification on launch');
         }
+        unawaited(_recordInInbox(initialMessage));
+        NotificationNavigationGate.instance
+            .setPendingTarget(targetForTap(initialMessage.data));
       }
     } catch (e) {
       debugPrint('NotificationService early init error: $e');
@@ -317,10 +365,10 @@ class NotificationService {
         badge: true,
         sound: true,
       );
-      debugPrint(
-          '[Notifications] permission: ${settings.authorizationStatus}');
+      debugPrint('[Notifications] permission: ${settings.authorizationStatus}');
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
-        debugPrint('[Notifications] DENIED — no push will arrive on this device');
+        debugPrint(
+            '[Notifications] DENIED — no push will arrive on this device');
       }
 
       final token = await messaging.getToken();
@@ -364,14 +412,7 @@ class NotificationService {
     Map<String, dynamic> data, {
     BuildContext? context,
   }) async {
-    if (data.isEmpty) return;
-
-    final target = NotificationDeepLinkResolver.resolveFromPayload(data);
-    if (target.type == NotificationTargetType.unknown) {
-      debugPrint(
-          '[NotificationService] Unrecognized notification payload: $data');
-      return;
-    }
+    final target = targetForTap(data);
 
     if (!NotificationNavigationGate.instance.isNavigationReady) {
       NotificationNavigationGate.instance.setPendingTarget(target);
@@ -379,6 +420,44 @@ class NotificationService {
     }
 
     await navigateToTarget(target, context: context);
+  }
+
+  /// Where a tapped notification goes: its content, or the notification
+  /// inbox when neither the content fields nor deep_link address anything.
+  @visibleForTesting
+  static NotificationTarget targetForTap(Map<String, dynamic> data) {
+    final target = NotificationDeepLinkResolver.resolveFromPayload(data);
+    if (target.type != NotificationTargetType.unknown) return target;
+    debugPrint('[NotificationService] Unroutable payload, opening inbox: $data');
+    return NotificationTarget.screen(
+      screenName: 'notifications',
+      notificationId: data['notification_id']?.toString(),
+      originalPayload: data,
+    );
+  }
+
+  /// Tells the reader why a deep-linked item did not open. A 404 means the
+  /// content was removed; anything else is most likely the connection.
+  void _showLoadFailure(BuildContext context, Object error) {
+    if (!context.mounted) return;
+    final telugu = AppState.instance.language == 'Telugu';
+    final gone = error is DioException && error.response?.statusCode == 404;
+    final message = gone
+        ? (telugu
+            ? 'ఈ కంటెంట్ ఇకపై అందుబాటులో లేదు'
+            : 'This content is no longer available')
+        : (telugu
+            ? 'కంటెంట్ లోడ్ కాలేదు. మీ కనెక్షన్‌ను తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.'
+            : 'Could not load this content. Check your connection and try again.');
+    ScaffoldMessenger.of(context)
+      ..removeCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
   }
 
   OverlayEntry? _loadingOverlay;
@@ -498,18 +577,7 @@ class NotificationService {
               _dismissLoadingIndicator();
               debugPrint(
                   '[NotificationService] Article load error for slug "$slug": $e');
-              if (navContext.mounted) {
-                ScaffoldMessenger.of(navContext)
-                  ..removeCurrentSnackBar()
-                  ..showSnackBar(
-                    const SnackBar(
-                      content:
-                          Text('ఈ కథనం అందుబాటులో లేదు లేదా తొలగించబడింది.'),
-                      behavior: SnackBarBehavior.floating,
-                      duration: Duration(seconds: 3),
-                    ),
-                  );
-              }
+              if (navContext.mounted) _showLoadFailure(navContext, e);
             }
           }
           break;
@@ -540,20 +608,14 @@ class NotificationService {
           if (posterId != null && posterId.isNotEmpty) {
             _showLoadingIndicator(navContext);
             try {
-              final posters = await ApiService.instance
-                  .getPosters()
-                  .timeout(const Duration(seconds: 6));
+              // Fetched by id. Scanning the first page of /posters/ missed
+              // any older poster and then opened a blank one.
+              final poster = await ApiService.instance
+                  .getPosterDetail(posterId)
+                  .timeout(const Duration(seconds: 8));
 
               _dismissLoadingIndicator();
 
-              final poster = posters.firstWhere(
-                (p) => p['id']?.toString() == posterId,
-                orElse: () => {
-                  'id': posterId,
-                  'image_url': target.originalPayload?['image_url'] ?? '',
-                  'title': target.originalPayload?['title'] ?? 'Poster',
-                },
-              );
               if (navContext.mounted) {
                 await AppNavigator.pushSafe(
                   navContext,
@@ -561,22 +623,44 @@ class NotificationService {
                       builder: (_) => PosterDetailScreen(poster: poster)),
                 );
               }
-            } catch (_) {
+            } catch (e) {
               _dismissLoadingIndicator();
-              if (navContext.mounted) {
-                ScaffoldMessenger.of(navContext)
-                  ..removeCurrentSnackBar()
-                  ..showSnackBar(
-                    const SnackBar(
-                      content:
-                          Text('ఈ పోస్టర్ అందుబాటులో లేదు లేదా తొలగించబడింది.'),
-                      behavior: SnackBarBehavior.floating,
-                      duration: Duration(seconds: 3),
-                    ),
-                  );
-              }
+              debugPrint(
+                  '[NotificationService] Poster load error for "$posterId": $e');
+              if (navContext.mounted) _showLoadFailure(navContext, e);
             }
           }
+          break;
+
+        case NotificationTargetType.poll:
+          final pollId = target.identifier;
+          if (pollId != null && pollId.isNotEmpty) {
+            _showLoadingIndicator(navContext);
+            try {
+              final poll = await ApiService.instance
+                  .fetchPollDetail(pollId)
+                  .timeout(const Duration(seconds: 8));
+
+              _dismissLoadingIndicator();
+
+              if (navContext.mounted) {
+                await AppNavigator.pushSafe(
+                  navContext,
+                  MaterialPageRoute(
+                      builder: (_) => PollDetailScreen(poll: poll)),
+                );
+              }
+            } catch (e) {
+              _dismissLoadingIndicator();
+              debugPrint(
+                  '[NotificationService] Poll load error for "$pollId": $e');
+              if (navContext.mounted) _showLoadFailure(navContext, e);
+            }
+          }
+          break;
+
+        case NotificationTargetType.video:
+          await _openVideo(navContext, target.identifier);
           break;
 
         case NotificationTargetType.ugc:
@@ -659,7 +743,8 @@ class NotificationService {
                   ..removeCurrentSnackBar()
                   ..showSnackBar(
                     const SnackBar(
-                      content: Text('ఈ సమర్పణ అందుబాటులో లేదు లేదా తొలగించబడింది.'),
+                      content:
+                          Text('ఈ సమర్పణ అందుబాటులో లేదు లేదా తొలగించబడింది.'),
                       behavior: SnackBarBehavior.floating,
                       duration: Duration(seconds: 3),
                     ),
@@ -699,6 +784,10 @@ class NotificationService {
                     builder: (_) => const NotificationSettingsScreen()),
               );
               break;
+            case 'home':
+              // Quotes and other feed-only content: back to the Home feed.
+              Navigator.of(navContext).popUntil((route) => route.isFirst);
+              break;
             default:
               debugPrint(
                   '[NotificationService] Unhandled screen target: ${target.screenName}');
@@ -718,6 +807,68 @@ class NotificationService {
     }
   }
 
+  /// Opens the Reels viewer for a /video/{id}/ link.
+  ///
+  /// The backend has no public video-by-id endpoint yet, so the id is looked
+  /// up in the first page of Shorts and of videos — never by paging on
+  /// indefinitely. If it is not there the reader still lands in Reels, told
+  /// that particular video could not be found.
+  // TODO(backend): switch to GET /api/v1/videos/{id}/ once it exists.
+  Future<void> _openVideo(BuildContext navContext, String? videoId) async {
+    _showLoadingIndicator(navContext);
+    final videos = <VideoItem>[];
+    Object? lastError;
+    for (final load in [
+      () => VideoRepository.instance.getShortsFeed(),
+      () => VideoRepository.instance.getVideoFeed(),
+    ]) {
+      try {
+        final page = await load().timeout(const Duration(seconds: 8));
+        if (page.hasErrors) throw Exception(page.errorMessage);
+        final seen = videos.map((v) => v.id).toSet();
+        videos.addAll((page.data ?? const <VideoItem>[])
+            .where((v) => seen.add(v.id)));
+        if (videos.any((v) => v.id == videoId)) break;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    _dismissLoadingIndicator();
+    if (!navContext.mounted) return;
+
+    if (videos.isEmpty) {
+      _showLoadFailure(navContext, lastError ?? Exception('no videos'));
+      return;
+    }
+
+    final index = videos.indexWhere((v) => v.id == videoId);
+    // Shown before the push: pushSafe completes only when the viewer is
+    // closed, and the app-wide messenger keeps the bar over the new route.
+    if (index < 0) {
+      final telugu = AppState.instance.language == 'Telugu';
+      ScaffoldMessenger.of(navContext)
+        ..removeCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(telugu
+                ? 'ఈ వీడియో కనుగొనబడలేదు. తాజా వీడియోలు చూపిస్తున్నాం.'
+                : 'That video could not be found. Showing the latest videos.'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+    }
+    await AppNavigator.pushSafe(
+      navContext,
+      MaterialPageRoute(
+        builder: (_) => ShortsViewerScreen(
+          shorts: videos,
+          initialIndex: index < 0 ? 0 : index,
+        ),
+      ),
+    );
+  }
+
   /// Maps an `/admin/ugc/<section>` deep link onto a console tab.
   int _adminTabFor(String? section) {
     switch (section?.toLowerCase()) {
@@ -733,8 +884,7 @@ class NotificationService {
   }
 
   NewsArticle? _ugcArticleFromTarget(NotificationTarget target) {
-    final payload = target.originalPayload;
-    if (payload == null) return null;
+    final payload = target.originalPayload ?? const <String, dynamic>{};
 
     final title = (payload['title'] ?? payload['notification_title'])
             ?.toString()
@@ -747,7 +897,13 @@ class NotificationService {
             ?.toString()
             .trim() ??
         '';
-    if (title.isEmpty && summary.isEmpty) return null;
+    // A bare id (e.g. a shared https://vaaradhinews.com/ugc/{id}/ link) is
+    // enough: the detail screen loads the post from GET /api/v1/ugc/{id}/.
+    if (title.isEmpty && summary.isEmpty) {
+      final id = target.identifier ?? payload['content_id']?.toString() ?? '';
+      if (id.isEmpty) return null;
+      return NewsArticle.fromJson({'id': id, 'feed_item_type': 'ugc'});
+    }
 
     return NewsArticle.fromJson({
       ...payload,

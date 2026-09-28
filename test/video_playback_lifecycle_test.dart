@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/media/video_playback_controller.dart';
-import 'package:way2news_clone/models/video_item.dart';
-import 'package:way2news_clone/repositories/video_repository.dart';
+import 'package:vaaradhi/core/media/video_playback_controller.dart';
+import 'package:vaaradhi/models/video_item.dart';
+import 'package:vaaradhi/repositories/video_repository.dart';
 
 void main() {
   group('VideoPlaybackState and Status Tests', () {

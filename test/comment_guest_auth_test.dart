@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/localization/app_translations.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/screens/comments_screen.dart';
-import 'package:way2news_clone/state/app_state.dart';
-import 'package:way2news_clone/widgets/news_feed_card.dart';
+import 'package:vaaradhi/localization/app_translations.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/screens/comments_screen.dart';
+import 'package:vaaradhi/state/app_state.dart';
+import 'package:vaaradhi/widgets/news_feed_card.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

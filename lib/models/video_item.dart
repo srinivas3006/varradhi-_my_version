@@ -26,6 +26,9 @@ class VideoItem {
   final int likes;
   bool isLiked;
 
+  /// Public page URL from the API (`share_url`). Empty when not sent.
+  final String shareUrl;
+
   VideoItem({
     required this.id,
     required this.title,
@@ -42,6 +45,7 @@ class VideoItem {
     this.likesCount = 0,
     required this.likes,
     this.isLiked = false,
+    this.shareUrl = '',
   });
 
   factory VideoItem.fromJson(Map<String, dynamic> json) {
@@ -101,6 +105,7 @@ class VideoItem {
       likesCount: likesCnt,
       likes: likesCnt,
       isLiked: json['is_liked_by_user'] == true || json['is_liked'] == true,
+      shareUrl: json['share_url']?.toString() ?? '',
     );
   }
 

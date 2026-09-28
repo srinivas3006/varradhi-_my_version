@@ -4,14 +4,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:visibility_detector/visibility_detector.dart';
-import 'package:way2news_clone/core/ads/ad_event_queue.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/services/ad_manager.dart';
-import 'package:way2news_clone/state/app_state.dart';
-import 'package:way2news_clone/widgets/ads/ad_viewability_detector.dart';
-import 'package:way2news_clone/widgets/ads/sponsored_spotlight_ad_card.dart';
-import 'package:way2news_clone/widgets/article_media_carousel.dart';
-import 'package:way2news_clone/core/widgets/flip_page_view.dart';
+import 'package:vaaradhi/core/ads/ad_event_queue.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/services/ad_manager.dart';
+import 'package:vaaradhi/state/app_state.dart';
+import 'package:vaaradhi/widgets/ads/ad_viewability_detector.dart';
+import 'package:vaaradhi/widgets/ads/sponsored_spotlight_ad_card.dart';
+import 'package:vaaradhi/widgets/article_media_carousel.dart';
+import 'package:vaaradhi/core/widgets/flip_page_view.dart';
 import 'support/integration_contract_cases.dart';
 
 class _AdAdapter implements HttpClientAdapter {

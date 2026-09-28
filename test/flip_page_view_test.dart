@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/widgets/flip_page_view.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
+import 'package:vaaradhi/core/widgets/flip_page_view.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
 
 void main() {
   group('FlipPageView transition maths', () {

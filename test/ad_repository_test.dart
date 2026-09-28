@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/repositories/ad_repository.dart';
+import 'package:vaaradhi/repositories/ad_repository.dart';
 
 class _MockDioAdapter implements HttpClientAdapter {
   final Future<ResponseBody> Function(RequestOptions options) handler;

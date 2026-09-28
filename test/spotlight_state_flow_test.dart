@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/spotlight/spotlight_state.dart';
+import 'package:vaaradhi/spotlight/spotlight_state.dart';
 
 void main() {
   test('filter reset clears cursor and recoverable error explicitly', () {

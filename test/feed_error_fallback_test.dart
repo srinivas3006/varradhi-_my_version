@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/state/feed_state.dart';
+import 'package:vaaradhi/core/state/feed_state.dart';
 
 void main() {
   test('failure with cached items keeps them and reports non-blocking', () {

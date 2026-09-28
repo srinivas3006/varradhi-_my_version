@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/account_deletion_request.dart';
+import 'package:vaaradhi/models/account_deletion_request.dart';
 
 void main() {
   group('AccountDeletionRequest Model Tests', () {

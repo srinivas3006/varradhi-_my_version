@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/media/media_source.dart';
-import 'package:way2news_clone/core/media/video_playback_controller.dart';
-import 'package:way2news_clone/core/media/youtube_playback_controller.dart';
+import 'package:vaaradhi/core/media/media_source.dart';
+import 'package:vaaradhi/core/media/video_playback_controller.dart';
+import 'package:vaaradhi/core/media/youtube_playback_controller.dart';
 
 void main() {
   group('controller construction', () {

@@ -156,8 +156,10 @@ class AppTtsService extends ChangeNotifier {
       // 4. RULE: ALWAYS fetch FULL content. Never use trimmed preview.
       String fullContent = article.body.trim();
 
-      if (fullContent.isEmpty || fullContent.length < 60) {
-        final slugToFetch = article.slug.isNotEmpty ? article.slug : article.id;
+      // Detail is by slug only; /articles/{id}/ is a 404.
+      final slugToFetch = article.slug;
+      if ((fullContent.isEmpty || fullContent.length < 60) &&
+          slugToFetch.isNotEmpty) {
         try {
           final fullArticle = await NewsArticleRepository.instance.getDetail(slugToFetch);
           if (fullArticle.body.trim().isNotEmpty) {

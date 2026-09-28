@@ -1,14 +1,15 @@
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/controllers/ugc_controller.dart';
-import 'package:way2news_clone/core/utils/media_validator.dart';
-import 'package:way2news_clone/models/reporter_post.dart';
-import 'package:way2news_clone/models/ugc_draft.dart';
-import 'package:way2news_clone/repositories/ugc_draft_repository.dart';
-import 'package:way2news_clone/repositories/ugc_repository.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/controllers/ugc_controller.dart';
+import 'package:vaaradhi/core/utils/media_validator.dart';
+import 'package:vaaradhi/models/reporter_post.dart';
+import 'package:vaaradhi/models/ugc_draft.dart';
+import 'package:vaaradhi/repositories/ugc_draft_repository.dart';
+import 'package:vaaradhi/repositories/ugc_repository.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 // Fake UgcRepository for deterministic unit testing
 class FakeUgcRepository extends UgcRepository {
@@ -99,6 +100,11 @@ void main() {
     AppState.instance.district = 'Hyderabad';
     AppState.instance.stateName = 'Telangana';
     AppState.instance.userPhone = '9876543210';
+    // Uploads now require a backend-verified UGC mobile.
+    AppState.instance.ugcMobileVerified = true;
+    AppState.instance.ugcVerifiedMobile = '9876543210';
+    AppState.instance.ugcUploadLockedUntil = null;
+    AppState.instance.ugcBlockedAt = null;
   });
 
   tearDown(() {
@@ -106,6 +112,20 @@ void main() {
       tempDir.deleteSync(recursive: true);
     } catch (_) {}
   });
+
+  // submitNews needs a BuildContext to show the location-permission sheet
+  // when location is missing; tests that already have a valid location
+  // never touch it, but the signature still requires one.
+  Future<BuildContext> pumpContext(WidgetTester tester) async {
+    late BuildContext captured;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        captured = context;
+        return const SizedBox();
+      }),
+    ));
+    return captured;
+  }
 
   group('MediaValidator Tests', () {
     test('Valid JPEG image within 10MB passes', () async {
@@ -267,46 +287,53 @@ void main() {
   });
 
   group('UgcController Lifecycle & State Machine Tests', () {
-    test('Validation fails if title or description is missing', () async {
+    testWidgets('Validation fails if title or description is missing',
+        (tester) async {
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository();
       final controller = UgcController(ugcRepository: fakeRepo);
 
       // Empty title
-      final success1 = await controller.submitNews();
+      final success1 = await controller.submitNews(context);
       expect(success1, isFalse);
       expect(controller.errorMessage, contains('శీర్షికను'));
 
       // Empty description
       controller.setTitle('Test News');
-      final success2 = await controller.submitNews();
+      final success2 = await controller.submitNews(context);
       expect(success2, isFalse);
       expect(controller.errorMessage, contains('వివరాలను'));
     });
 
-    test('Validation fails if no media is attached', () async {
+    testWidgets('Validation fails if no media is attached', (tester) async {
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository();
       final controller = UgcController(ugcRepository: fakeRepo);
       controller.setTitle('Test News');
       controller.setDescription('Detailed report on the ground');
 
       // PostType is image by default, no images attached
-      final success = await controller.submitNews();
+      final success = await controller.submitNews(context);
       expect(success, isFalse);
       expect(controller.errorMessage, contains('ఫోటోను జతపరచండి'));
     });
 
-    test('Validation fails if location is missing', () async {
+    testWidgets(
+        'Validation fails if location is missing and reader dismisses the prompt',
+        (tester) async {
       AppState.instance.latitude = null;
       AppState.instance.longitude = null;
 
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository();
       final controller = UgcController(ugcRepository: fakeRepo);
-      controller.setTitle('News Without GPS');
-      controller.setDescription('Details');
 
+      // Restore title/description/media from a draft rather than calling
+      // setTitle/setDescription directly: those each fire an unawaited
+      // autosave (UgcController._autoSaveDraft), and two of them back to
+      // back here would race the explicit saveDraft below and could
+      // clobber it depending on scheduling.
       final img = File('${tempDir.path}/pic.jpg')..writeAsBytesSync([1, 2, 3]);
-      controller.setType(PostType.image);
-      // Simulate picked photo
       final draft = UgcDraft(
         title: 'News Without GPS',
         description: 'Details',
@@ -315,16 +342,46 @@ void main() {
         filePaths: [img.path],
       );
       await UgcDraftRepository.instance.saveDraft(draft);
-      await controller.checkForPendingDraft();
-      await controller.restorePendingDraft();
 
-      // Submit attempt when location is unavailable
-      final success = await controller.submitNews();
+      // Both draft restore (findMissingFiles) and submitNews (MediaValidator)
+      // do real dart:io File I/O, which never resolves under flutter_test's
+      // default FakeAsync zone without tester.runAsync. submitNews also
+      // needs to show/await the location sheet, so the interaction runs
+      // inside the same runAsync call — but a single pumpAndSettle right
+      // after firing submitNews can race ahead of that real I/O and find
+      // nothing scheduled yet, so poll with real delays until the sheet
+      // actually appears rather than assuming one pump cycle is enough.
+      late bool success;
+      await tester.runAsync(() async {
+        await controller.checkForPendingDraft();
+        await controller.restorePendingDraft();
+
+        final future = controller.submitNews(context);
+
+        for (var i = 0;
+            i < 50 && find.text('Maybe later').evaluate().isEmpty;
+            i++) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          await tester.pump();
+        }
+        expect(find.text('Maybe later'), findsOneWidget);
+
+        // The text exists from the sheet's first frame, while it is still
+        // below the screen; let the slide-up finish so the tap lands.
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Maybe later'));
+        await tester.pumpAndSettle();
+
+        success = await future;
+      });
+
       expect(success, isFalse);
-      expect(controller.errorMessage, contains('Location'));
+      expect(controller.errorMessage, contains('GPS'));
     });
 
-    test('Full submission and upload pipeline progresses to completed', () async {
+    testWidgets('Full submission and upload pipeline progresses to completed',
+        (tester) async {
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository();
       final controller = UgcController(ugcRepository: fakeRepo);
 
@@ -337,10 +394,19 @@ void main() {
         filePaths: [img.path],
       );
       await UgcDraftRepository.instance.saveDraft(draft);
-      await controller.checkForPendingDraft();
-      await controller.restorePendingDraft();
 
-      final success = await controller.submitNews();
+      // Real dart:io File I/O (draft restore + MediaValidator inside
+      // submitNews) never resolves under the default FakeAsync test zone;
+      // runAsync escapes to the real zone for it. No sheet interaction is
+      // needed here (setUp already gives a valid location), so the whole
+      // sequence can run inside one call.
+      late bool success;
+      await tester.runAsync(() async {
+        await controller.checkForPendingDraft();
+        await controller.restorePendingDraft();
+        success = await controller.submitNews(context);
+      });
+
       expect(success, isTrue);
       expect(controller.status, equals(UgcUploadStatus.completed));
       expect(controller.uploadProgress, equals(1.0));
@@ -352,7 +418,10 @@ void main() {
       expect(await UgcDraftRepository.instance.hasDraft(), isFalse);
     });
 
-    test('Failed media upload preserves submissionId and draft for retry', () async {
+    testWidgets(
+        'Failed media upload preserves submissionId and draft for retry',
+        (tester) async {
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository()..uploadShouldFail = true;
       final controller = UgcController(ugcRepository: fakeRepo);
 
@@ -365,18 +434,28 @@ void main() {
         filePaths: [img.path],
       );
       await UgcDraftRepository.instance.saveDraft(draft);
-      await controller.checkForPendingDraft();
-      await controller.restorePendingDraft();
 
-      final success = await controller.submitNews();
+      late bool success;
+      late UgcUploadStatus statusAfterFailure;
+      late String? submissionIdAfterFailure;
+      late bool retrySuccess;
+      await tester.runAsync(() async {
+        await controller.checkForPendingDraft();
+        await controller.restorePendingDraft();
+
+        success = await controller.submitNews(context);
+        statusAfterFailure = controller.status;
+        submissionIdAfterFailure = controller.submissionId;
+
+        // The submission ID is preserved!
+        // Now retry with working upload
+        fakeRepo.uploadShouldFail = false;
+        retrySuccess = await controller.submitNews(context);
+      });
+
       expect(success, isFalse);
-      expect(controller.status, equals(UgcUploadStatus.failed));
-      expect(controller.submissionId, equals('sub-uuid-12345'));
-
-      // The submission ID is preserved!
-      // Now retry with working upload
-      fakeRepo.uploadShouldFail = false;
-      final retrySuccess = await controller.submitNews();
+      expect(statusAfterFailure, equals(UgcUploadStatus.failed));
+      expect(submissionIdAfterFailure, equals('sub-uuid-12345'));
       expect(retrySuccess, isTrue);
       expect(controller.status, equals(UgcUploadStatus.completed));
       // submitPost should NOT have been called again! It reused the existing submissionId!
@@ -392,7 +471,9 @@ void main() {
       expect(controller.errorMessage, contains('రద్దు చేయబడింది'));
     });
 
-    test('Duplicate submit call while in-flight is rejected', () async {
+    testWidgets('Duplicate submit call while in-flight is rejected',
+        (tester) async {
+      final context = await pumpContext(tester);
       final fakeRepo = FakeUgcRepository();
       final controller = UgcController(ugcRepository: fakeRepo);
 
@@ -405,15 +486,20 @@ void main() {
         filePaths: [img.path],
       );
       await UgcDraftRepository.instance.saveDraft(draft);
-      await controller.checkForPendingDraft();
-      await controller.restorePendingDraft();
 
-      // Fire first submit
-      final future1 = controller.submitNews();
-      // Rapid secondary tap
-      final future2 = controller.submitNews();
+      late List<bool> results;
+      await tester.runAsync(() async {
+        await controller.checkForPendingDraft();
+        await controller.restorePendingDraft();
 
-      final results = await Future.wait([future1, future2]);
+        // Fire first submit
+        final future1 = controller.submitNews(context);
+        // Rapid secondary tap
+        final future2 = controller.submitNews(context);
+
+        results = await Future.wait([future1, future2]);
+      });
+
       // One succeeds, second was rejected by duplicate guard
       expect(results, contains(true));
       expect(results, contains(false));

@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/navigation/notification_deep_link_resolver.dart';
-import 'package:way2news_clone/models/notification_target.dart';
+import 'package:vaaradhi/core/navigation/notification_deep_link_resolver.dart';
+import 'package:vaaradhi/models/notification_target.dart';
 
 void main() {
   group('admin console deep links', () {

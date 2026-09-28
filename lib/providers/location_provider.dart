@@ -72,6 +72,12 @@ class LocationProvider extends ChangeNotifier {
 
     final result = await detector.detect();
     if (!result.isSuccess) {
+      if (result.failure == LocationDetectFailure.permissionDenied) {
+        AppState.instance.markLocationPermissionDenied();
+      } else if (result.failure ==
+          LocationDetectFailure.permissionDeniedForever) {
+        AppState.instance.markLocationPermissionDenied(forever: true);
+      }
       _isDetecting = false;
       _detectFailure = result.failure ?? LocationDetectFailure.unknown;
       notifyListeners();
@@ -236,14 +242,18 @@ class LocationProvider extends ChangeNotifier {
         location,
         stateId: result.type == LocationLevel.state ? result.id : null,
         districtId: result.type == LocationLevel.district ? result.id : null,
-        subdistrictId: result.type == LocationLevel.subdistrict ? result.id : null,
+        subdistrictId:
+            result.type == LocationLevel.subdistrict ? result.id : null,
         villageId: result.type == LocationLevel.village ? result.id : null,
       );
 
       final patchData = <String, dynamic>{};
-      if (result.type == LocationLevel.village) patchData['village_id'] = result.id;
-      if (result.type == LocationLevel.subdistrict) patchData['subdistrict_id'] = result.id;
-      if (result.type == LocationLevel.district) patchData['district_id'] = result.id;
+      if (result.type == LocationLevel.village)
+        patchData['village_id'] = result.id;
+      if (result.type == LocationLevel.subdistrict)
+        patchData['subdistrict_id'] = result.id;
+      if (result.type == LocationLevel.district)
+        patchData['district_id'] = result.id;
       if (result.type == LocationLevel.state) patchData['state_id'] = result.id;
 
       if (patchData.isNotEmpty) {

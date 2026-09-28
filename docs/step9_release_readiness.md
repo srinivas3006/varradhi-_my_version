@@ -1,9 +1,9 @@
 # Step 9 Release Readiness & Reliability Hardening Audit
 
 **Date**: September 11, 2026  
-**Application**: VARADHI APK (Way2News Clone)  
+**Application**: VARADHI APK (VAARADHI App)  
 **Target Platform**: Android (SDK 24+ / Android 7.0 through Android 15)  
-**Package**: `way2news_clone`  
+**Package**: `vaaradhi`  
 
 ---
 

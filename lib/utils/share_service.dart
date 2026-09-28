@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
@@ -10,6 +12,7 @@ import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
 import '../widgets/watermark/watermark_banner.dart';
 import '../core/utils/url_normalizer.dart';
+import '../services/sharing/share_content_builder.dart';
 
 class ShareService {
   static final ScreenshotController _screenshotController =
@@ -33,21 +36,26 @@ class ShareService {
   }
 
   static String buildWebArticleUrl(NewsArticle article) {
+    // The API's share_url is authoritative when it is on our domain.
+    final fromApi = ShareContentBuilder.trustedShareUrl(article.shareUrl);
+    if (fromApi != null) return fromApi;
     final route = article.isUgc ? 'ugc' : 'article';
     final identifier = article.isUgc
         ? article.id
         : (article.slug.isNotEmpty ? article.slug : article.id);
-    return '$webBaseUrl/$route/${Uri.encodeComponent(identifier)}';
+    // Trailing slash: the canonical public routes are /article/{slug}/ and
+    // /ugc/{id}/ (handover §16).
+    return '$webBaseUrl/$route/${Uri.encodeComponent(identifier)}/';
   }
 
   /// Builds clean, professional share text with title, web article link, and app download link.
   static String buildShareText(NewsArticle article) {
     final webUrl = buildWebArticleUrl(article);
-    return '${article.title.trim()}\n\n'
-        '📲 పూర్తి వార్తలు & తాజా అప్‌డేట్స్ కోసం వారధి యాప్ డౌన్‌లోడ్ చేసుకోండి:\n'
-        '$appDownloadUrl\n\n'
-        '🌐 కథనం లింక్:\n'
-        '$webUrl';
+    return '📰 ${article.title.trim()}\n\n'
+        '🔗 కథనం లింక్:\n'
+        '$webUrl\n\n'
+        '📲 వారధి యాప్ డౌన్‌లోడ్ చేసుకోండి:\n'
+        '$appDownloadUrl';
   }
 
   /// Pre-fetches the image bytes into memory so `Image.memory` paints synchronously
@@ -67,9 +75,39 @@ class ShareService {
     return null;
   }
 
-  /// Captures an off-screen branded widget and shares it via the native share sheet.
+  /// Every still the poster could be built from, best first.
+  ///
+  /// The first media item is not always a photo: the detail payload often
+  /// leads with a video/YouTube URL, or carries its photos only in
+  /// `image_urls`. Fetching that one URL failed and the share fell back to
+  /// the sticker-only card, so each usable still is offered in turn —
+  /// images as-is, videos through their thumbnail.
+  static List<String> _imageCandidates(NewsArticle article) {
+    final raw = <String>[
+      for (final item in article.orderedMedia)
+        item.isVideo ? item.thumbnailUrl : item.url,
+      article.imageUrl,
+      ...?article.imageUrls,
+    ];
+    final seen = <String>{};
+    final result = <String>[];
+    for (final value in raw) {
+      final url = UrlNormalizer.normalize(value);
+      if ((url.startsWith('http://') || url.startsWith('https://')) &&
+          seen.add(url)) {
+        result.add(url);
+      }
+    }
+    return result;
+  }
+
+  /// Shares the branded article image and formatted caption via the native share sheet.
   /// One-tap guarded: ignores rapid duplicate taps while processing.
-  static Future<void> shareArticle(NewsArticle article) async {
+  ///
+  /// [fallback] supplies extra image candidates — the detail screen passes
+  /// the feed article it opened from, whose image Spotlight already shows.
+  static Future<void> shareArticle(NewsArticle article,
+      {NewsArticle? fallback}) async {
     if (_isSharing) {
       debugPrint('ShareService: share already in progress, ignoring duplicate tap');
       return;
@@ -77,80 +115,17 @@ class ShareService {
     _isSharing = true;
 
     try {
-      final normalizedUrl = UrlNormalizer.normalize(
-        (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
-            ? article.mediaItems.first.url
-            : article.imageUrl,
-      );
-
-      final hasValidImage = normalizedUrl.isNotEmpty &&
-          (normalizedUrl.startsWith('http://') || normalizedUrl.startsWith('https://'));
-
-      Uint8List? imageBytes;
-      if (hasValidImage) {
-        imageBytes = await _fetchImageBytes(normalizedUrl);
-      }
-
-      // If valid image exists and bytes downloaded, generate the branded watermark card image
-      if (imageBytes != null && imageBytes.isNotEmpty) {
-        try {
-          int naturalWidth = 1200;
-          int naturalHeight = 675;
-          try {
-            final ui.Codec codec = await ui.instantiateImageCodec(imageBytes);
-            final ui.FrameInfo frameInfo = await codec.getNextFrame();
-            naturalWidth = frameInfo.image.width;
-            naturalHeight = frameInfo.image.height;
-          } catch (decodeErr) {
-            debugPrint('[ShareService] Error decoding image dimensions: $decodeErr');
-          }
-
-          // Exact natural aspect ratio preserved — zero distortion or unwanted cropping
-          double targetWidth = naturalWidth.toDouble();
-          double targetHeight = naturalHeight.toDouble();
-          if (targetWidth > 1200) {
-            targetHeight = (targetHeight * 1200 / targetWidth).roundToDouble();
-            targetWidth = 1200;
-          } else if (targetWidth < 600 && targetWidth > 0) {
-            targetHeight = (targetHeight * 600 / targetWidth).roundToDouble();
-            targetWidth = 600;
-          }
-          if (targetHeight <= 0) targetHeight = 675;
-          if (targetWidth <= 0) targetWidth = 1200;
-
-          final Uint8List cardBytes =
-              await _screenshotController.captureFromWidget(
-            _WatermarkShareCard(
-              article: article,
-              imageBytes: imageBytes,
-              width: targetWidth,
-              height: targetHeight,
-            ),
-            targetSize: Size(targetWidth, targetHeight),
-            delay: const Duration(milliseconds: 80),
-          );
-
-          if (cardBytes.isNotEmpty) {
-            final tempDir = await getTemporaryDirectory();
-            final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-            final file = await File('${tempDir.path}/vaaradhi_share_$safeId.png').create();
-            await file.writeAsBytes(cardBytes);
-
-            final shareText = buildShareText(article);
-            await Share.shareXFiles(
-              [XFile(file.path)],
-              text: shareText,
-            );
-            return;
-          }
-        } catch (imgError) {
-          debugPrint('ShareService: capture widget failed, falling back to text share: $imgError');
-        }
-      }
-
-      // Fallback: share clean text + link directly
+      final file = await generateArticleImage(article, fallback: fallback);
       final shareText = buildShareText(article);
-      await Share.share(shareText);
+
+      if (file != null) {
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: 'image/jpeg')],
+          text: shareText,
+        );
+      } else {
+        await Share.share(shareText);
+      }
     } catch (e) {
       debugPrint('Error sharing article: $e');
     } finally {
@@ -170,99 +145,144 @@ class ShareService {
     // want to pass on.
     if (article.isVideo) return true;
 
-    final url = UrlNormalizer.normalize(
-      (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
-          ? article.mediaItems.first.url
-          : article.imageUrl,
-    );
-    return url.startsWith('http://') || url.startsWith('https://');
+    return _imageCandidates(article).isNotEmpty;
   }
 
-  /// Builds the branded PNG poster: image, headline, body excerpt, and the
-  /// mandatory watermark.
-  ///
-  /// Returns the written file, or null when no poster could be produced.
-  /// Works for articles and UGC alike — UGC is a NewsArticle with
-  /// contentKind 'ugc', so the only difference is which fields carry text.
-  /// Builds the PNG that travels with a share or download.
-  ///
-  /// [includeText] adds the headline and summary beneath the banner, which
-  /// is what a share preview needs. A download stays picture-and-banner
-  /// only, so the saved image is the artwork rather than a screenshot of
-  /// the story.
+  /// Where the red strip starts inside the sticker artwork, as a fraction of
+  /// its height. Everything above it is transparent except the logo circle,
+  /// which rises past the strip.
+  static const double _stickerStripTop = 95 / 296;
+
+  /// Generates the branded composite article image:
+  /// - High-resolution news photo
+  /// - Downscaled at decode time if > 3MB (OOM prevention on low-end devices)
+  /// - Proportional scaling constrained to max 1440px width
+  /// - Full-width Vaaradhi sticker at the bottom: the red strip begins
+  ///   exactly at the photo's lower edge so it hides none of the photo, and
+  ///   the logo circle overlaps the photo like a sticker
+  /// - Painted over white, since JPEG has no alpha and the sticker's
+  ///   transparent corners would otherwise encode as black
+  /// - High quality filtering and anti-aliasing
+  /// - Encoded to JPEG with quality 88 and JpegChroma.yuv420 for optimal file size and fast sharing
+  static Future<File?> generateArticleImage(NewsArticle article,
+      {NewsArticle? fallback}) async {
+    try {
+      final candidates = <String>{
+        ..._imageCandidates(article),
+        if (fallback != null) ..._imageCandidates(fallback),
+      };
+
+      // 1. First candidate that downloads AND decodes wins. Memory-safe
+      // decoding: downscale at decode-time if very large (OOM prevention).
+      ui.Image? decoded;
+      for (final url in candidates) {
+        final bytes = await _fetchImageBytes(url);
+        if (bytes == null || bytes.isEmpty) continue;
+        try {
+          final codec = bytes.lengthInBytes > 3000000
+              ? await ui.instantiateImageCodec(bytes, targetWidth: 1440)
+              : await ui.instantiateImageCodec(bytes);
+          decoded = (await codec.getNextFrame()).image;
+          break;
+        } catch (e) {
+          debugPrint('[ShareService] Could not decode $url: $e');
+        }
+      }
+
+      if (decoded == null) {
+        return _buildWatermarkOnlyFile(article);
+      }
+      final ui.Image image = decoded;
+
+      // 2. Banner decoding
+      final bannerByteData =
+          await rootBundle.load('assets/images/watermark_banner.png');
+      final bannerBytes = bannerByteData.buffer.asUint8List();
+      final ui.Image banner = await decodeImageFromList(bannerBytes);
+
+      // 3. Proportional scaling with maxWidth clamp (1440px)
+      const double maxWidth = 1440.0;
+      final double scale =
+          image.width > maxWidth ? maxWidth / image.width.toDouble() : 1.0;
+      final int targetWidth = (image.width * scale).round();
+      final int targetHeight = (image.height * scale).round();
+
+      // Scaled sticker height matching exact width ratio. It is placed so
+      // the strip's top edge lands on the photo's bottom edge; only the part
+      // from the strip down extends the canvas.
+      final double bannerHeight =
+          banner.height.toDouble() * targetWidth / banner.width.toDouble();
+      final double bannerTop =
+          targetHeight - bannerHeight * _stickerStripTop;
+      final int totalHeight = (bannerTop + bannerHeight).ceil();
+
+      // 4. Paint to Canvas with high quality and anti-aliasing
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final paint = Paint()
+        ..filterQuality = FilterQuality.high
+        ..isAntiAlias = true;
+
+      // White base: JPEG drops alpha, so anything left transparent (the
+      // sticker's corners, a transparent PNG photo) would turn black.
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, targetWidth.toDouble(), totalHeight.toDouble()),
+        Paint()..color = Colors.white,
+      );
+
+      // Draw news image
+      final imgSrcRect =
+          Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+      final imgDstRect =
+          Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble());
+      canvas.drawImageRect(image, imgSrcRect, imgDstRect, paint);
+
+      // Draw the sticker: strip below the photo, logo circle over it.
+      final bannerSrcRect =
+          Rect.fromLTWH(0, 0, banner.width.toDouble(), banner.height.toDouble());
+      final bannerDstRect = Rect.fromLTWH(
+          0, bannerTop, targetWidth.toDouble(), bannerHeight);
+      canvas.drawImageRect(banner, bannerSrcRect, bannerDstRect, paint);
+
+      final picture = recorder.endRecording();
+      final compositeUiImg = await picture.toImage(targetWidth, totalHeight);
+
+      // 5. Convert to raw RGBA for JPEG encoding
+      final byteData =
+          await compositeUiImg.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (byteData == null) return null;
+
+      final imgImage = img.Image.fromBytes(
+        width: targetWidth,
+        height: totalHeight,
+        bytes: byteData.buffer,
+        order: img.ChannelOrder.rgba,
+      );
+
+      // 6. Encode to JPEG with quality 88 and chroma yuv420 for optimal size & speed
+      final jpgBytes = img.encodeJpg(
+        imgImage,
+        quality: 88,
+        chroma: img.JpegChroma.yuv420,
+      );
+
+      final dir = await getTemporaryDirectory();
+      final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final file = File('${dir.path}/vaaradhi_$safeId.jpg');
+      await file.writeAsBytes(jpgBytes);
+      return file;
+    } catch (e) {
+      debugPrint('[ShareService] Error generating article image: $e');
+      return null;
+    }
+  }
+
+  /// Builds the branded image poster for sharing or downloading.
   static Future<File?> buildPosterFile(
     NewsArticle article, {
     bool includeText = false,
-  }) async {
-    if (!canGeneratePoster(article)) return null;
-
-    final url = UrlNormalizer.normalize(
-      (article.mediaItems.isNotEmpty && article.mediaItems.first.url.isNotEmpty)
-          ? article.mediaItems.first.url
-          : article.imageUrl,
-    );
-    final imageBytes = await _fetchImageBytes(url);
-
-    // No still available — a video, or an image that would not load. Fall
-    // back to the branded black card instead of returning nothing.
-    if (imageBytes == null || imageBytes.isEmpty) {
-      return _buildWatermarkOnlyFile(article);
-    }
-
-    // Image + watermark only. No headline, no body: the download is the
-    // picture, and the text travels beside it in the share sheet instead of
-    // being burned into the pixels.
-    //
-    // Natural aspect ratio preserved, capped so a huge original does not
-    // produce a huge PNG.
-    double width = 1200;
-    double height = 675;
-    try {
-      final codec = await ui.instantiateImageCodec(imageBytes);
-      final frame = await codec.getNextFrame();
-      width = frame.image.width.toDouble();
-      height = frame.image.height.toDouble();
-    } catch (e) {
-      debugPrint('[ShareService] could not decode poster dimensions: $e');
-    }
-    if (width > 1200) {
-      height = (height * 1200 / width).roundToDouble();
-      width = 1200;
-    }
-    if (width <= 0 || height <= 0) {
-      width = 1200;
-      height = 675;
-    }
-
-    final bytes = await _screenshotController.captureFromWidget(
-      includeText
-          ? _SharePreviewCard(
-              article: article,
-              imageBytes: imageBytes,
-              width: width,
-            )
-          : _WatermarkShareCard(
-              article: article,
-              imageBytes: imageBytes,
-              width: width,
-              height: height,
-            ),
-      // A preview stacks banner and text under the picture, so it needs the
-      // taller canvas; a plain download is exactly the image.
-      targetSize: includeText
-          ? Size(width, height + _SharePreviewCard.chromeHeight(width))
-          : Size(width, height),
-      delay: const Duration(milliseconds: 120),
-    );
-    if (bytes.isEmpty) return null;
-
-    final dir = await getTemporaryDirectory();
-    final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-    final file =
-        await File('${dir.path}/vaaradhi_poster_$safeId.png').create();
-    await file.writeAsBytes(bytes);
-    return file;
-  }
+  }) =>
+      generateArticleImage(article);
 
   /// Outcome of a download, so the UI can say what actually happened rather
   /// than guessing.
@@ -327,16 +347,38 @@ class ShareService {
       final file = await buildPosterFile(article);
       if (file == null) return downloadFailed;
 
-      // toAlbum makes the saved file land somewhere the reader can find it,
-      // rather than loose in the camera roll.
-      if (!await Gal.hasAccess(toAlbum: true)) {
-        if (!await Gal.requestAccess(toAlbum: true)) {
+      // On Android 10+ (API 29+), Scoped Storage lets the app save its own files
+      // to MediaStore without storage permissions. On Android <= 28 or iOS,
+      // check and request access if needed.
+      final hasAccess = await Gal.hasAccess(toAlbum: false);
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess(toAlbum: false);
+        if (!granted) {
           return downloadPermissionDenied;
         }
       }
 
-      await Gal.putImage(file.path, album: 'Vaaradhi');
-      return downloadSaved;
+      // Tier 1: Try saving into the 'Vaaradhi' custom album.
+      // Tier 2: If the OEM restricts custom album creation or folder ownership
+      // conflicts occur on Android 13+ (e.g. MIUI/OneUI/ColorOS), seamlessly
+      // fall back to saving directly to the root Pictures gallery without an album.
+      try {
+        await Gal.putImage(file.path, album: 'Vaaradhi');
+        return downloadSaved;
+      } catch (albumError) {
+        debugPrint('ShareService: Album save error ($albumError), retrying root gallery...');
+        try {
+          await Gal.putImage(file.path);
+          return downloadSaved;
+        } catch (fallbackError) {
+          debugPrint('ShareService: Fallback save also failed: $fallbackError');
+          if (fallbackError is GalException &&
+              fallbackError.type == GalExceptionType.accessDenied) {
+            return downloadPermissionDenied;
+          }
+          return downloadFailed;
+        }
+      }
     } on GalException catch (e) {
       debugPrint('ShareService: gallery save failed: ${e.type}');
       return e.type == GalExceptionType.accessDenied
@@ -356,14 +398,19 @@ class ShareService {
     if (_isSharing) return false;
     _isSharing = true;
     try {
-      // Share preview: picture, banner, then the story.
-      final file = await buildPosterFile(article, includeText: true);
-      if (file == null) return false;
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
-        text: buildShareText(article),
-      );
-      return true;
+      final file = await generateArticleImage(article);
+      final shareText = buildShareText(article);
+
+      if (file != null) {
+        await Share.shareXFiles(
+          [XFile(file.path, mimeType: 'image/jpeg')],
+          text: shareText,
+        );
+        return true;
+      } else {
+        await Share.share(shareText);
+        return true;
+      }
     } catch (e) {
       debugPrint('ShareService: poster share failed: $e');
       return false;
@@ -382,148 +429,3 @@ class ShareService {
   }
 }
 
-/// The off-screen widget representing the article image with ONLY the official logo watermark.
-/// Matches the exact natural size and aspect ratio of the news article image with no footer bar or extra text.
-class _WatermarkShareCard extends StatelessWidget {
-  final NewsArticle article;
-  final Uint8List imageBytes;
-  final double width;
-  final double height;
-
-  const _WatermarkShareCard({
-    required this.article,
-    required this.imageBytes,
-    required this.width,
-    required this.height,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: TextDirection.ltr,
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.memory(
-              imageBytes,
-              width: width,
-              height: height,
-              fit: BoxFit.cover,
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: EdgeInsets.fromLTRB(
-                    width * 0.04, width * 0.05, width * 0.04, width * 0.025),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [Colors.black87, Colors.transparent],
-                  ),
-                ),
-                child: WatermarkBanner(
-                  height: width * 0.06,
-                  padding: EdgeInsets.zero,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The card a share preview is rendered from: the picture, the masthead
-/// banner beneath it, then the story — the same order the reader sees on the
-/// spotlight card and the article screen.
-///
-/// A download uses [_WatermarkShareCard] instead, which is the picture and
-/// the banner without the copy.
-class _SharePreviewCard extends StatelessWidget {
-  const _SharePreviewCard({
-    required this.article,
-    required this.imageBytes,
-    required this.width,
-  });
-
-  final NewsArticle article;
-  final Uint8List imageBytes;
-  final double width;
-
-  /// Height the banner and text add below the picture, so the capture can be
-  /// sized before the widget is laid out.
-  static double chromeHeight(double width) => width * 0.52;
-
-  @override
-  Widget build(BuildContext context) {
-    final pad = width * 0.045;
-
-    return Directionality(
-      textDirection: TextDirection.ltr,
-      child: Container(
-        width: width,
-        color: Colors.white,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 1. The original image, uncropped.
-            Image.memory(imageBytes, width: width, fit: BoxFit.contain),
-
-            // 2. The masthead band, on the seam — the same place it sits in
-            // the app, so a shared image reads like the screen it came from.
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: pad, vertical: pad * 0.5),
-              child: WatermarkBanner(
-                height: width * 0.075,
-                padding: EdgeInsets.zero,
-              ),
-            ),
-
-            // 3. The story.
-            Padding(
-              padding: EdgeInsets.fromLTRB(pad, 0, pad, pad),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    article.title.trim(),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: width * 0.042,
-                      height: 1.35,
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF141414),
-                    ),
-                  ),
-                  if (article.summary.trim().isNotEmpty) ...[
-                    SizedBox(height: pad * 0.4),
-                    Text(
-                      article.summary.trim(),
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: width * 0.028,
-                        height: 1.6,
-                        color: const Color(0xFF4A4A4A),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -2,11 +2,15 @@ import 'dart:async';
 import '../repositories/ad_repository.dart';
 import '../core/ads/ad_placement.dart';
 import 'dart:io' show File, Platform;
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kIsWeb;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
+import '../models/search_result.dart';
+import '../models/submission_status.dart';
+export '../models/submission_status.dart';
+export '../models/search_result.dart';
 import '../models/live_news.dart';
 import '../models/video_item.dart';
 import '../models/category.dart';
@@ -42,7 +46,6 @@ class ApiService {
       return false;
     }
   }
-
 
   String? _extractInstallationSecret(dynamic responseData) {
     if (responseData is Map<String, dynamic>) {
@@ -110,8 +113,10 @@ class ApiService {
       }
       return data;
     } on DioException catch (dioErr) {
-      debugPrint(
-          '[ApiService] Login failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
+      if (kDebugMode) {
+        debugPrint(
+            '[ApiService] Login failed: status=${dioErr.response?.statusCode}, type=${dioErr.type}');
+      }
 
       // A 403 here means the backend holds an installation_secret for this
       // device_id that this client no longer has. Without the retry below the
@@ -357,7 +362,6 @@ class ApiService {
       throw ApiException(message, dioErr.response?.statusCode);
     }
   }
-
 
   Future<Map<String, dynamic>> refreshToken(String refreshToken) async {
     final response = await _dio.post('/api/v1/auth/token/refresh/', data: {
@@ -1361,28 +1365,31 @@ class ApiService {
     String? lang,
     String? category,
   }) async {
+    final r = await search(query, lang: lang, category: category);
+    return r.error != null
+        ? ApiResponse.error(message: r.error!, fallbackData: <NewsArticle>[])
+        : ApiResponse.success(r.results);
+  }
+
+  /// `GET /api/v1/search/` → results, suggestions (for zero results),
+  /// filters and cache_ttl_seconds.
+  Future<SearchResult> search(
+    String query, {
+    String? lang,
+    String? category,
+  }) async {
     try {
       final response = await _dio.get('/api/v1/search/', queryParameters: {
         'q': query,
         if (lang != null) 'lang': lang,
         if (category != null) 'category': category,
       });
-      // Search API wraps items in data['results'], 'articles', or directly in data.
-      return ApiResponse<List<NewsArticle>>.fromJson(response.data, (json) {
-        if (json is Map<String, dynamic>) {
-          final list = json['results'] ?? json['articles'] ?? json['data'] ?? json['items'];
-          if (list is List) {
-            return list.map((i) => NewsArticle.fromJson(i)).toList();
-          }
-        } else if (json is List) {
-          return json.map((i) => NewsArticle.fromJson(i)).toList();
-        }
-        return <NewsArticle>[];
-      });
+      return SearchResult.parse(response.data);
     } catch (e) {
-      return ApiResponse.error(
-        message: e is AppException ? e.message : e.toString(),
-        fallbackData: <NewsArticle>[],
+      return SearchResult(
+        results: const [],
+        suggestions: const [],
+        error: e is AppException ? e.message : e.toString(),
       );
     }
   }
@@ -1499,8 +1506,7 @@ class ApiService {
     Map<String, dynamic> articleData;
     if (nested is Map) {
       articleData = Map<String, dynamic>.from(nested);
-      if ((articleData['id'] == null ||
-              articleData['id'].toString().isEmpty) &&
+      if ((articleData['id'] == null || articleData['id'].toString().isEmpty) &&
           map['article_id'] != null) {
         articleData['id'] = map['article_id'];
       }
@@ -1537,19 +1543,30 @@ class ApiService {
     await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
   }
 
-  Future<bool> toggleBookmark(String articleId) async {
+  /// POST /api/v1/bookmarks/toggle/ — flips the server's saved state and
+  /// returns what it is now (`data.bookmarked`), or null if an older server
+  /// did not say. Throws when the request fails.
+  ///
+  /// The answer matters: the endpoint is a toggle, so when the app's copy is
+  /// stale (already saved on the server) the call *removes* the bookmark.
+  /// Ignoring it showed "Saved" for stories missing from the Saved screen.
+  Future<bool?> toggleBookmark(String articleId) async {
     final response = await _dio
         .post('/api/v1/bookmarks/toggle/', data: {'article_id': articleId});
     if (response.statusCode != 200 && response.statusCode != 201) {
-      return false;
+      throw ApiException('Bookmark toggle failed (${response.statusCode}).');
     }
     if (response.data is Map) {
       final map = response.data as Map;
       if (map['errors'] != null && map['errors'] != false) {
-        return false;
+        throw ApiException('Bookmark toggle failed.');
+      }
+      final data = map['data'];
+      if (data is Map && data['bookmarked'] is bool) {
+        return data['bookmarked'] as bool;
       }
     }
-    return true;
+    return null;
   }
 
   Future<void> removeBookmark(String bookmarkId) async {
@@ -1577,17 +1594,35 @@ class ApiService {
   }
 
   // --- UGC Creation ---
+
+  /// Binds the phone number inside a Firebase ID token to the logged-in
+  /// user's UGC profile. The backend verifies the token; the returned
+  /// `mobile` (10 digits) is what every later UGC call must send.
+  Future<Map<String, dynamic>> verifyFirebasePhone(String idToken) async {
+    final response = await _dio.post('/api/v1/ugc/verify-firebase-phone/',
+        data: {'id_token': idToken});
+    final data = response.data is Map ? response.data['data'] : null;
+    return data is Map<String, dynamic> ? data : <String, dynamic>{};
+  }
+
+  /// Fallback flow: backend-sent SMS OTP. [phone] must be 10 digits.
   Future<bool> sendOtp(String phone) async {
     final response =
         await _dio.post('/api/v1/ugc/send-otp/', data: {'mobile': phone});
     return response.statusCode == 200;
   }
 
+  /// Fallback flow. True only when the backend reports `verified: true`
+  /// (or, for older builds that omit the flag, a 200).
   Future<bool> verifyOtp(String phone, String otp) async {
     final response = await _dio.post('/api/v1/ugc/verify-otp/', data: {
       'mobile': phone,
       'otp': otp,
     });
+    final data = response.data is Map ? response.data['data'] : null;
+    if (data is Map && data.containsKey('verified')) {
+      return data['verified'] == true;
+    }
     return response.statusCode == 200;
   }
 
@@ -1625,7 +1660,9 @@ class ApiService {
             summary: map['description']?.toString() ?? '',
             thumbnailUrl: map['thumbnail_url']?.toString() ?? '',
             mediaUrl: map['media_url']?.toString() ?? '',
-            createdAt: DateParser.tryParse(map['created_at'] ?? map['published_at']) ?? DateTime.now(),
+            createdAt:
+                DateParser.tryParse(map['created_at'] ?? map['published_at']) ??
+                    DateTime.now(),
             district: map['district']?.toString() ?? '',
             subdistrict: map['subdistrict']?.toString() ?? '',
             village: map['village']?.toString() ?? '',
@@ -1646,6 +1683,20 @@ class ApiService {
               'image_urls': map['image_urls'],
               'media_type': map['media_type'],
               'trust_level': map['trust_level'],
+              // Engagement state (handover §17.4): counts are global,
+              // my_reaction is canonical, is_bookmarked is per account.
+              for (final key in const [
+                'like_count',
+                'dislike_count',
+                'my_reaction',
+                'is_liked_by_user',
+                'is_disliked_by_user',
+                'is_bookmarked',
+                'share_url',
+                'uploader_name',
+                'author_name',
+              ])
+                if (map[key] != null) key: map[key],
             },
           );
         }).toList();
@@ -1656,6 +1707,21 @@ class ApiService {
         fallbackData: <UnifiedFeedItem>[],
       );
     }
+  }
+
+  /// `GET /api/v1/ugc/{submission_id}/` — one public citizen post (handover
+  /// §11), with its engagement state (§17.4). Throws on 404: the post is
+  /// missing, unapproved or no longer visible.
+  Future<NewsArticle> getUgcDetail(String submissionId) async {
+    final response = await _dio.get('/api/v1/ugc/$submissionId/');
+    final data = response.data is Map ? response.data['data'] : null;
+    if (data is! Map) {
+      throw ParsingException('Unexpected citizen post payload.');
+    }
+    return UnifiedFeedItem.fromJson({
+      ...Map<String, dynamic>.from(data),
+      'type': 'ugc',
+    }).toArticle();
   }
 
   Future<Map<String, dynamic>> submitUgc(Map<String, dynamic> data) async {
@@ -1730,15 +1796,21 @@ class ApiService {
     return response.data['data'] as Map<String, dynamic>;
   }
 
+  /// `GET /api/v1/ugc/reporter/submissions/{id}/status/` (handover §10).
+  Future<SubmissionStatus> getSubmissionStatus(String submissionId) async {
+    final response = await _dio
+        .get('/api/v1/ugc/reporter/submissions/$submissionId/status/');
+    return SubmissionStatus.parse(response.data);
+  }
+
   Future<List<ReporterPost>> getReporterSubmissions({
     String? status,
     int pageSize = 20,
-    int page = 1,
   }) async {
     try {
+      // Cursor-paginated (handover §1): never send `page`.
       final query = <String, dynamic>{
         'page_size': pageSize,
-        'page': page,
       };
       if (status != null &&
           status.isNotEmpty &&
@@ -1765,7 +1837,9 @@ class ApiService {
           id: json['id'] ?? '',
           reporterName: json['uploader'] ?? 'Me',
           type:
-              json['content_type'] == 'video' ? PostType.video : PostType.image,
+              json['content_type']?.toString().toUpperCase() == 'VIDEO'
+                  ? PostType.video
+                  : PostType.image,
           caption: json['title'] ?? '',
           category: json['category'] ?? 'local',
           mediaUrl: json['thumbnail_url'] ?? json['media_url'] ?? '',
@@ -1865,6 +1939,20 @@ class ApiService {
     } catch (_) {
       return [];
     }
+  }
+
+  /// GET /api/v1/posters/{id}/ — a single poster, for deep links and
+  /// notification taps. Throws on failure (including 404) so the caller can
+  /// tell "gone" from "offline".
+  Future<Map<String, dynamic>> getPosterDetail(String posterId) async {
+    final response = await _dio.get('/api/v1/posters/$posterId/');
+    final payload = response.data is Map
+        ? ((response.data as Map)['data'] ?? response.data)
+        : response.data;
+    if (payload is! Map) {
+      throw Exception('Unexpected detail payload format for poster $posterId');
+    }
+    return Map<String, dynamic>.from(payload);
   }
 
   // --- Ad Booking ---
@@ -2058,6 +2146,19 @@ class ApiService {
     }
   }
 
+  /// GET /api/v1/polls/{id}/ for deep links. Unlike [getPollDetails] this
+  /// throws, so a 404 can be told apart from a network failure.
+  Future<Poll> fetchPollDetail(String pollId) async {
+    final response = await _dio.get('/api/v1/polls/$pollId/');
+    final payload = response.data is Map
+        ? ((response.data as Map)['data'] ?? response.data)
+        : response.data;
+    if (payload is! Map) {
+      throw Exception('Unexpected detail payload format for poll $pollId');
+    }
+    return Poll.fromJson(Map<String, dynamic>.from(payload));
+  }
+
   Future<bool> submitPollVote(
     String pollId, {
     String? optionId,
@@ -2110,11 +2211,17 @@ class ApiService {
     try {
       final response = await _dio
           .get('/api/v1/search/trending/', queryParameters: {'days': days});
-      final List data = response.data['data'] is List ? response.data['data'] : [];
+      final List data =
+          response.data['data'] is List ? response.data['data'] : [];
       return data
           .map<String>((item) {
             if (item is Map) {
-              return (item['keyword'] ?? item['term'] ?? item['query'] ?? item['title'] ?? '').toString();
+              return (item['keyword'] ??
+                      item['term'] ??
+                      item['query'] ??
+                      item['title'] ??
+                      '')
+                  .toString();
             }
             return item.toString();
           })

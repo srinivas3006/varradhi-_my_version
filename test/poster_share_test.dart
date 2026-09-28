@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/utils/share_service.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/utils/share_service.dart';
 
 NewsArticle _article({
   String image = 'https://cdn.example.com/a.jpg',
@@ -83,9 +83,9 @@ void main() {
       expect(source, isNot(contains('ArticleWatermarkOverlay')));
     });
 
-    test('the generated file is a .png', () {
-      expect(source, contains("vaaradhi_poster_\$safeId.png"));
-      expect(source, contains("mimeType: 'image/png'"));
+    test('the generated file is a .jpg', () {
+      expect(source, contains("vaaradhi_\$safeId.jpg"));
+      expect(source, contains("mimeType: 'image/jpeg'"));
     });
   });
 
@@ -106,10 +106,11 @@ void main() {
       expect(source, contains('downloadPermissionDenied'));
     });
 
-    test('share sends the PNG with the text alongside', () {
+    test('share sends the JPEG with the text alongside', () {
       final fn = source.substring(source.indexOf('static Future<bool> sharePoster'));
-      expect(fn, contains("mimeType: 'image/png'"));
-      expect(fn, contains('text: buildShareText(article)'));
+      expect(fn, contains("mimeType: 'image/jpeg'"));
+      expect(fn, contains('final shareText = buildShareText(article);'));
+      expect(fn, contains('text: shareText'));
     });
   });
 }

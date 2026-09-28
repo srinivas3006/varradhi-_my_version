@@ -9,6 +9,7 @@ import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../repositories/ugc_repository.dart';
 import '../services/api_service.dart';
+import '../services/location_permission_coordinator.dart';
 import '../services/location_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -750,43 +751,27 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     ]);
   }
 
+  // Tapping the GPS icon already is the "use current location" intent, so
+  // this goes straight to the Play-Store-required disclosure and then native
+  // permission — no extra soft sheet on top of a choice the reader already
+  // made. LocationPermissionCoordinator.detectAndApply owns the rest: native
+  // permission, deniedForever/denied handling, geocode, confirm, apply.
   Future<void> _detectLocation() async {
     final consent = await LocationService.showPrivacyDisclosure(context);
     if (!consent) return;
+    if (!mounted) return;
 
     setState(() => _isDetectingLocation = true);
-
     try {
-      final deviceLocation = await LocationService.detectLocation();
-      final match =
-          await ApiService.instance.resolveCanonicalLocation(deviceLocation);
-      if (!mounted) return;
-      final confirmed = await LocationService.showCanonicalConfirmation(
+      final applied = await LocationPermissionCoordinator.detectAndApply(
         context,
-        match,
       );
-      if (!mounted) return;
-      if (!confirmed) {
-        await _changeLocation();
-        return;
-      }
-      await ApiService.instance.applyCanonicalLocation(match);
-      if (mounted) {
+      if (applied && mounted) {
         setState(() {
           _location = AppState.instance.displayLocation;
         });
         await _loadAds();
         await _loadAllSections(clearExisting: true);
-      }
-    } on LocationException catch (exception) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(exception.message)));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('లొకేషన్ పొందడంలో సమస్య ఏర్పడింది: $e')));
       }
     } finally {
       if (mounted) {
@@ -1115,7 +1100,8 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
       return LocationTranslations.toTelugu(article.subdistrict!.trim());
     }
     if (_hasText(article.district)) {
-      final districtTe = LocationTranslations.toTelugu(article.district!.trim());
+      final districtTe =
+          LocationTranslations.toTelugu(article.district!.trim());
       return '$districtTe జిల్లా';
     }
     return 'స్థానిక వార్తలు';
@@ -1375,7 +1361,8 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     final selectedState = AppState.instance.stateName;
 
     final selectedVillageTe = LocationTranslations.toTelugu(selectedVillage);
-    final selectedSubdistrictTe = LocationTranslations.toTelugu(selectedSubdistrict);
+    final selectedSubdistrictTe =
+        LocationTranslations.toTelugu(selectedSubdistrict);
     final selectedDistrictTe = LocationTranslations.toTelugu(selectedDistrict);
     final selectedStateTe = LocationTranslations.toTelugu(selectedState);
 

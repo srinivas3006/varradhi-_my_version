@@ -20,6 +20,12 @@ class AdminApiEndpoints {
   static const String reports = '/admin/api/ugc/reports/';
   static String reviewReport(String id) => '/admin/api/ugc/reports/$id/review/';
   static String dismissReport(String id) => '/admin/api/ugc/reports/$id/dismiss/';
+
+  // Desk-article reports: a separate queue with its own ids and actions
+  // (handover §17.5). Never mixed with the UGC report endpoints above.
+  static const String articleReports = '/admin/api/articles/reports/';
+  static String reviewArticleReport(String id) => '/admin/api/articles/reports/$id/review/';
+  static String dismissArticleReport(String id) => '/admin/api/articles/reports/$id/dismiss/';
   static String reporterDetail(String userId) => '/admin/api/ugc/reporters/$userId/';
   static const String otpDeliveries = '/admin/api/ugc/otp-deliveries/';
 }

@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
-import 'spotlight_screen.dart';
 import '../services/api_service.dart';
-import '../core/navigation/notification_navigation_gate.dart';
 
 
 import 'package:flutter/services.dart';
@@ -102,15 +100,14 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted || _navigated) return;
     _navigated = true;
 
-    final hasPendingNotif = NotificationNavigationGate.instance.hasPendingTarget;
-    final Widget nextScreen = hasPendingNotif
-        ? const HomeScreen(openSpotlightOnStart: false)
-        : const SpotlightScreen(isLocal: false);
-
+    // Home is the root hub; it opens the Main News Spotlight feed on top
+    // straight away, so back from Spotlight lands on Home. A pending
+    // notification skips that and opens its own target instead.
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 300),
-        pageBuilder: (_, __, ___) => nextScreen,
+        pageBuilder: (_, __, ___) =>
+            const HomeScreen(openSpotlightOnStart: true),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
       ),

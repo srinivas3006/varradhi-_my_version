@@ -359,18 +359,23 @@ class LocationService {
         false;
   }
 
-  static Future<DeviceLocation> detectLocation() async {
+  static Future<DeviceLocation> detectLocation({
+    bool requestPermission = true,
+  }) async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw LocationException(
           'లొకేషన్ సేవలు నిలిపివేయబడ్డాయి. దయచేసి GPS ఆన్ చేయండి.');
     }
 
     var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
+    if (permission == LocationPermission.denied && requestPermission) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
         throw LocationException('లొకేషన్ అనుమతులు నిరాకరించబడ్డాయి.');
       }
+    }
+    if (permission == LocationPermission.denied) {
+      throw LocationException('Location permission is required.');
     }
 
     if (permission == LocationPermission.deniedForever) {

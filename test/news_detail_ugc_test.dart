@@ -1,20 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/screens/news_detail_screen.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/screens/news_detail_screen.dart';
 
-void main() {
-  testWidgets('UGC detail uses feed content and only supported actions',
-      (tester) async {
-    final report = NewsArticle(
-      id: 'ugc-123',
+NewsArticle _story({required String kind}) => NewsArticle(
+      id: '$kind-123',
       title: 'Road damage reported in Kesaram',
-      slug: 'ugc-123',
+      slug: '$kind-123',
       summary: 'Residents requested urgent repairs.',
       body: 'Residents requested urgent repairs.',
       imageUrl: '',
-      source: 'Citizen Reporter',
-      category: 'UGC',
+      source: 'Reporter',
+      category: 'Local',
       publishedAt: DateTime(2026, 1, 1),
       likes: 0,
       comments: 0,
@@ -26,11 +23,14 @@ void main() {
       subdistrict: 'Jajireddygudem',
       village: 'Kesaram',
       coverageLevel: 'local',
-      contentKind: 'ugc',
+      contentKind: kind,
     );
 
+void main() {
+  testWidgets('a citizen post opens exactly like a desk article',
+      (tester) async {
     await tester.pumpWidget(
-      MaterialApp(home: NewsDetailScreen(article: report)),
+      MaterialApp(home: NewsDetailScreen(article: _story(kind: 'ugc'))),
     );
     await tester.pump();
 
@@ -39,18 +39,17 @@ void main() {
         find.textContaining('esidents requested urgent repairs.',
             findRichText: true),
         findsOneWidget);
-    expect(find.text('పౌర వార్త'), findsOneWidget);
-    expect(find.text('నివేదించండి'), findsOneWidget);
-    expect(find.byIcon(Icons.favorite_outline_rounded), findsNothing);
-    expect(find.byIcon(Icons.chat_bubble_outline_rounded), findsNothing);
-    expect(find.byIcon(Icons.bookmark_border_rounded), findsNothing);
+    // No separate citizen-only strip.
+    expect(find.text('పౌర వార్త'), findsNothing);
+    // Same header menu and engagement bar as every story.
+    expect(find.byKey(const Key('detail_more_btn')), findsOneWidget);
+    expect(find.byIcon(Icons.thumb_up_alt_outlined), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
 
-    await tester.tap(find.text('నివేదించండి'));
+    // Report lives in the shared ⋮ sheet.
+    await tester.tap(find.byKey(const Key('detail_more_btn')));
     await tester.pumpAndSettle();
-
-    expect(find.text('పౌర వార్తను నివేదించండి'), findsOneWidget);
-    expect(
-        find.text('తప్పుడు లేదా తప్పుదారి పట్టించే సమాచారం'), findsOneWidget);
+    expect(find.byKey(const Key('story_option_report')), findsOneWidget);
+    expect(find.byKey(const Key('story_option_bookmark')), findsOneWidget);
   });
 }

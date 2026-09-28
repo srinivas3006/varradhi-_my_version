@@ -53,7 +53,19 @@ class UnifiedFeedItem {
       parsedMeta = Map<String, dynamic>.from(json['metadata'] as Map);
     }
 
-    for (final key in ['media_items', 'media_type', 'image_urls', 'slug']) {
+    for (final key in [
+      'media_items',
+      'media_type',
+      'image_urls',
+      'slug',
+      'like_count',
+      'dislike_count',
+      'my_reaction',
+      'is_liked_by_user',
+      'is_disliked_by_user',
+      'is_bookmarked',
+      'share_url',
+    ]) {
       if (json[key] != null) parsedMeta[key] = json[key];
     }
 

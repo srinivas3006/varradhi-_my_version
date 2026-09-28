@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/location_model.dart';
-import 'package:way2news_clone/repositories/location_repository.dart';
-import 'package:way2news_clone/screens/location_selection_screen.dart';
-import 'package:way2news_clone/theme/app_theme.dart';
+import 'package:vaaradhi/models/location_model.dart';
+import 'package:vaaradhi/repositories/location_repository.dart';
+import 'package:vaaradhi/screens/location_selection_screen.dart';
+import 'package:vaaradhi/theme/app_theme.dart';
 
 class FakeLocationRepository extends LocationRepository {
   @override

@@ -3,6 +3,8 @@ enum NotificationTargetType {
   article,
   category,
   poster,
+  poll,
+  video,
   ugc,
   admin,
   screen,
@@ -64,6 +66,35 @@ class NotificationTarget {
     return NotificationTarget(
       type: NotificationTargetType.poster,
       identifier: posterId,
+      notificationId: notificationId,
+      originalPayload: originalPayload,
+    );
+  }
+
+  /// A poll, loaded from GET /api/v1/polls/{id}/.
+  factory NotificationTarget.poll({
+    required String pollId,
+    String? notificationId,
+    Map<String, dynamic>? originalPayload,
+  }) {
+    return NotificationTarget(
+      type: NotificationTargetType.poll,
+      identifier: pollId,
+      notificationId: notificationId,
+      originalPayload: originalPayload,
+    );
+  }
+
+  /// A video or Short, opened in the Reels viewer. There is no public
+  /// video-by-id API, so the id is matched against the first feed page only.
+  factory NotificationTarget.video({
+    required String videoId,
+    String? notificationId,
+    Map<String, dynamic>? originalPayload,
+  }) {
+    return NotificationTarget(
+      type: NotificationTargetType.video,
+      identifier: videoId,
       notificationId: notificationId,
       originalPayload: originalPayload,
     );

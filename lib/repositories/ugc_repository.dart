@@ -71,6 +71,10 @@ class UgcRepository {
   Future<Map<String, dynamic>> submitPost(Map<String, dynamic> data) async {
     try {
       return await ApiService.instance.submitUgc(data);
+    } on DioException {
+      // Keep the backend's errors.message ("Mobile number is not verified.",
+      // "Daily upload limit reached." …) — the controller acts on it.
+      rethrow;
     } on AppException {
       rethrow;
     } catch (e) {

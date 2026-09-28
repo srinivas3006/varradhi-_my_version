@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/state/app_state.dart';
-import 'package:way2news_clone/theme/app_theme.dart';
+import 'package:vaaradhi/state/app_state.dart';
+import 'package:vaaradhi/theme/app_theme.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

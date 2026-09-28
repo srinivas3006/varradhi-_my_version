@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
-import 'package:way2news_clone/repositories/feed_repository.dart';
-import 'package:way2news_clone/spotlight/spotlight_controller.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
+import 'package:vaaradhi/repositories/feed_repository.dart';
+import 'package:vaaradhi/spotlight/spotlight_controller.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class _FeedAdapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];

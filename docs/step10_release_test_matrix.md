@@ -2,7 +2,7 @@
 
 **Date**: September 11, 2026  
 **Application**: VARADHI Flutter Android Application  
-**Package**: `com.vaaradhi.vaaradhi` (`way2news_clone`)  
+**Package**: `com.vaaradhi.vaaradhi` (`vaaradhi`)  
 **Version**: `1.0.0+1`  
 
 ---

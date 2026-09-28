@@ -3,7 +3,7 @@
 **Audit Date**: September 11, 2026  
 **Project**: VARADHI Flutter Mobile Application  
 **Package / App ID**: `com.vaaradhi.vaaradhi`  
-**Package Name in pubspec**: `way2news_clone`  
+**Package Name in pubspec**: `vaaradhi`  
 **Version**: `1.0.0+1` (Version Name: `1.0.0`, Version Code: `1`)  
 
 ---

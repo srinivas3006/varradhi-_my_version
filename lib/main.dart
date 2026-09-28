@@ -73,7 +73,7 @@ void main() async {
   ]);
 
   // Immediately mount the application so the logo splash screen renders with zero white screen delay
-  runApp(const Way2NewsCloneApp());
+  runApp(const VaaradhiApp());
 
   // Asynchronously initialize heavy background services (Firebase, FCM tokens, deep links, role sync)
   // without blocking UI frame drawing or causing a prolonged blank launch screen
@@ -100,8 +100,8 @@ Future<void> _initBackgroundServices() async {
   }
 }
 
-class Way2NewsCloneApp extends StatelessWidget {
-  const Way2NewsCloneApp({super.key});
+class VaaradhiApp extends StatelessWidget {
+  const VaaradhiApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +112,7 @@ class Way2NewsCloneApp extends StatelessWidget {
       animation: AppState.instance.themeAndLocaleNotifier,
       builder: (context, _) {
         return MaterialApp(
-          title: 'VARADHI',
+          title: 'VAARADHI',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
           scaffoldMessengerKey: scaffoldMessengerKey,

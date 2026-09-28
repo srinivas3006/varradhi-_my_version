@@ -19,15 +19,14 @@ class BottomNavBar extends StatelessWidget {
 
   static const _items = [
     (icon: Icons.home_rounded, key: 'nav_home'),
-    // Spotlight sits beside Home. Tapping it pushes its own screen rather
-    // than switching the stack, so its navigation stays separate.
-    (icon: Icons.auto_awesome_rounded, key: 'nav_spotlight'),
+    // Main and Local open the full-screen Spotlight feed as its own route
+    // rather than switching tabs, so they never show as selected.
+    (icon: Icons.auto_awesome_rounded, key: 'nav_main_news'),
     // Index 2 is the centre slot the floating Post button occupies — the
     // Row renders a gap here and the label below comes from _items[2], so
     // nothing else may take this position.
     (icon: Icons.add, key: 'nav_post'),
     (icon: Icons.location_on_rounded, key: 'nav_local'),
-    (icon: Icons.play_circle_fill_rounded, key: 'nav_video'),
     (icon: Icons.person_rounded, key: 'nav_profile'),
   ];
 
@@ -68,15 +67,12 @@ class BottomNavBar extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.spaceAround,
                         children: List.generate(_items.length, (index) {
                           if (index == 2) {
-                            return const SizedBox(width: 70);
+                            return const SizedBox(width: 64);
                           }
 
                           final item = _items[index];
                           final isActive = index == currentIndex;
-                          final itemLabel =
-                              (index == 1 && AppState.instance.displayLocation.isNotEmpty)
-                                  ? AppState.instance.displayLocation
-                                  : tr(item.key);
+                          final itemLabel = tr(item.key);
 
                           return Expanded(
                             child: Semantics(

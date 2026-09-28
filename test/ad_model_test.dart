@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/core/ads/ad_type_resolver.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/core/ads/ad_type_resolver.dart';
 
 void main() {
   group('AdBanner Model Tests', () {

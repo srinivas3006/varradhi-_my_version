@@ -71,48 +71,6 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     }
   }
 
-  void _handleGatedAction(AppState state, VoidCallback onAuthorized) {
-    if (!state.isLoggedIn) {
-      HapticFeedback.warningNotification();
-      _showLoginRequiredDialog();
-    } else {
-      onAuthorized();
-    }
-  }
-
-  void _showLoginRequiredDialog() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(tr('account_required'), style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
-        content: Text(
-          tr('account_required_sub'),
-          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(tr('cancel'), style: TextStyle(color: isDark ? Colors.white38 : Colors.black38)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
-            },
-            child: Text(tr('log_in'), style: const TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -134,10 +92,14 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 const SizedBox(height: 16),
 
                 // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
-                if (state.isLoggedIn && !state.isReporter && !state.isAdmin) ...[
+                if (state.isLoggedIn &&
+                    !state.hasJoinedAsReporter &&
+                    !state.isAdmin) ...[
                   _buildBecomeReporterCard(),
                   const SizedBox(height: 16),
-                ] else if (state.isLoggedIn && state.isReporter && !state.isAdmin) ...[
+                ] else if (state.isLoggedIn &&
+                    state.hasJoinedAsReporter &&
+                    !state.isAdmin) ...[
                   _buildReporterDashboardCard(state, isDark),
                   const SizedBox(height: 16),
                   _buildRewardsCard(state, isDark),

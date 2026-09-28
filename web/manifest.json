@@ -1,11 +1,11 @@
 {
-    "name": "way2news_clone",
-    "short_name": "way2news_clone",
+    "name": "VAARADHI",
+    "short_name": "VAARADHI",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "VAARADHI news, video, local updates, ads, and citizen journalism mobile app.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

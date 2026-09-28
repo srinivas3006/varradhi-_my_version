@@ -4,10 +4,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/services/api_service.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/services/api_service.dart';
+import 'package:vaaradhi/services/content_engagement_service.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {
   _Adapter(this.handler);
@@ -183,6 +184,43 @@ void main() {
       expect(method, 'POST');
       expect(path, '/api/v1/bookmarks/toggle/');
       expect(body, {'article_id': 'a1'});
+    });
+
+    test('toggle returns the server state, not the hoped-for one', () async {
+      serve((o) async => _json({'data': {'bookmarked': false}}, 200));
+      expect(await ApiService.instance.toggleBookmark('a1'), isFalse);
+    });
+
+    test('saving when the server already had it still ends saved', () async {
+      // Regression: the app showed "Saved" but the toggle had removed a
+      // bookmark the server already held, so the Saved screen lacked it.
+      var calls = 0;
+      var serverSaved = true; // stale app copy: server already has it
+      serve((o) async {
+        calls++;
+        serverSaved = !serverSaved;
+        return _json({'data': {'bookmarked': serverSaved}}, 200);
+      });
+      final story = NewsArticle.fromJson({'id': 'a1', 'title': 't'});
+      final saved = await ContentEngagementService.instance
+          .setSaved(story, nowSaved: true);
+      expect(saved, isTrue);
+      expect(serverSaved, isTrue, reason: 'server must end saved');
+      expect(calls, 2);
+    });
+
+    test('a normal save is a single toggle', () async {
+      var calls = 0;
+      serve((o) async {
+        calls++;
+        return _json({'data': {'bookmarked': true}}, 200);
+      });
+      final story = NewsArticle.fromJson({'id': 'a2', 'title': 't'});
+      expect(
+          await ContentEngagementService.instance
+              .setSaved(story, nowSaved: true),
+          isTrue);
+      expect(calls, 1);
     });
 
     test('a failed toggle throws so the caller can roll back', () async {

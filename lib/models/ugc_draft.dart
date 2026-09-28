@@ -9,6 +9,10 @@ enum UgcUploadStatus {
   completed,
   failed,
   cancelled,
+
+  /// The backend (or the local cache) says the UGC mobile is not verified.
+  /// The screen opens phone verification and retries the submit.
+  verificationRequired,
 }
 
 /// Persistent model representing an in-progress or recoverable UGC draft.

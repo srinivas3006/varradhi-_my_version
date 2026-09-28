@@ -32,6 +32,7 @@ class AppTranslations {
       'skip_for_now': 'Skip for now',
       // Navigation
       'nav_home': 'Home',
+      'nav_main_news': 'Main News',
       'nav_spotlight': 'Spotlight',
       'nav_services': 'Services',
       'nav_post': 'Post',
@@ -99,6 +100,7 @@ class AppTranslations {
       'report_comment': 'Report Comment',
       'comment_reported_hidden': 'Comment reported and hidden.',
       'block_user': 'Block User',
+      'block_user_confirm': 'Are you sure you want to block this user? You will no longer see comments from this user.',
       'blocked': 'blocked.',
       'comment_hidden': 'This comment was hidden.',
       'reply': 'Reply',
@@ -151,6 +153,7 @@ class AppTranslations {
       'skip_for_now': 'ప్రస్తుతానికి వదిలేయండి',
       // Navigation
       'nav_home': 'హోమ్',
+      'nav_main_news': 'ప్రధాన వార్తలు',
       'nav_spotlight': 'స్పాట్‌లైట్',
       'nav_services': 'సేవలు',
       'nav_post': 'పోస్ట్',
@@ -214,6 +217,7 @@ class AppTranslations {
       'report_comment': 'కామెంట్‌ను నివేదించండి',
       'comment_reported_hidden': 'కామెంట్ నివేదించబడింది మరియు దాచబడింది.',
       'block_user': 'వినియోగదారుని బ్లాక్ చేయండి',
+      'block_user_confirm': 'మీరు ఖచ్చితంగా ఈ యూజర్‌ను బ్లాక్ చేయాలనుకుంటున్నారా? ఇకపై వీరి కామెంట్లు మీకు కనిపించవు.',
       'blocked': 'బ్లాక్ చేయబడ్డారు.',
       'comment_hidden': 'ఈ కామెంట్ దాచబడింది.',
       'reply': 'ప్రత్యుత్తరం',
@@ -352,6 +356,7 @@ class AppTranslations {
       'skip_for_now': 'இப்போதைக்கு தவிர்க்கவும்',
       // Navigation
       'nav_home': 'முகப்பு',
+      'nav_main_news': 'முக்கிய செய்திகள்',
       'nav_services': 'சேவைகள்',
       'nav_post': 'பதிவு',
       'nav_video': 'வீடியோ',

@@ -3431,7 +3431,7 @@ UGCSubmitScreen
 
 ## 28. Home Page UI/UX Direction
 
-Use Way2News as a reference for fast local-news scanning, but do not clone it.
+Use competitor apps as a reference for fast local-news scanning, but do not clone it.
 
 Recommended HomeScreen hierarchy:
 

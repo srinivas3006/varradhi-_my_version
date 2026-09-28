@@ -8,7 +8,6 @@ import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/share_service.dart';
-import '../services/api_service.dart';
 import '../services/tts_service.dart';
 import '../repositories/news_article_repository.dart';
 import '../services/ad_manager.dart';
@@ -17,6 +16,9 @@ import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
 import 'comments_screen.dart';
 import '../widgets/watermark/watermark_banner.dart';
+import '../widgets/spotlight/story_options_sheet.dart';
+import '../services/content_engagement_service.dart';
+import '../services/api_service.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
@@ -38,29 +40,19 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
   Future<void> _fetchFullArticleDetail() async {
     if (_isUgc) {
-      if (mounted) {
-        setState(() {
-          _isLoadingDetail = false;
-          _detailError = null;
-        });
-      }
+      await _fetchUgcDetail();
       return;
     }
 
+    // Slug only: the detail API is /api/v1/articles/{slug}/, and an id there
+    // is always a 404. Without a slug the feed copy already on screen stands.
     final slugToFetch = (widget.slug?.isNotEmpty ?? false)
         ? widget.slug!
-        : (widget.article.slug.isNotEmpty
-            ? widget.article.slug
-            : (widget.article.id.isNotEmpty
-                ? widget.article.id
-                : article.slug));
+        : widget.article.slug;
     if (slugToFetch.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _isLoadingDetail = false;
-          _detailError = 'Article slug is missing.';
-        });
-      }
+      debugPrint('Detail: no slug for article ${widget.article.id}; '
+          'showing feed copy');
+      if (mounted) setState(() => _isLoadingDetail = false);
       return;
     }
 
@@ -84,6 +76,38 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       }
     } catch (e) {
       debugPrint('Detail API error for slug "$slugToFetch": $e');
+      if (mounted) {
+        setState(() {
+          _detailError = e.toString();
+          _isLoadingDetail = false;
+        });
+      }
+    }
+  }
+
+  /// Citizen post: `GET /api/v1/ugc/{id}/` brings full media and the
+  /// reader's engagement state. The feed copy stays on screen meanwhile, and
+  /// remains if the request fails — unless there is nothing to show (opened
+  /// from a bare link), in which case the error and Retry appear.
+  Future<void> _fetchUgcDetail() async {
+    final id = widget.article.id;
+    if (id.isEmpty) return;
+    setState(() {
+      _isLoadingDetail = true;
+      _detailError = null;
+    });
+    try {
+      final full = await ApiService.instance.getUgcDetail(id);
+      if (!mounted) return;
+      setState(() {
+        // Keep whatever the detail payload leaves blank from the feed copy.
+        article = full.title.isEmpty && article.title.isNotEmpty
+            ? article
+            : full;
+        _isLoadingDetail = false;
+      });
+    } catch (e) {
+      debugPrint('UGC detail error for "$id": $e');
       if (mounted) {
         setState(() {
           _detailError = e.toString();
@@ -152,10 +176,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     });
 
     try {
-      final res = await ApiService.instance.postArticleReaction(
-        targetId,
-        nextReaction,
-      );
+      final res =
+          await ContentEngagementService.instance.react(article, nextReaction);
       if (mounted) {
         setState(() {
           final l = res['like_count'] ?? res['likes_count'] ?? res['likes'];
@@ -210,7 +232,15 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (mounted) setState(() => article.isBookmarked = !wasBookmarked);
 
     try {
-      await ApiService.instance.toggleBookmark(targetId);
+      // Same call for desk and citizen stories.
+      final saved = await ContentEngagementService.instance
+          .setSaved(article, nowSaved: !wasBookmarked);
+      if (saved == null) throw Exception('bookmark not saved');
+      if (saved == wasBookmarked) {
+        // The server's toggle is the truth; adopt it.
+        AppState.instance.setBookmarked(targetId, saved);
+        if (mounted) setState(() => article.isBookmarked = saved);
+      }
     } catch (e) {
       if (AppState.instance.isBookmarked(targetId) != wasBookmarked) {
         AppState.instance.toggleBookmark(targetId);
@@ -247,75 +277,30 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-  Future<void> _showUgcReportSheet() async {
-    final reasons = <(String, String)>[
-      ('spam', tr('reason_spam_short')),
-      ('misinformation', tr('reason_misinformation_short')),
-      ('inappropriate', tr('reason_inappropriate')),
-      ('other', tr('reason_other')),
-    ];
-
-    final selected = await showModalBottomSheet<(String, String)>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                tr('report_citizen_news'),
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              ...reasons.map(
-                (reason) => ListTile(
-                  minTileHeight: 48,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.flag_outlined),
-                  title: Text(reason.$2),
-                  onTap: () => Navigator.pop(sheetContext, reason),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (selected == null || !mounted) return;
-
-    try {
-      final reported = await ApiService.instance.reportUgcSubmission(
-        submissionId: article.id,
-        reason: selected.$1,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            reported ? tr('report_submitted') : tr('report_submit_failed'),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      debugPrint('Error reporting UGC submission: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(tr('report_submit_failed')),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+  /// ⋮ in the header: the same Report Story / Bookmark sheet as Spotlight,
+  /// for desk articles and citizen posts alike.
+  Future<void> _showMoreSheet() async {
+    HapticFeedback.selectionClick();
+    final targetId = article.id.isNotEmpty ? article.id : article.slug;
+    final isSaved =
+        article.isBookmarked || AppState.instance.isBookmarked(targetId);
+    final choice =
+        await StoryOptionsSheet.show(context, isBookmarked: isSaved);
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case StoryOption.bookmark:
+        await _toggleBookmark();
+        break;
+      case StoryOption.report:
+        await StoryActions.report(context, article);
+        break;
     }
   }
 
   void _share() {
-    ShareService.shareArticle(article);
+    // The detail payload can lack a usable still; the feed article this
+    // screen opened from is what Spotlight shares, so it backs it up.
+    ShareService.shareArticle(article, fallback: widget.article);
   }
 
   @override
@@ -323,14 +308,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     super.initState();
     article = widget.article;
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    if (!article.isUgc) {
-      if (AppState.instance.isLiked(targetId)) {
-        article.isLiked = true;
-      }
-      _fetchFullArticleDetail();
-    } else {
-      _fetchFullArticleDetail();
+    if (AppState.instance.isLiked(targetId)) {
+      article.isLiked = true;
     }
+    _fetchFullArticleDetail();
   }
 
   @override
@@ -343,6 +324,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBgColor = isDark ? AppColors.cardDarkNavy : Colors.white;
+    // Visible hero = the Spotlight frame shape (width / 1.22) instead of a
+    // fixed 310px, so the photo is framed the same on every screen size.
+    final heroVisible = (MediaQuery.sizeOf(context).width / 1.22)
+        .clamp(220.0, MediaQuery.sizeOf(context).height * 0.5);
     final bodyColor =
         isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
     final mutedTextColor =
@@ -360,7 +345,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             top: 0,
             left: 0,
             right: 0,
-            height: 360,
+            height: heroVisible + 50, // 50 sits under the curved sheet
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -422,7 +407,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             ),
           ),
 
-          // 2. Frosted Header Action Bar (Top Floating Controls with Way2News Category & Desk)
+          // 2. Frosted Header Action Bar (Top Floating Controls with Category & Desk)
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 14,
@@ -455,7 +440,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 ),
                 const SizedBox(width: 10),
 
-                // Category & Desk Title (Way2News style)
+                // Category & Desk Title (Vaaradhi style)
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,49 +479,30 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                 ),
 
-                // Actions (Bookmark & Share)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (!_isUgc)
-                      AnimatedBuilder(
-                        animation: AppState.instance,
-                        builder: (context, _) {
-                          final targetId =
-                              article.id.isNotEmpty ? article.id : article.slug;
-                          // Backend saved-state first, local set as the
-                          // optimistic overlay — matching how isLiked is
-                          // read. Reading only the set meant a bookmark from
-                          // an earlier session never showed here.
-                          final isBookmarked = article.isBookmarked ||
-                              AppState.instance.isBookmarked(targetId);
-                          return GestureDetector(
-                            onTap: _toggleBookmark,
-                            child: Container(
-                              width: 40,
-                              height: 40,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                color: isBookmarked
-                                    ? AppColors.primary
-                                    : Colors.black.withValues(alpha: 0.45),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.2),
-                                    width: 1),
-                              ),
-                              child: Icon(
-                                isBookmarked
-                                    ? Icons.bookmark_rounded
-                                    : Icons.bookmark_border_rounded,
-                                color: Colors.white,
-                                size: 19,
-                              ),
-                            ),
-                          );
-                        },
+                // More (⋮): Report Story + Bookmark — the same sheet as
+                // Spotlight, for every story (desk or citizen).
+                Semantics(
+                  button: true,
+                  label: AppState.instance.language == 'Telugu'
+                      ? 'మరిన్ని ఎంపికలు'
+                      : 'More options',
+                  child: GestureDetector(
+                    key: const Key('detail_more_btn'),
+                    onTap: _showMoreSheet,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            width: 1),
                       ),
-],
+                      child: const Icon(Icons.more_vert_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -544,7 +510,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
           // 3. Overlapping Curved Sheet Article Body (Bottom Section)
           Positioned.fill(
-            top: 310, // Overlaps top hero image
+            top: heroVisible, // Overlaps top hero image
             child: Container(
               decoration: BoxDecoration(
                 color: cardBgColor,
@@ -760,49 +726,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
                       const SizedBox(height: 16),
 
-                      if (_isUgc) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? AppColors.surfaceElevatedDark
-                                : const Color(0xFFF3F4F6),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                                color: isDark
-                                    ? AppColors.borderDark
-                                    : const Color(0xFFE5E7EB),
-                                width: 0.8),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.campaign_outlined,
-                                      color: AppColors.primary, size: 22),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    tr('citizen_report'),
-                                    style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700),
-                                  ),
-                                ],
-                              ),
-                              TextButton.icon(
-                                onPressed: _showUgcReportSheet,
-                                icon: const Icon(Icons.flag_outlined,
-                                    size: 18),
-                                label: Text(tr('report')),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-
                       // Article Content Body
                       if (_isLoadingDetail && article.body.isEmpty)
                         const Padding(
@@ -837,8 +760,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                                     article.summary,
                                     style: GoogleFonts.notoSansTelugu(
                                       fontSize: AppState.instance.readingFontSize > 0
-                                          ? (AppState.instance.readingFontSize * (16.0 / 19.0))
-                                          : 16.0,
+                                          ? (AppState.instance.readingFontSize * (18.5 / 19.0))
+                                          : 18.5,
                                       height: 1.65,
                                       letterSpacing: 0.2,
                                       color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),
@@ -852,7 +775,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       else
                         AnimatedBuilder(
                           animation: AppState.instance,
-                          builder: (context, _) => _buildWay2NewsBodyText(
+                          builder: (context, _) => _buildArticleBodyText(
                             article.body.isNotEmpty
                                 ? article.body
                                 : (article.summary.isNotEmpty
@@ -862,14 +785,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                           ),
                         ),
 
-                      if (!_isUgc) ...[
-                        _buildReactionSection(isDark),
-                        const SizedBox(height: 16),
-                      ],
+                      // Every story carries the same engagement bar and ad.
+                      _buildReactionSection(isDark),
+                      const SizedBox(height: 16),
 
-                      // Ad slot runs for UGC too. It was inside the !_isUgc
-                      // block, so community posts never carried one — the
-                      // reaction bar and the ad are unrelated decisions.
                       const BannerAdSlot(placementZone: 'article'),
                       const SizedBox(height: 32),
                       const SizedBox(height: 40),
@@ -907,7 +826,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 AppState.instance.isDisliked(article.id));
 
         final cardBg = isDark ? AppColors.surfaceElevatedDark : const Color(0xFFF3F4F6);
-        final activeColor = AppColors.primary;
+        const activeColor = AppColors.primary;
         final inactiveColor =
             isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280);
 
@@ -1104,7 +1023,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     );
   }
 
-  Widget _buildWay2NewsBodyText(String text, Color bodyColor) {
+  Widget _buildArticleBodyText(String text, Color bodyColor) {
     if (text.isEmpty) {
       return Text(
         tr('no_content'),
@@ -1139,8 +1058,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
 
     final effectiveFontSize = AppState.instance.readingFontSize > 0
-        ? (AppState.instance.readingFontSize * (16.0 / 19.0))
-        : 16.0;
+        ? (AppState.instance.readingFontSize * (18.5 / 19.0))
+        : 18.5; // larger for easy reading (was 16)
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final paragraphStyle = GoogleFonts.notoSansTelugu(

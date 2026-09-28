@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/main.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/main.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class WidgetTestMockAdapter implements HttpClientAdapter {
   @override
@@ -67,7 +67,7 @@ void main() {
 
   testWidgets('App smoke test - boots and renders MaterialApp',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const Way2NewsCloneApp());
+    await tester.pumpWidget(const VaaradhiApp());
     expect(find.byType(MaterialApp), findsOneWidget);
     // Complete splash screen delay and transition
     await tester.pump(const Duration(milliseconds: 1800));

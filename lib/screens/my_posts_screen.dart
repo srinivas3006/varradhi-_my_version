@@ -5,6 +5,7 @@ import '../models/reporter_post.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import 'submission_status_screen.dart';
 
 class MyPostsScreen extends StatefulWidget {
   const MyPostsScreen({super.key});
@@ -239,7 +240,21 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
                           final post = displayPosts[index];
-                          return Container(
+                          // Tap → backend status, next action, review note.
+                          return GestureDetector(
+                            key: ValueKey('my_post_${post.id}'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: post.id.isEmpty
+                                ? null
+                                : () => Navigator.of(context)
+                                    .push(MaterialPageRoute(
+                                      builder: (_) => SubmissionStatusScreen(
+                                        submissionId: post.id,
+                                        initialTitle: post.caption,
+                                      ),
+                                    ))
+                                    .then((_) => _fetchSubmissions()),
+                            child: Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               color: Theme.of(context).brightness == Brightness.dark
@@ -353,6 +368,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                                   ),
                                 ),
                               ],
+                            ),
                             ),
                           );
                         },

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
@@ -80,6 +81,16 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
         foregroundColor: textColor,
         elevation: 0,
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.open_in_browser_rounded),
+            tooltip: 'View on Web',
+            onPressed: () => launchUrl(
+              Uri.parse('https://vaaradhinews.com/privacy-policy'),
+              mode: LaunchMode.externalApplication,
+            ),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadPolicy,

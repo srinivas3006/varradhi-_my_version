@@ -13,9 +13,10 @@
         android:maxSdkVersion="29" />
 
 <application
-        android:label="VARADHI"
+        android:label="VAARADHI"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="true">
         <activity
@@ -61,8 +62,10 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <!-- Only the apex host. On Android 11 and below, one host
+                     failing verification unverifies every host in every
+                     autoVerify filter, and www serves no assetlinks.json. -->
                 <data android:scheme="https" android:host="vaaradhinews.com" />
-                <data android:scheme="https" android:host="www.vaaradhinews.com" />
                 <data android:pathPrefix="/article/" />
                 <data android:pathPrefix="/poster/" />
                 <data android:pathPrefix="/poll/" />

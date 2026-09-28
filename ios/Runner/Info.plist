@@ -70,5 +70,17 @@
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Vaaradhi saves the news posters you download to your photo library.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- Firebase Phone Auth reCAPTCHA fallback: the encoded GOOGLE_APP_ID. -->
+				<string>app-1-730020121705-ios-6c0f54662ae211c3e626f8</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

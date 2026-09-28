@@ -5,9 +5,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/services/api_service.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/services/api_service.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {
   _Adapter(this.handler);

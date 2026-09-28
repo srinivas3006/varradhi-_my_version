@@ -69,5 +69,22 @@ class AppNotification {
       isRead: json['is_read'] == true,
     );
   }
+
+  /// Round-trips through [AppNotification.fromJson]; used for the on-device
+  /// inbox that keeps received pushes (guests included).
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        if (notificationId != null) 'notification_id': notificationId,
+        'title': title,
+        'body': message,
+        'created_at': timestamp.toIso8601String(),
+        if (notificationType != null) 'notification_type': notificationType,
+        if (contentType != null) 'content_type': contentType,
+        if (contentId != null) 'content_id': contentId,
+        if (contentSlug != null) 'content_slug': contentSlug,
+        if (imageUrl != null) 'image_url': imageUrl,
+        if (deepLink != null) 'deep_link': deepLink,
+        'is_read': isRead,
+      };
 }
 

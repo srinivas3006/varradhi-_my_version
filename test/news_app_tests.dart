@@ -3,11 +3,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/network/api_response.dart';
-import 'package:way2news_clone/core/network/dio_client.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/repositories/news_article_repository.dart';
-import 'package:way2news_clone/widgets/news_feed_card.dart';
+import 'package:vaaradhi/core/network/api_response.dart';
+import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/repositories/news_article_repository.dart';
+import 'package:vaaradhi/widgets/news_feed_card.dart';
 
 class TestMockAdapter implements HttpClientAdapter {
   final Future<ResponseBody> Function(RequestOptions options) handler;

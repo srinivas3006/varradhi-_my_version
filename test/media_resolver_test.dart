@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/media/media_resolver.dart';
-import 'package:way2news_clone/core/media/media_source.dart';
-import 'package:way2news_clone/models/video_item.dart';
+import 'package:vaaradhi/core/media/media_resolver.dart';
+import 'package:vaaradhi/core/media/media_source.dart';
+import 'package:vaaradhi/models/video_item.dart';
 
 void main() {
   group('MediaResolver Tests', () {

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
 
 Map<String, dynamic> _poster(String id, List<String> urls) => {
       'id': id,

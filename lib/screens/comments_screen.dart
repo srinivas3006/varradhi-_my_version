@@ -48,10 +48,50 @@ class _CommentsScreenState extends State<CommentsScreen> {
   bool _isPosting = false;
   List<Comment> _comments = [];
 
+  /// Citizen posts have no comment API yet (handover §17.4). Article comment
+  /// endpoints must never receive a UGC id, so nothing is fetched or posted.
+  bool get _commentsUnavailable => widget.article.isUgc;
+
   @override
   void initState() {
     super.initState();
+    if (_commentsUnavailable) {
+      _isLoading = false;
+      return;
+    }
     _fetchComments();
+  }
+
+  Widget _buildCommentsUnavailable(BuildContext context) {
+    final telugu = AppState.instance.language == 'Telugu';
+    final body = Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.forum_outlined, size: 48, color: Colors.grey),
+            const SizedBox(height: 12),
+            Text(
+              telugu
+                  ? 'పౌర వార్తలపై కామెంట్లు త్వరలో అందుబాటులోకి వస్తాయి.'
+                  : 'Comments on citizen posts are coming soon.',
+              key: const Key('ugc_comments_unavailable'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (widget.sheetMode) {
+      return Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: body,
+      );
+    }
+    return Scaffold(appBar: AppBar(), body: body);
   }
 
   Future<void> _fetchComments() async {
@@ -59,9 +99,18 @@ class _CommentsScreenState extends State<CommentsScreen> {
     try {
       final fetched = await ApiService.instance.getComments(widget.article.id);
       if (mounted) {
+        final appState = AppState.instance;
+        final filtered = fetched.where((c) =>
+            !appState.isUserBlocked(c.authorId) &&
+            !appState.isUserBlocked(c.username)).toList();
+        for (final c in filtered) {
+          c.replies.removeWhere((r) =>
+              appState.isUserBlocked(r.authorId) ||
+              appState.isUserBlocked(r.username));
+        }
         setState(() {
-          if (fetched.isNotEmpty) {
-            _comments = fetched;
+          if (filtered.isNotEmpty) {
+            _comments = filtered;
           } else {
             // Fall back to any locally cached demo comments for this article if none returned yet
             _comments = AppState.instance.getComments(widget.article.id);
@@ -262,11 +311,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                             fontWeight: FontWeight.w600)),
                     onTap: () {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                            content:
-                                Text('${comment.username} ${tr('blocked')}')),
-                      );
+                      _confirmBlockUser(comment);
                     },
                   ),
                 ],
@@ -276,6 +321,57 @@ class _CommentsScreenState extends State<CommentsScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _confirmBlockUser(Comment comment) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${tr('block_user')} ${comment.username}?'),
+        content: Text(tr('block_user_confirm')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('cancel')),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final authorId = comment.authorId;
+              if (authorId != null && authorId.isNotEmpty) {
+                await AppState.instance.blockUser(authorId);
+              }
+              if (comment.username.isNotEmpty) {
+                await AppState.instance.blockUser(comment.username);
+              }
+              if (!mounted) return;
+              setState(() {
+                _comments.removeWhere((c) =>
+                    AppState.instance.isUserBlocked(c.authorId) ||
+                    AppState.instance.isUserBlocked(c.username));
+                for (final c in _comments) {
+                  c.replies.removeWhere((r) =>
+                      AppState.instance.isUserBlocked(r.authorId) ||
+                      AppState.instance.isUserBlocked(r.username));
+                }
+              });
+              AppState.instance.setComments(widget.article.id, _comments);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${comment.username} ${tr('blocked')}'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: Text(tr('block_user')),
+          ),
+        ],
+      ),
     );
   }
 
@@ -668,6 +764,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_commentsUnavailable) return _buildCommentsUnavailable(context);
     final body = Column(
         children: [
           Expanded(

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/ads/ad_event_queue.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/widgets/ads/sponsored_spotlight_ad_card.dart';
+import 'package:vaaradhi/core/ads/ad_event_queue.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/widgets/ads/sponsored_spotlight_ad_card.dart';
 
 AdBanner _ad({String image = 'https://cdn.example.com/creative.jpg'}) =>
     AdBanner.fromJson({

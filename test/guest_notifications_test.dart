@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/navigation/notification_deep_link_resolver.dart';
-import 'package:way2news_clone/models/notification_target.dart';
+import 'package:vaaradhi/core/navigation/notification_deep_link_resolver.dart';
+import 'package:vaaradhi/models/notification_target.dart';
 
 void main() {
   group('a tap resolves from the payload, not to Home', () {
@@ -14,17 +14,18 @@ void main() {
       test('an article keyed by "$key" resolves to the article', () {
         final t = NotificationDeepLinkResolver.resolveFromPayload({
           key: 'article',
-          'content_id': '42',
+          'content_slug': 'story-42',
         });
         expect(t.type, NotificationTargetType.article);
-        expect(t.identifier, '42');
+        expect(t.identifier, 'story-42');
       });
     }
 
-    test('a video payload opens the story that carries it', () {
+    test('a video payload opens the Reels viewer', () {
       final t = NotificationDeepLinkResolver.resolveFromPayload(
           {'type': 'video', 'content_id': '7'});
-      expect(t.type, NotificationTargetType.article);
+      expect(t.type, NotificationTargetType.video);
+      expect(t.identifier, '7');
     });
 
     test('ugc keeps its own destination rather than becoming an article', () {
@@ -34,11 +35,29 @@ void main() {
       expect(t.requiresAuth, isFalse);
     });
 
-    test('content_id, article_id and slug are all accepted', () {
+    test('articles open by slug; an id alone is not a detail address', () {
+      // GET /api/v1/articles/{id}/ is a 404 — detail takes the slug only.
+      for (final key in ['content_id', 'article_id']) {
+        expect(
+          NotificationDeepLinkResolver.resolveFromPayload(
+              {'type': 'news', key: '9'}).type,
+          isNot(NotificationTargetType.article),
+          reason: '$key must not be used as a slug',
+        );
+      }
+      expect(
+        NotificationDeepLinkResolver.resolveFromPayload({
+          'content_type': 'article',
+          'content_id': 'uuid-9',
+          'deep_link': '/article/from-link',
+        }).identifier,
+        'from-link',
+        reason: 'no content_slug: the deep_link slug is used, not the id',
+      );
       expect(
         NotificationDeepLinkResolver.resolveFromPayload(
-            {'type': 'news', 'article_id': '9'}).identifier,
-        '9',
+            {'type': 'news', 'slug': 's-9'}).identifier,
+        's-9',
       );
       expect(
         NotificationDeepLinkResolver.resolveFromPayload(
@@ -63,17 +82,18 @@ void main() {
 
     test('a nested data payload is unwrapped', () {
       final t = NotificationDeepLinkResolver.resolveFromPayload({
-        'data': {'type': 'article', 'content_id': '11'},
+        'data': {'type': 'article', 'content_slug': 'story-11'},
       });
       expect(t.type, NotificationTargetType.article);
-      expect(t.identifier, '11');
+      expect(t.identifier, 'story-11');
     });
   });
 
   group('guest article destinations do not demand login', () {
     test('an article target is publicly reachable', () {
       final t = NotificationDeepLinkResolver.resolveFromPayload(
-          {'type': 'article', 'content_id': '42'});
+          {'type': 'article', 'content_slug': 'a-42'});
+      expect(t.type, NotificationTargetType.article);
       expect(t.requiresAuth, isFalse,
           reason: 'a guest tapping a news notification must reach the story');
     });

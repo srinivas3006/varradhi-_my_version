@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../localization/app_translations.dart';
 import '../models/account_deletion_request.dart';
 import '../core/errors/app_exception.dart';
@@ -326,6 +327,16 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         ),
         centerTitle: false,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.open_in_browser_rounded),
+            tooltip: 'Web Deletion Portal',
+            onPressed: () => launchUrl(
+              Uri.parse('https://vaaradhinews.com/delete-account'),
+              mode: LaunchMode.externalApplication,
+            ),
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

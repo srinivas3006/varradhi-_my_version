@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/news_article.dart';
+import 'package:vaaradhi/models/news_article.dart';
 
 /// The shape the live feed actually returns, verified against
 /// GET /api/v1/articles/feed/ — singular *_count names, my_reaction,

@@ -5,9 +5,11 @@ import '../core/navigation/auth_guard.dart';
 import '../controllers/ugc_controller.dart';
 import '../models/reporter_post.dart';
 import '../models/ugc_draft.dart';
+import '../core/utils/indian_mobile.dart';
 import '../theme/app_theme.dart';
-import '../services/api_service.dart';
 import '../state/app_state.dart';
+import 'ugc_phone_verify_screen.dart';
+import 'submission_status_screen.dart';
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
@@ -20,7 +22,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   late final UgcController _controller;
   final _titleController = TextEditingController();
   final _captionController = TextEditingController();
-  final _otpController = TextEditingController();
+  bool _verificationOpen = false;
+  UgcUploadStatus _lastStatus = UgcUploadStatus.idle;
 
   static const _categories = [
     'Local',
@@ -45,6 +48,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     super.initState();
     _controller = UgcController();
     _controller.addListener(_onControllerStateChanged);
+    _gate = _currentGate;
+    AppState.instance.addListener(_onAppStateChanged);
 
     _titleController.addListener(() {
       _controller.setTitle(_titleController.text);
@@ -64,9 +69,41 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     });
   }
 
+  /// Which of the three screens [build] shows: login, join, or the form.
+  (bool, bool) get _currentGate => (
+        AppState.instance.isLoggedIn,
+        AppState.instance.hasJoinedAsReporter,
+      );
+  late (bool, bool) _gate;
+
+  /// Rebuilds only when that choice changes — e.g. the reporter check on
+  /// login finishes after this tab is already open — not on every AppState
+  /// notification.
+  void _onAppStateChanged() {
+    final next = _currentGate;
+    if (next == _gate || !mounted) return;
+    setState(() => _gate = next);
+  }
+
   void _onControllerStateChanged() {
     if (!mounted) return;
     setState(() {});
+
+    // React to transitions only: the listener also fires on every keystroke.
+    final previous = _lastStatus;
+    _lastStatus = _controller.status;
+    if (previous == _controller.status) return;
+
+    if (_controller.status == UgcUploadStatus.verificationRequired &&
+        !_verificationOpen) {
+      // Backend rejected the cached mobile (or none is cached): verify, then
+      // retry the same submission — the draft and submissionId are kept.
+      final notice = _controller.errorMessage;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _verifyThenSubmit(notice: notice);
+      });
+      return;
+    }
 
     if (_controller.status == UgcUploadStatus.completed) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,9 +113,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+      final submissionId = _controller.lastCompletedSubmissionId;
+      final title = _titleController.text.trim();
       _titleController.clear();
       _captionController.clear();
-      if (!(ModalRoute.of(context)?.isFirst ?? true)) {
+      // Media processes asynchronously (handover §9): open the status screen,
+      // which polls until upload_status is READY or FAILED.
+      if (submissionId != null && submissionId.isNotEmpty) {
+        final route = MaterialPageRoute(
+          builder: (_) => SubmissionStatusScreen(
+              submissionId: submissionId, initialTitle: title),
+        );
+        if (!(ModalRoute.of(context)?.isFirst ?? true)) {
+          Navigator.of(context).pushReplacement(route);
+        } else {
+          Navigator.of(context).push(route);
+        }
+      } else if (!(ModalRoute.of(context)?.isFirst ?? true)) {
         Navigator.of(context).pop();
       }
     }
@@ -140,12 +191,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return;
     }
 
-    if (!AppState.instance.uploadVerified) {
-      _showOtpSheet();
-      return;
-    }
+    _verifyThenSubmit();
+  }
 
-    _controller.submitNews();
+  /// Local cache says unverified → verify first. The backend still has the
+  /// final word: if submit answers "Mobile number is not verified." the
+  /// controller flips to [UgcUploadStatus.verificationRequired] and
+  /// [_onControllerStateChanged] reopens verification and retries.
+  Future<void> _verifyThenSubmit({String? notice}) async {
+    if (!AppState.instance.uploadVerified) {
+      final verified = await _openVerification(notice: notice);
+      if (verified == null || !mounted) return;
+    }
+    if (!mounted) return;
+    await _controller.submitNews(context);
+  }
+
+  Future<String?> _openVerification({String? notice}) async {
+    if (_verificationOpen) return null;
+    _verificationOpen = true;
+    try {
+      return await UgcPhoneVerifyScreen.open(context, notice: notice);
+    } finally {
+      _verificationOpen = false;
+    }
   }
 
   void _showMediaPickerSheet() {
@@ -245,312 +314,92 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
-  void _showOtpSheet() async {
-    _otpController.clear();
-    Timer? sheetTimer;
-
-    final phone = AppState.instance.userPhone.isNotEmpty
-        ? AppState.instance.userPhone
-        : '9876543210';
-    try {
-      await ApiService.instance.sendOtp(phone);
-    } catch (_) {
-      // Ignored
-    }
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        int resendSeconds = 24;
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            bool sheetSubmitting = false;
-            String? sheetError;
-
-            void startTimer() {
-              sheetTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-                if (resendSeconds > 0) {
-                  setSheetState(() => resendSeconds--);
-                } else {
-                  t.cancel();
-                }
-              });
-            }
-
-            if (sheetTimer == null) {
-              startTimer();
-            }
-
-            void verifyOtp() async {
-              final otpCode = _otpController.text.trim();
-              if (otpCode.length < 4 || otpCode.length > 6) {
-                setSheetState(
-                    () => sheetError = 'దయచేసి సరైన OTP కోడ్‌ను నమోదు చేయండి.');
-                return;
-              }
-              setSheetState(() => sheetSubmitting = true);
-
-              try {
-                final success =
-                    await ApiService.instance.verifyOtp(phone, otpCode);
-                setSheetState(() => sheetSubmitting = false);
-
-                if (!success) {
-                  setSheetState(() => sheetError = 'తప్పుడు OTP కోడ్.');
-                  return;
-                }
-
-                AppState.instance.markUploadVerified();
-                if (context.mounted) Navigator.pop(context);
-                _controller.submitNews();
-              } catch (e) {
-                setSheetState(() {
-                  sheetSubmitting = false;
-                  sheetError = 'ధృవీకరణ విఫలమైంది. మళ్లీ ప్రయత్నించండి.';
-                });
-              }
-            }
-
-            final isDark = Theme.of(context).brightness == Brightness.dark;
-            final sheetColor = Theme.of(context).cardColor;
-            final safeBottom = MediaQuery.of(context).padding.bottom;
-            final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                  bottom: keyboardHeight > 0 ? keyboardHeight : safeBottom),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 26),
-                decoration: BoxDecoration(
-                  color: sheetColor,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(22)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color:
-                            isDark ? Colors.white24 : const Color(0xFFE1E3E9),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      margin: const EdgeInsets.only(bottom: 20),
-                    ),
-                    const Text(
-                      'వార్తలు పంపడానికి మీ మొబైల్ ధృవీకరించండి',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'మొదటి పోస్ట్ కోసం ఒకసారి మాత్రమే ధృవీకరణ అవసరం. ఆ తర్వాత నేరుగా పోస్ట్ చేయవచ్చు.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                          height: 1.5),
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                            color: isDark
-                                ? Colors.white24
-                                : const Color(0xFFE7E9EE),
-                            width: 1.5),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          const Text('IN +91',
-                              style: TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500)),
-                          const SizedBox(width: 12),
-                          Text(
-                              AppState.instance.userPhone.isNotEmpty
-                                  ? AppState.instance.userPhone
-                                  : '98xxxxxx21',
-                              style: TextStyle(
-                                  color: Theme.of(context)
-                                      .textTheme
-                                      .bodyLarge
-                                      ?.color,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _otpController,
-                      keyboardType: TextInputType.number,
-                      maxLength: 6,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 22,
-                          letterSpacing: 12,
-                          fontWeight: FontWeight.w700),
-                      decoration: InputDecoration(
-                        counterText: '',
-                        hintText: '••••••',
-                        filled: true,
-                        fillColor: isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.black.withValues(alpha: 0.02),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.white24
-                                  : const Color(0xFFE7E9EE),
-                              width: 1.5),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.white24
-                                  : const Color(0xFFE7E9EE),
-                              width: 1.5),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(
-                              color: AppColors.primary, width: 1.5),
-                        ),
-                      ),
-                    ),
-                    if (sheetError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(sheetError!,
-                          style:
-                              const TextStyle(color: Colors.red, fontSize: 12)),
-                    ],
-                    const SizedBox(height: 16),
-                    Text.rich(
-                      TextSpan(
-                        text: resendSeconds > 0
-                            ? 'మళ్లీ కోడ్ పంపడానికి సమయం: '
-                            : 'కోడ్ రాలేదా? ',
-                        children: [
-                          if (resendSeconds > 0)
-                            TextSpan(
-                                text:
-                                    '0:${resendSeconds.toString().padLeft(2, '0')}',
-                                style: const TextStyle(
-                                    color: AppColors.primary,
-                                    fontWeight: FontWeight.bold))
-                          else
-                            const TextSpan(
-                                text: 'మళ్లీ పంపండి',
-                                style: TextStyle(
-                                    color: AppColors.primary,
-                                    fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      style: const TextStyle(
-                          fontSize: 11, color: AppColors.textMuted),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14)),
-                          elevation: 0,
-                        ),
-                        onPressed: sheetSubmitting ? null : verifyOtp,
-                        child: sheetSubmitting
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Text('ధృవీకరించి వార్తను పంపండి',
-                                style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    ).then((_) {
-      sheetTimer?.cancel();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     if (!AppState.instance.isLoggedIn) {
       return _buildLoginRequired();
     }
-    if (!AppState.instance.isReporter) {
+    if (!AppState.instance.hasJoinedAsReporter) {
       return _buildReporterOnboarding();
     }
     return _buildUploadForm();
   }
 
+  /// True when this screen was pushed as a route. As the Post tab it is
+  /// part of Home, and a close button there would pop Home itself.
+  bool get _isSecondaryRoute => !(ModalRoute.of(context)?.isFirst ?? true);
+
+  /// Shown only when there is a route to close.
+  AppBar _plainAppBar() => AppBar(
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        leading: _isSecondaryRoute
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.maybePop(context),
+              )
+            : null,
+      );
+
   Widget _buildLoginRequired() {
+    final telugu = AppState.instance.language == 'Telugu';
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.maybePop(context),
-        ),
-      ),
+      appBar: _plainAppBar(),
       body: SafeArea(
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 48,
-                  color: AppColors.primary.withValues(alpha: 0.9),
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.edit_note_rounded,
+                      size: 52, color: AppColors.primary),
                 ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Login required',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Please login to post village news.',
+                const SizedBox(height: 24),
+                Text(
+                  telugu ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి' : 'Log in to post news',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.textMuted),
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.w800, height: 1.3),
                 ),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  onPressed: () => requireAuth(context, () {
-                    if (mounted) setState(() {});
-                  }),
-                  icon: const Icon(Icons.login_rounded),
-                  label: const Text('Login'),
+                const SizedBox(height: 10),
+                Text(
+                  telugu
+                      ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
+                      : 'Share what is happening in your village and mandal.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 14.5, color: AppColors.textMuted, height: 1.5),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    onPressed: () => requireAuth(context, () {
+                      if (mounted) setState(() {});
+                    }),
+                    icon: const Icon(Icons.login_rounded, size: 20),
+                    label: Text(telugu ? 'లాగిన్' : 'Log in',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
                 ),
               ],
             ),
@@ -560,23 +409,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  /// Which mobile the post will be sent under. Read-only: the UGC mobile is
+  /// bound once per account and the backend has no change-mobile flow.
+  Widget _buildVerifiedMobileRow() {
+    final verified = AppState.instance.uploadVerified;
+    final color = verified ? Colors.green.shade700 : AppColors.textMuted;
+    return Row(
+      children: [
+        Icon(verified ? Icons.verified_rounded : Icons.phone_android_rounded,
+            size: 18, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            verified
+                ? 'ధృవీకరించిన మొబైల్: +91 ${IndianMobile.format(AppState.instance.ugcVerifiedMobile)}'
+                : 'మొదటి పోస్ట్‌కు ముందు ఒకసారి మొబైల్ ధృవీకరణ అవసరం',
+            style: TextStyle(
+                fontSize: 12.5, fontWeight: FontWeight.w600, color: color),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildReporterOnboarding() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.transparent,
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
+      appBar: _plainAppBar(),
       body: SafeArea(
-        child: Padding(
+        child: Center(
+          child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
@@ -666,7 +532,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
+              const SizedBox(height: 24),
             ],
+          ),
           ),
         ),
       ),
@@ -720,9 +588,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     fontWeight: FontWeight.normal)),
           ],
         ),
-        titleSpacing: 0,
+        // As a tab there is no back button, and 0 left the title touching
+        // the screen edge; line it up with the form's 20px gutter instead.
+        titleSpacing: isSecondaryRoute ? 0 : 20,
         centerTitle: false,
         elevation: 0,
+        // A hairline once the form scrolls under the header, so cards do
+        // not look cut off against a same-colour bar.
+        scrolledUnderElevation: 0.6,
+        shadowColor: isDark ? Colors.black : Colors.black26,
+        surfaceTintColor: Colors.transparent,
         backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
       ),
       body: SafeArea(
@@ -1008,7 +883,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     if (!AppState.instance.hasValidLocation) ...[
                       const SizedBox(width: 6),
                       GestureDetector(
-                        onTap: () => _controller.ensureLocationAvailable(),
+                        onTap: () =>
+                            _controller.ensureLocationAvailable(context),
                         child: const Icon(Icons.refresh,
                             size: 14, color: AppColors.primary),
                       ),
@@ -1232,7 +1108,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ],
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
+              _buildVerifiedMobileRow(),
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 height: 52,
@@ -1240,12 +1118,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        AppColors.primary.withValues(alpha: 0.4),
+                    disabledForegroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                     elevation: 8,
                     shadowColor: AppColors.primary.withValues(alpha: 0.4),
                   ),
-                  onPressed: _controller.isSubmittingOrUploading
+                  onPressed: _controller.isSubmittingOrUploading ||
+                          _controller.isUploadRestricted
                       ? null
                       : _onSubmitPressed,
                   child: _controller.isSubmittingOrUploading
@@ -1255,10 +1137,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
                       : Text(
-                          _controller.submissionId != null &&
-                                  _controller.status == UgcUploadStatus.failed
-                              ? 'మీడియా అప్‌లోడ్ మళ్లీ ప్రయత్నించండి'
-                              : 'సమీక్ష కోసం సమర్పించండి',
+                          AppState.instance.isUgcUploaderBlocked
+                              ? 'అప్‌లోడ్ నిలిపివేయబడింది'
+                              : AppState.instance.isUgcDailyLimitActive
+                                  ? 'రేపు మళ్లీ పోస్ట్ చేయండి'
+                                  : _controller.submissionId != null &&
+                                          _controller.status ==
+                                              UgcUploadStatus.failed
+                                      ? 'మీడియా అప్‌లోడ్ మళ్లీ ప్రయత్నించండి'
+                                      : AppState.instance.uploadVerified
+                                          ? 'సమీక్ష కోసం సమర్పించండి'
+                                          : 'మొబైల్ ధృవీకరించి సమర్పించండి',
                           style: const TextStyle(
                               fontSize: 14, fontWeight: FontWeight.w700),
                         ),
@@ -1335,10 +1224,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerStateChanged);
+    AppState.instance.removeListener(_onAppStateChanged);
     _controller.dispose();
     _titleController.dispose();
     _captionController.dispose();
-    _otpController.dispose();
     super.dispose();
   }
 }

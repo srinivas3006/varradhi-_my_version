@@ -9,7 +9,6 @@ import '../models/location_model.dart';
 import '../core/utils/location_detector.dart';
 import '../providers/location_provider.dart';
 import '../repositories/location_repository.dart';
-import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
 class LocationSelectionScreen extends StatelessWidget {

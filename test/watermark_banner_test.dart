@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/widgets/watermark/watermark_banner.dart';
+import 'package:vaaradhi/widgets/watermark/watermark_banner.dart';
 
 void main() {
   group('the banner is one widget, defined once', () {
@@ -19,8 +19,8 @@ void main() {
       await tester.pumpWidget(
           const MaterialApp(home: Scaffold(body: WatermarkBanner())));
       final ar = tester.widget<AspectRatio>(find.byType(AspectRatio));
-      // 1162x215 — laid out at its own shape rather than squeezed.
-      expect(ar.aspectRatio, closeTo(1162 / 215, 0.001));
+      // 1600x296 — laid out at its own shape rather than squeezed.
+      expect(ar.aspectRatio, closeTo(1600 / 296, 0.001));
     });
 
     testWidgets('a fixed height wins when supplied', (tester) async {
@@ -39,14 +39,19 @@ void main() {
   });
 
   group('it sits between the media and the story', () {
-    test('on the spotlight card', () {
+    test('on the spotlight card, the mark is overlaid on the media', () {
+      // The card carries a faint rotated wordmark instead of the band, so it
+      // must land in the media slot. (The logo avatar was removed to keep
+      // the photo clean.)
       final src = File('lib/widgets/spotlight/spotlight_news_card.dart')
           .readAsStringSync();
-      final banner = src.indexOf('WatermarkBanner(');
-      expect(banner, greaterThan(src.indexOf('height: mediaHeight')),
-          reason: 'after the media slot');
-      expect(banner, lessThan(src.indexOf('article.title')),
-          reason: 'before the headline');
+      final media = src.indexOf('height: mediaHeight');
+      final title = src.indexOf('article.title');
+      for (final mark in ["'VAARADHI'"]) {
+        final at = src.indexOf(mark);
+        expect(at, greaterThan(media), reason: '$mark after the media slot');
+        expect(at, lessThan(title), reason: '$mark before the headline');
+      }
     });
 
     test('on the article detail screen', () {
@@ -80,8 +85,11 @@ void main() {
       });
     }
 
-    test('the spotlight card has one banner, not several', () {
-      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[0])).length, 1);
+    test('the spotlight card has one wordmark, no logo, no band', () {
+      final card = code(bannerSurfaces[0]);
+      expect("'VAARADHI'".allMatches(card).length, 1);
+      expect(card, isNot(contains('logo.png')));
+      expect(card, isNot(contains('WatermarkBanner(')));
     });
 
     test('the detail screen has one banner', () {
@@ -94,10 +102,13 @@ void main() {
       expect(overlay, isNot(contains('WatermarkBanner(')));
     });
 
-    test('each generated card carries a single banner', () {
+    test('each generated image carries a single banner', () {
       final share = code('lib/utils/share_service.dart');
-      // Three cards: share preview, download, and the black video card.
-      expect('WatermarkBanner('.allMatches(share).length, 3);
+      // The photo image paints the banner asset straight onto its canvas;
+      // only the black no-image fallback card lays out the widget.
+      expect("'assets/images/watermark_banner.png'".allMatches(share).length,
+          1);
+      expect('WatermarkBanner('.allMatches(share).length, 1);
       expect(share, isNot(contains('ArticleWatermarkOverlay(')));
     });
   });

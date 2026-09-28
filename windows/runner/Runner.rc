@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "way2news_clone" "\0"
+            VALUE "CompanyName", "com.vaaradhi" "\0"
+            VALUE "FileDescription", "vaaradhi" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "way2news_clone" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "way2news_clone.exe" "\0"
-            VALUE "ProductName", "way2news_clone" "\0"
+            VALUE "InternalName", "vaaradhi" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.vaaradhi. All rights reserved." "\0"
+            VALUE "OriginalFilename", "vaaradhi.exe" "\0"
+            VALUE "ProductName", "vaaradhi" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

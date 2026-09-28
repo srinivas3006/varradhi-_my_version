@@ -14,8 +14,8 @@ enum FeedItemType {
 }
 
 /// Wraps a heterogeneous feed entry (article, ad slot, or poll) so a single
-/// PageView/ListView can render a mixed vertical feed, matching Way2News's
-/// pattern of interleaving native ads and polls between story cards.
+/// PageView/ListView can render a mixed vertical feed, interleaving native ads
+/// and polls between story cards.
 class FeedItem {
   final FeedItemType type;
   final NewsArticle? article;

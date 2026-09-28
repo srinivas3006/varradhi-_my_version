@@ -5,7 +5,6 @@ import '../state/app_state.dart';
 import '../models/app_notification.dart';
 import '../theme/app_theme.dart';
 
-import 'account_login_screen.dart';
 import 'notification_settings_screen.dart';
 import 'notifications_tab.dart';
 import '../services/api_service.dart';
@@ -25,13 +24,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
-    if (AppState.instance.isLoggedIn) {
-      _loadNotifications();
-    }
+    // No login needed: guests get the device inbox plus pushes kept on the
+    // device; logged-in readers get their account inbox as well.
+    _loadNotifications();
   }
 
   Future<void> _loadNotifications() async {
-    if (!AppState.instance.isLoggedIn) return;
     setState(() => _isLoading = true);
     await AppState.instance.fetchNotifications();
     if (mounted) {
@@ -78,7 +76,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             AnimatedBuilder(
               animation: AppState.instance,
               builder: (context, _) {
-                if (AppState.instance.unreadNotificationsCount == 0 || !AppState.instance.isLoggedIn) {
+                if (AppState.instance.unreadNotificationsCount == 0) {
                   return const SizedBox.shrink();
                 }
                 return TextButton(
@@ -107,10 +105,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             AnimatedBuilder(
               animation: AppState.instance,
               builder: (context, _) {
-                if (!AppState.instance.isLoggedIn) {
-                  return _buildLoginRequired(isDark);
-                }
-
                 final notifications = AppState.instance.notifications;
                 
                 if (_isLoading && notifications.isEmpty) {
@@ -147,57 +141,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               },
             ),
             const NotificationsTab(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoginRequired(bool isDark) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.mark_email_unread_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
-            const SizedBox(height: 16),
-            Text(
-              'నోటిఫికేషన్ల కోసం లాగిన్ అవ్వండి',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'తాజా వార్తల అలర్ట్‌లు, సంపాదకీయ సమాచారం మరియు మీ వార్తల స్థితి అప్‌డేట్‌లను పొందడానికి లాగిన్ అవ్వండి.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                );
-                if (AppState.instance.isLoggedIn) {
-                  _loadNotifications();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('లాగిన్ / రిజిస్టర్', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
           ],
         ),
       ),

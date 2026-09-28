@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/live_news.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/screens/news_feed_tab.dart';
+import 'package:vaaradhi/models/live_news.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/screens/news_feed_tab.dart';
 
 void main() {
   group('Hero Breaking and Live Stream Card Tests', () {

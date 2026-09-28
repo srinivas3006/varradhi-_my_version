@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/spotlight_item.dart';
+import 'package:vaaradhi/models/spotlight_item.dart';
 
 void main() {
   group('media is 9:8 from width, not a share of height', () {
@@ -41,39 +41,45 @@ void main() {
   });
 
 
-  group('the media aspect is the same on every device', () {
-    // The old rule asked for 16:10 then clamped to 38-40% of viewport
-    // height, and the clamp won on every phone — the image ran from 1.48:1
-    // on a compact screen to 0.88:1 on a tall one. Same photo, different
-    // crop per device.
-    double mediaHeight(double w, double h) =>
-        (w / (16 / 10)).clamp(0.0, h * 0.45);
+  group('the media is an exact square below the status bar', () {
+    // Mirrors the card: height = width, capped only on a wide/landscape
+    // screen at 62% of the height left under the status band.
+    double mediaHeight(double w, double h, {double statusBar = 24}) =>
+        w.clamp(0.0, (h - statusBar) * 0.62);
 
-    const devices = <String, List<double>>{
+    const phones = <String, List<double>>{
       'compact 360x640': [360, 640],
       'pixel 4a 393x851': [393, 851],
       'pixel 7 412x915': [412, 915],
       'tall 412x1000': [412, 1000],
       'very tall 360x1080': [360, 1080],
-      'tablet 800x1280': [800, 1280],
     };
 
-    devices.forEach((name, size) {
-      test('$name crops at 16:10', () {
-        final h = mediaHeight(size[0], size[1]);
-        expect(size[0] / h, closeTo(1.6, 0.01));
+    phones.forEach((name, size) {
+      test('$name is 1:1', () {
+        expect(mediaHeight(size[0], size[1]), size[0]);
       });
     });
 
     test('a taller screen gets no more image, only more story', () {
-      final short = mediaHeight(412, 915);
-      final tall = mediaHeight(412, 1000);
-      expect(tall, equals(short),
-          reason: 'height follows width, not viewport height');
+      expect(mediaHeight(412, 1000), mediaHeight(412, 915));
     });
 
     test('the cap still stops a wide screen eating the card', () {
-      expect(mediaHeight(2000, 800), lessThanOrEqualTo(800 * 0.45));
+      expect(mediaHeight(2000, 800), lessThanOrEqualTo((800 - 24) * 0.62));
+    });
+
+    final src = File('lib/widgets/spotlight/spotlight_news_card.dart')
+        .readAsStringSync();
+
+    test('the image starts below a black status-bar band', () {
+      expect(src, contains('top: statusBarHeight,'));
+      expect(src, contains('child: const ColoredBox(color: Colors.black)'));
+      expect(src, contains('top: statusBarHeight + mediaHeight'));
+    });
+
+    test('the contact email is no longer shown under the headline', () {
+      expect(src, isNot(contains('vaaradhinewsapp@gmail.com')));
     });
   });
 

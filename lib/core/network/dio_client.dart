@@ -81,9 +81,17 @@ class ApiClient {
               path.contains('/auth/register/') ||
               path.contains('/auth/token/refresh/') ||
               path.contains('/auth/logout/');
+          // verify-firebase-phone answers 401 when the *Firebase* ID token is
+          // bad or from another project. That says nothing about the backend
+          // session, so it must not trigger a refresh or — worse — a logout.
+          final isFirebaseTokenRejection =
+              path.contains('/ugc/verify-firebase-phone/') &&
+                  _isFirebaseTokenMessage(e.response?.data);
           final refreshToken = AppState.instance.refreshToken;
 
-          if (e.response?.statusCode == 401 &&
+          if (isFirebaseTokenRejection) {
+            // fall through to the standard error mapping below
+          } else if (e.response?.statusCode == 401 &&
               !isAuthEndpoint &&
               refreshToken != null &&
               refreshToken.isNotEmpty) {
@@ -302,6 +310,17 @@ class ApiClient {
   }
 
   // --- Exception Mapping Helpers ---
+
+  static bool _isFirebaseTokenMessage(dynamic data) {
+    if (data is! Map) return false;
+    final errors = data['errors'];
+    final message = (errors is Map
+            ? (errors['message'] ?? errors['detail'])
+            : (data['detail'] ?? data['message']))
+        ?.toString()
+        .toLowerCase();
+    return message != null && message.contains('firebase');
+  }
 
   static AppException _unwrapDioException(DioException e) {
     if (e.error is AppException) {

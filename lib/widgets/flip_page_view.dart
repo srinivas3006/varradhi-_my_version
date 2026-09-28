@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 /// A vertical paging view that mimics a "flipping magazine page" transition:
 /// as you swipe up, the current card folds upward around its top edge (like
 /// a page closing away from you) while the next card rises into place from
-/// below. This is the distinctive swipe feel Way2News uses for its news
-/// card feed, as opposed to a flat slide (the default PageView behavior).
+/// below. This provides a distinctive swipe feel for the news card feed.
 class FlipPageView extends StatelessWidget {
   final PageController controller;
   final int itemCount;

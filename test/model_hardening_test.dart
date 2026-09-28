@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/models/category.dart';
-import 'package:way2news_clone/models/news_article.dart';
-import 'package:way2news_clone/models/poll.dart';
-import 'package:way2news_clone/models/unified_feed_item.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/models/category.dart';
+import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/models/poll.dart';
+import 'package:vaaradhi/models/unified_feed_item.dart';
 
 void main() {
   group('NewsArticle Model Hardening Tests', () {

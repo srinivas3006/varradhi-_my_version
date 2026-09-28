@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/core/navigation/app_navigator.dart';
-import 'package:way2news_clone/screens/home_screen.dart';
-import 'package:way2news_clone/screens/news_feed_tab.dart';
-import 'package:way2news_clone/screens/local_news_tab.dart';
-import 'package:way2news_clone/screens/profile_tab.dart';
-import 'package:way2news_clone/screens/video_tab.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/core/navigation/app_navigator.dart';
+import 'package:vaaradhi/screens/home_screen.dart';
+import 'package:vaaradhi/screens/news_feed_tab.dart';
+import 'package:vaaradhi/screens/local_news_tab.dart';
+import 'package:vaaradhi/screens/profile_tab.dart';
+import 'package:vaaradhi/screens/video_tab.dart';
+import 'package:vaaradhi/spotlight/spotlight_screen.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 import 'package:flutter/services.dart';
 
@@ -102,18 +103,25 @@ void main() {
       expect(find.byType(VideoTab), findsNothing);
       expect(find.byType(ProfileTab), findsNothing);
 
-      // Tap on Tab 1 (Local News)
+      // Tap Local News: it opens the Spotlight feed as a route, so no tab
+      // is mounted for it.
       final localNewsTabIcon = find.byIcon(Icons.location_on_rounded);
       expect(localNewsTabIcon, findsOneWidget);
       await tester.tap(localNewsTabIcon);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
 
-      // The local tab must still mount lazily, on demand.
-      expect(find.byType(LocalNewsTab), findsOneWidget);
+      expect(find.byType(SpotlightScreenView), findsOneWidget);
+      expect(find.byType(LocalNewsTab), findsNothing);
 
       // VideoTab and ProfileTab must still be unmounted
       expect(find.byType(VideoTab), findsNothing);
       expect(find.byType(ProfileTab), findsNothing);
+
+      // The push above started AppNavigator's wall-clock debounce; let it
+      // lapse so it doesn't leak into the next test's isNavigating check.
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 400)));
     });
   });
 

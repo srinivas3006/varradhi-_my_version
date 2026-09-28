@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
-import 'package:way2news_clone/models/app_notification.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/models/app_notification.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 void main() {
   final bar = File('lib/screens/news_feed_tab.dart').readAsStringSync();

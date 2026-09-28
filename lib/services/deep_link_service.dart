@@ -36,6 +36,10 @@ class DeepLinkService {
       await handleUri(initialUri);
     } on PlatformException catch (e) {
       debugPrint('[DeepLinkService] Could not read initial link: $e');
+    } on TimeoutException {
+      // Must be caught here: escaping, it aborted the rest of
+      // _initBackgroundServices (FCM token upload, role sync).
+      debugPrint('[DeepLinkService] Initial link timed out');
     } on MissingPluginException {
       // Expected in widget tests and on platforms without the Android bridge.
     }

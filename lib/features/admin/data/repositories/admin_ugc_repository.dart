@@ -118,12 +118,20 @@ class AdminUgcRepository {
     String? cursor,
     int pageSize = 20,
     String? status,
+    AdminReportSource source = AdminReportSource.citizen,
   }) =>
-      _guard(() => _api.getReports(cursor: cursor, pageSize: pageSize, status: status), 'Unable to load reports');
+      _guard(
+          () => _api.getReports(
+              cursor: cursor, pageSize: pageSize, status: status, source: source),
+          'Unable to load reports');
 
-  Future<void> reviewReport(String id) => _guard(() => _api.reviewReport(id), 'Unable to review report');
+  Future<void> reviewReport(String id,
+          {AdminReportSource source = AdminReportSource.citizen}) =>
+      _guard(() => _api.reviewReport(id, source: source), 'Unable to review report');
 
-  Future<void> dismissReport(String id) => _guard(() => _api.dismissReport(id), 'Unable to dismiss report');
+  Future<void> dismissReport(String id,
+          {AdminReportSource source = AdminReportSource.citizen}) =>
+      _guard(() => _api.dismissReport(id, source: source), 'Unable to dismiss report');
 
   Future<AdminReporterProfileModel> getReporterProfile(String userId) =>
       _guard(() => _api.getReporterProfile(userId), 'Unable to load reporter profile');

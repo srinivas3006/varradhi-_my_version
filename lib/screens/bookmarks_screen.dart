@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
 import '../services/api_service.dart';
+import '../services/content_engagement_service.dart';
 import '../widgets/news_feed_card.dart';
 import 'news_detail_screen.dart';
 import 'comments_screen.dart';
@@ -80,18 +81,34 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           }
         }
         setState(() {
-          _bookmarks = bookmarks.where((a) => !_removing.contains(a.id)).toList();
+          _bookmarks = _withDeviceSaved(bookmarks)
+              .where((a) => !_removing.contains(a.id))
+              .toList();
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted && generation == _generation) {
+        final device = _withDeviceSaved(const []);
         setState(() {
-          _error = tr('saved_load_failed');
+          // Saved citizen posts live on the device, so they still show when
+          // the server list cannot be loaded.
+          _bookmarks = device;
+          if (device.isEmpty) _error = tr('saved_load_failed');
           _isLoading = false;
         });
       }
     }
+  }
+
+  /// Server bookmarks plus citizen posts saved on the device (until the
+  /// backend can bookmark UGC), without duplicates.
+  List<NewsArticle> _withDeviceSaved(List<NewsArticle> server) {
+    final ids = server.map((a) => a.id).toSet();
+    return [
+      ...AppState.instance.deviceSavedStories.where((a) => ids.add(a.id)),
+      ...server,
+    ];
   }
 
   @override
@@ -266,8 +283,9 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               if (wasSaved) AppState.instance.toggleBookmark(article.id);
               setState(() => _bookmarks.removeWhere((a) => a.id == article.id));
               try {
-                final success = await ApiService.instance.toggleBookmark(article.id);
-                if (!success) throw Exception('Bookmark update failed');
+                final saved = await ContentEngagementService.instance
+                    .setSaved(article, nowSaved: false);
+                if (saved != false) throw Exception('Bookmark update failed');
               } catch (_) {
                 if (wasSaved && !AppState.instance.isBookmarked(article.id)) {
                   AppState.instance.toggleBookmark(article.id);

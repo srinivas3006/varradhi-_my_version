@@ -14,10 +14,10 @@ class WatermarkBanner extends StatelessWidget {
     this.padding = const EdgeInsets.symmetric(vertical: 8),
   });
 
-  /// Artwork asset. 1162x215, so it is laid out at its own 5.4:1 ratio
+  /// Artwork asset. 1600x296, so it is laid out at its own 5.4:1 ratio
   /// rather than being squeezed to whatever box it lands in.
   static const String asset = 'assets/images/watermark_banner.png';
-  static const double aspectRatio = 1162 / 215;
+  static const double aspectRatio = 1600 / 296;
 
   final double? height;
   final double opacity;

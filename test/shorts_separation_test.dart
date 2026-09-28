@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/models/video_item.dart';
+import 'package:vaaradhi/models/video_item.dart';
 
 VideoItem _item(Map<String, dynamic> json) => VideoItem.fromJson(json);
 

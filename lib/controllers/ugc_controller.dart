@@ -1,14 +1,16 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show BuildContext;
 import '../core/errors/app_exception.dart';
+import '../core/errors/ugc_error.dart';
 import '../core/utils/media_picker_helper.dart';
 import '../core/utils/media_validator.dart';
 import '../models/reporter_post.dart';
 import '../models/ugc_draft.dart';
 import '../repositories/ugc_draft_repository.dart';
 import '../repositories/ugc_repository.dart';
-import '../services/location_service.dart';
+import '../services/location_permission_coordinator.dart';
 import '../state/app_state.dart';
 
 /// Production controller managing Citizen Reporter (UGC) lifecycle,
@@ -39,6 +41,7 @@ class UgcController extends ChangeNotifier {
   UgcUploadStatus _status = UgcUploadStatus.idle;
   double _uploadProgress = 0.0;
   String? _errorMessage;
+  UgcErrorKind? _errorKind;
   String? _submissionId;
   CancelToken? _cancelToken;
 
@@ -56,9 +59,34 @@ class UgcController extends ChangeNotifier {
   UgcUploadStatus get status => _status;
   double get uploadProgress => _uploadProgress;
   String? get errorMessage => _errorMessage;
+
+  /// Kind of the last backend failure, so the screen can react (open
+  /// verification, disable the button) without parsing messages.
+  UgcErrorKind? get errorKind => _errorKind;
   String? get submissionId => _submissionId;
+
+  /// The submission that just finished uploading, for status tracking.
+  String? _lastCompletedSubmissionId;
+  String? get lastCompletedSubmissionId => _lastCompletedSubmissionId;
+
+  /// Uploads are off: backend said daily limit reached or uploader blocked.
+  bool get isUploadRestricted =>
+      AppState.instance.isUgcDailyLimitActive ||
+      AppState.instance.isUgcUploaderBlocked;
+
+  static String _t(String te, String en) =>
+      AppState.instance.language == 'Telugu' ? te : en;
+
+  static String get dailyLimitMessage => _t(
+      'ఈరోజు అప్‌లోడ్ పరిమితి పూర్తయింది. రేపు మళ్లీ ప్రయత్నించండి.',
+      'Daily upload limit reached. You can post again tomorrow.');
+
+  static String get blockedMessage => _t(
+      'మీ ఖాతా నుండి వార్తలు పంపడం నిలిపివేయబడింది. సహాయం కోసం సపోర్ట్‌ను సంప్రదించండి.',
+      'Uploading is blocked for your account. Please contact support.');
   UgcDraft? get pendingDraft => _pendingDraft;
-  List<String> get missingFilesWarning => List.unmodifiable(_missingFilesWarning);
+  List<String> get missingFilesWarning =>
+      List.unmodifiable(_missingFilesWarning);
 
   bool get isSubmittingOrUploading =>
       _status == UgcUploadStatus.preparing ||
@@ -111,7 +139,8 @@ class UgcController extends ChangeNotifier {
       if (_selectedImagePaths.length < MediaValidator.maxMediaItems) {
         _selectedImagePaths.add(xFile.path);
       } else {
-        _errorMessage = 'Maximum ${MediaValidator.maxMediaItems} photos are allowed.';
+        _errorMessage =
+            'Maximum ${MediaValidator.maxMediaItems} photos are allowed.';
       }
       notifyListeners();
       _autoSaveDraft();
@@ -119,14 +148,16 @@ class UgcController extends ChangeNotifier {
   }
 
   Future<void> pickPhotosFromGallery() async {
-    final remainingSlots = MediaValidator.maxMediaItems - _selectedImagePaths.length;
+    final remainingSlots =
+        MediaValidator.maxMediaItems - _selectedImagePaths.length;
     if (remainingSlots <= 0) {
       _errorMessage = 'Maximum ${MediaValidator.maxMediaItems} photos reached.';
       notifyListeners();
       return;
     }
 
-    final xFiles = await _pickerHelper.pickPhotosFromGallery(maxItems: remainingSlots);
+    final xFiles =
+        await _pickerHelper.pickPhotosFromGallery(maxItems: remainingSlots);
     if (xFiles.isNotEmpty) {
       for (final f in xFiles) {
         if (_selectedImagePaths.length < MediaValidator.maxMediaItems &&
@@ -192,7 +223,8 @@ class UgcController extends ChangeNotifier {
     _title = draft.title;
     _description = draft.description;
     _category = draft.category;
-    _type = draft.type.toUpperCase() == 'VIDEO' ? PostType.video : PostType.image;
+    _type =
+        draft.type.toUpperCase() == 'VIDEO' ? PostType.video : PostType.image;
     _submissionId = draft.submissionId;
 
     // Validate local files
@@ -200,10 +232,12 @@ class UgcController extends ChangeNotifier {
     _missingFilesWarning = missing;
 
     if (_type == PostType.image) {
-      _selectedImagePaths = draft.filePaths.where((p) => !missing.contains(p)).toList();
+      _selectedImagePaths =
+          draft.filePaths.where((p) => !missing.contains(p)).toList();
       _selectedVideoPath = null;
     } else {
-      if (draft.filePaths.isNotEmpty && !missing.contains(draft.filePaths.first)) {
+      if (draft.filePaths.isNotEmpty &&
+          !missing.contains(draft.filePaths.first)) {
         _selectedVideoPath = draft.filePaths.first;
       } else {
         _selectedVideoPath = null;
@@ -250,34 +284,60 @@ class UgcController extends ChangeNotifier {
       locationLon: AppState.instance.longitude?.toString(),
       district: AppState.instance.district,
       stateName: AppState.instance.stateName,
-      mobile: AppState.instance.userPhone,
+      mobile: AppState.instance.ugcVerifiedMobile,
     );
     _draftRepository.saveDraft(draft);
   }
 
   // --- Location Requirement ---
 
-  Future<bool> ensureLocationAvailable() async {
-    if (AppState.instance.latitude != null && AppState.instance.longitude != null) {
+  /// Citizen reports need real GPS coordinates (manual admin-area selection
+  /// is not enough — see the "prevent fake coordinates" check below), so
+  /// this is a genuine strong-permission moment: it shows the reader why
+  /// before asking, via [LocationPermissionCoordinator]'s sheet, rather than
+  /// popping the native dialog with no context.
+  Future<bool> ensureLocationAvailable(BuildContext context) async {
+    if (AppState.instance.latitude != null &&
+        AppState.instance.longitude != null) {
       return true;
     }
-    try {
-      final loc = await LocationService.detectLocation();
-      AppState.instance.setDeviceLocation(loc);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _errorMessage = 'దయచేసి మీ ప్రాంత వివరాలను (Location) ఎంచుకోండి / GPS ఆన్ చేయండి.';
+    final applied = await LocationPermissionCoordinator.requestCurrentLocation(
+      context,
+      reason: LocationPromptReason.post,
+    );
+    final hasCoords = AppState.instance.latitude != null &&
+        AppState.instance.longitude != null;
+    if (!applied || !hasCoords) {
+      _errorMessage = 'దయచేసి GPS ద్వారా మీ ప్రాంతాన్ని గుర్తించండి.';
       notifyListeners();
       return false;
     }
+    notifyListeners();
+    return true;
   }
 
   // --- Submission & Upload Pipeline ---
 
   /// Primary action called when the user taps Submit or Retry.
-  Future<bool> submitNews() async {
+  Future<bool> submitNews(BuildContext context) async {
     if (isSubmittingOrUploading) return false;
+    _errorKind = null;
+
+    // 0. Backend-imposed restrictions: don't hammer the server.
+    if (AppState.instance.isUgcUploaderBlocked) {
+      _status = UgcUploadStatus.failed;
+      _errorKind = UgcErrorKind.uploaderBlocked;
+      _errorMessage = blockedMessage;
+      notifyListeners();
+      return false;
+    }
+    if (AppState.instance.isUgcDailyLimitActive) {
+      _status = UgcUploadStatus.failed;
+      _errorKind = UgcErrorKind.dailyLimitReached;
+      _errorMessage = dailyLimitMessage;
+      notifyListeners();
+      return false;
+    }
 
     // 1. Form Validation
     if (_title.trim().isEmpty) {
@@ -286,7 +346,8 @@ class UgcController extends ChangeNotifier {
       return false;
     }
     if (_description.trim().isEmpty) {
-      _errorMessage = 'దయచేసి వార్త పూర్తి వివరాలను (Description) నమోదు చేయండి.';
+      _errorMessage =
+          'దయచేసి వార్త పూర్తి వివరాలను (Description) నమోదు చేయండి.';
       notifyListeners();
       return false;
     }
@@ -308,7 +369,8 @@ class UgcController extends ChangeNotifier {
     notifyListeners();
 
     if (_type == PostType.image) {
-      final validation = await MediaValidator.validateImagesBatch(_selectedImagePaths);
+      final validation =
+          await MediaValidator.validateImagesBatch(_selectedImagePaths);
       if (!validation.isValid) {
         _status = UgcUploadStatus.failed;
         _errorMessage = validation.errorMessage;
@@ -316,7 +378,8 @@ class UgcController extends ChangeNotifier {
         return false;
       }
     } else {
-      final validation = await MediaValidator.validateVideo(_selectedVideoPath!);
+      final validation =
+          await MediaValidator.validateVideo(_selectedVideoPath!);
       if (!validation.isValid) {
         _status = UgcUploadStatus.failed;
         _errorMessage = validation.errorMessage;
@@ -326,17 +389,31 @@ class UgcController extends ChangeNotifier {
     }
 
     // 3. Location Verification (Prevent fake coordinates)
-    final hasLoc = await ensureLocationAvailable();
+    if (!context.mounted) {
+      _status = UgcUploadStatus.failed;
+      notifyListeners();
+      return false;
+    }
+    final hasLoc = await ensureLocationAvailable(context);
     if (!hasLoc) {
       _status = UgcUploadStatus.failed;
       notifyListeners();
       return false;
     }
 
-    final mobile = AppState.instance.userPhone.isNotEmpty
-        ? AppState.instance.userPhone
-        : '9876543210';
-    final contentType = _type == PostType.image ? 'IMAGE' : 'VIDEO';
+    // 4a. Verified UGC mobile. Only the backend-returned 10-digit number is
+    // ever sent — never +91, never the profile phone, never a placeholder.
+    if (!AppState.instance.uploadVerified) {
+      _status = UgcUploadStatus.verificationRequired;
+      _errorKind = UgcErrorKind.mobileNotVerified;
+      _errorMessage = null;
+      notifyListeners();
+      return false;
+    }
+    final mobile = AppState.instance.ugcVerifiedMobile;
+    // Backend enums are uppercase (content_type TEXT|IMAGE|VIDEO, media_type
+    // IMAGE|VIDEO|SHORT_VIDEO); lowercase fails serializer validation.
+    final mediaType = _type == PostType.image ? 'IMAGE' : 'VIDEO';
 
     // 4. Submission creation (POST /api/v1/ugc/submit/) if submissionId doesn't exist
     if (_submissionId == null || _submissionId!.isEmpty) {
@@ -349,7 +426,7 @@ class UgcController extends ChangeNotifier {
           'title': _title.trim(),
           'description': _description.trim(),
           'category': _category.toLowerCase(),
-          'content_type': contentType,
+          'content_type': mediaType,
           'media_url': '',
           'thumbnail_url': '',
           'location_lat': AppState.instance.latitude!.toString(),
@@ -362,20 +439,22 @@ class UgcController extends ChangeNotifier {
         };
 
         final response = await _ugcRepository.submitPost(submissionPayload);
-        _submissionId = (response['submission_id'] ?? response['id'])?.toString();
+        _submissionId =
+            (response['submission_id'] ?? response['id'])?.toString();
         _autoSaveDraft();
       } catch (e) {
-        _status = UgcUploadStatus.failed;
-        _errorMessage = e is AppException ? e.message : 'వార్తను సమర్పించడం విఫలమైంది: $e';
-        notifyListeners();
-        return false;
+        return _failFromBackend(
+            e,
+            _t('వార్తను సమర్పించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.',
+                'Could not submit the news. Please try again.'));
       }
     }
 
     // If server created submission, proceed to media upload
     if (_submissionId == null || _submissionId!.isEmpty) {
       _status = UgcUploadStatus.failed;
-      _errorMessage = 'సర్వర్ నుండి రిఫరెన్స్ ఐడీ రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.';
+      _errorMessage =
+          'సర్వర్ నుండి రిఫరెన్స్ ఐడీ రాలేదు. దయచేసి మళ్ళీ ప్రయత్నించండి.';
       notifyListeners();
       return false;
     }
@@ -397,7 +476,7 @@ class UgcController extends ChangeNotifier {
             await _ugcRepository.uploadMedia(
               submissionId: _submissionId!,
               mobile: mobile,
-              mediaType: 'IMAGE',
+              mediaType: mediaType,
               filePath: _selectedImagePaths.first,
               onSendProgress: _onSendProgress,
               cancelToken: _cancelToken,
@@ -407,7 +486,7 @@ class UgcController extends ChangeNotifier {
               submissionId: _submissionId!,
               mobile: mobile,
               filePaths: _selectedImagePaths,
-              mediaTypes: List.filled(_selectedImagePaths.length, 'IMAGE'),
+              mediaTypes: List.filled(_selectedImagePaths.length, mediaType),
               onSendProgress: _onSendProgress,
               cancelToken: _cancelToken,
             );
@@ -416,45 +495,43 @@ class UgcController extends ChangeNotifier {
           await _ugcRepository.uploadMedia(
             submissionId: _submissionId!,
             mobile: mobile,
-            mediaType: 'VIDEO',
+            mediaType: mediaType,
             filePath: _selectedVideoPath!,
             onSendProgress: _onSendProgress,
             cancelToken: _cancelToken,
           );
         }
         uploadSuccess = true;
-      } on DioException catch (dioErr) {
-        if (CancelToken.isCancel(dioErr)) {
+      } catch (e) {
+        if ((e is DioException && CancelToken.isCancel(e)) ||
+            (_cancelToken?.isCancelled ?? false)) {
           _status = UgcUploadStatus.cancelled;
           _errorMessage = 'అప్‌లోడ్ రద్దు చేయబడింది.';
           notifyListeners();
           return false;
         }
 
-        final statusCode = dioErr.response?.statusCode;
-        // Do NOT retry 4xx client errors (validation, auth rejection, etc.)
-        if (statusCode != null && statusCode >= 400 && statusCode < 500) {
-          _status = UgcUploadStatus.failed;
-          _errorMessage = dioErr.response?.data?['errors']?['message']?.toString() ??
-              'మీడియా అప్‌లోడ్ చెల్లుబాటు కాలేదు ($statusCode).';
-          notifyListeners();
-          return false;
+        final error = UgcApiError.from(e);
+        final status = error.statusCode;
+        // Do NOT retry 4xx client errors (validation, verification,
+        // limit, block, auth rejection…).
+        if (status != null && status >= 400 && status < 500) {
+          return _failFromBackend(
+              error,
+              _t('మీడియా అప్‌లోడ్ చెల్లుబాటు కాలేదు ($status).',
+                  'Media upload was rejected ($status).'));
         }
 
         // Bounded retry for transient 5xx or connection issues
         retryCount++;
         if (retryCount > maxRetries) {
           _status = UgcUploadStatus.failed;
-          _errorMessage = 'నెట్‌వర్క్ సమస్య కారణంగా మీడియా అప్‌లోడ్ విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
-          notifyListeners();
-          return false;
-        }
-        await Future.delayed(Duration(seconds: retryCount));
-      } catch (e) {
-        retryCount++;
-        if (retryCount > maxRetries) {
-          _status = UgcUploadStatus.failed;
-          _errorMessage = e is AppException ? e.message : 'మీడియా అప్‌లోడ్ విఫలమైంది.';
+          _errorKind = error.kind;
+          _errorMessage = error.isRetryable
+              ? 'నెట్‌వర్క్ సమస్య కారణంగా మీడియా అప్‌లోడ్ విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'
+              : (e is AppException
+                  ? e.message
+                  : 'మీడియా అప్‌లోడ్ విఫలమైంది.');
           notifyListeners();
           return false;
         }
@@ -465,6 +542,11 @@ class UgcController extends ChangeNotifier {
     // 6. Success handling
     _status = UgcUploadStatus.completed;
     _uploadProgress = 1.0;
+    unawaited(AppState.instance.clearUgcUploadRestrictions());
+    // Done with this submission: the next story must create a new one, not
+    // upload its media into this one.
+    _lastCompletedSubmissionId = _submissionId;
+    _submissionId = null;
 
     // Register local post in AppState for immediate dashboard reflection
     AppState.instance.submitReporterPost(
@@ -481,6 +563,70 @@ class UgcController extends ChangeNotifier {
 
     notifyListeners();
     return true;
+  }
+
+  /// Applies the documented frontend action for a failed submit/upload and
+  /// returns false so callers can `return _failFromBackend(...)`.
+  Future<bool> _failFromBackend(Object e, String fallbackMessage) async {
+    final error = UgcApiError.from(e);
+    _errorKind = error.kind;
+    switch (error.kind) {
+      case UgcErrorKind.mobileNotVerified:
+        // Backend is the source of truth: drop the stale cache and verify.
+        await AppState.instance.clearUgcVerification();
+        _status = UgcUploadStatus.verificationRequired;
+        _errorMessage = null;
+        break;
+      case UgcErrorKind.mobileMismatch:
+        // The account is bound to a different number than we sent. Re-run
+        // verification; the backend will only accept that bound number and
+        // hand it back, and the retry then uses it.
+        await AppState.instance.clearUgcVerification();
+        _status = UgcUploadStatus.verificationRequired;
+        _errorMessage = _t(
+            'మీ ఖాతా మరో మొబైల్ నంబర్‌తో ధృవీకరించబడింది. దయచేసి ఆ నంబర్‌ను ధృవీకరించండి.',
+            'Your account is verified with a different mobile number. Please verify that number.');
+        break;
+      case UgcErrorKind.nonIndianPhone:
+      case UgcErrorKind.tokenMissingPhone:
+        // The saved number cannot be used: verify again with Firebase.
+        await AppState.instance.clearUgcVerification();
+        _status = UgcUploadStatus.verificationRequired;
+        _errorMessage = error.kind == UgcErrorKind.nonIndianPhone
+            ? _t('దయచేసి సరైన భారతీయ మొబైల్ నంబర్ ఉపయోగించండి.',
+                'Please use a valid Indian mobile number.')
+            : null;
+        break;
+      case UgcErrorKind.dailyLimitReached:
+        await AppState.instance.markUgcDailyLimitReached();
+        _status = UgcUploadStatus.failed;
+        _errorMessage = dailyLimitMessage;
+        break;
+      case UgcErrorKind.uploaderBlocked:
+        await AppState.instance.markUgcUploaderBlocked();
+        _status = UgcUploadStatus.failed;
+        _errorMessage = blockedMessage;
+        break;
+      case UgcErrorKind.cancelled:
+        _status = UgcUploadStatus.cancelled;
+        _errorMessage = 'అప్‌లోడ్ రద్దు చేయబడింది.';
+        break;
+      case UgcErrorKind.sessionExpired:
+        _status = UgcUploadStatus.failed;
+        _errorMessage = _t(
+            'సెషన్ గడువు ముగిసింది. దయచేసి మళ్లీ లాగిన్ అవ్వండి.',
+            'Your session expired. Please log in again.');
+        break;
+      default:
+        _status = UgcUploadStatus.failed;
+        _errorMessage = (e is AppException ||
+                    (e is DioException && e.error is AppException)) &&
+                error.message.isNotEmpty
+            ? error.message
+            : fallbackMessage;
+    }
+    notifyListeners();
+    return false;
   }
 
   void cancelUpload() {

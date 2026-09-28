@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:way2news_clone/core/ads/ad_event_queue.dart';
-import 'package:way2news_clone/models/ad_banner.dart';
-import 'package:way2news_clone/widgets/ads/breaking_strip_ad_widget.dart';
-import 'package:way2news_clone/widgets/ads/bottom_sticky_ad_banner.dart';
-import 'package:way2news_clone/widgets/ads/rotating_breaking_strip.dart';
+import 'package:vaaradhi/core/ads/ad_event_queue.dart';
+import 'package:vaaradhi/models/ad_banner.dart';
+import 'package:vaaradhi/widgets/ads/breaking_strip_ad_widget.dart';
+import 'package:vaaradhi/widgets/ads/bottom_sticky_ad_banner.dart';
+import 'package:vaaradhi/widgets/ads/rotating_breaking_strip.dart';
 
 AdBanner _ad(String id, {String? dest}) => AdBanner.fromJson({
       'id': id,

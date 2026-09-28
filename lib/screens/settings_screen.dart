@@ -10,6 +10,7 @@ import 'cms_page_screen.dart';
 import 'account_deletion_screen.dart';
 import 'package:dio/dio.dart';
 import 'bookmarks_screen.dart';
+import '../widgets/spotlight/news_language_sheet.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -244,8 +245,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               color: isDark ? Colors.white54 : Colors.black54)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded,
                           size: 16),
-                      onTap: () =>
-                          _showContentLanguageDialog(context, state, isDark),
+                      // Same sheet as the first-launch prompt.
+                      onTap: () => NewsLanguageSheet.show(context),
                     ),
                     const Divider(height: 1),
 
@@ -522,39 +523,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       default:
         return 'All Languages';
     }
-  }
-
-  void _showContentLanguageDialog(
-      BuildContext context, AppState state, bool isDark) {
-    Widget option(BuildContext ctx, String label, String? code) => ListTile(
-          title: Text(label),
-          trailing: state.contentLanguage == code
-              ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
-              : null,
-          onTap: () {
-            state.setContentLanguage(code);
-            Navigator.pop(ctx);
-          },
-        );
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(tr('content_language')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            option(ctx, 'All Languages', null),
-            const Divider(height: 1),
-            option(ctx, 'తెలుగు (Telugu)', 'te'),
-            const Divider(height: 1),
-            option(ctx, 'English', 'en'),
-          ],
-        ),
-      ),
-    );
   }
 
   void _showLanguageDialog(BuildContext context, AppState state, bool isDark) {

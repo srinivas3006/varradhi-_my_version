@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:way2news_clone/localization/app_translations.dart';
-import 'package:way2news_clone/localization/location_translations.dart';
-import 'package:way2news_clone/screens/profile_tab.dart';
-import 'package:way2news_clone/state/app_state.dart';
+import 'package:vaaradhi/localization/app_translations.dart';
+import 'package:vaaradhi/localization/location_translations.dart';
+import 'package:vaaradhi/screens/profile_tab.dart';
+import 'package:vaaradhi/state/app_state.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

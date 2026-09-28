@@ -23,6 +23,9 @@ class _SearchScreenState extends State<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   List<NewsArticle> _results = [];
+
+  /// Backend keyword suggestions, shown when a search finds nothing.
+  List<String> _suggestions = [];
   List<FeedPresentationItem<NewsArticle>> _presentedResults = [];
   List<String> _recent = [];
   List<String> _trending = [];
@@ -85,25 +88,29 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     setState(() => _isLoading = true);
 
-    final futureResponse = ApiService.instance.searchArticles(
+    final futureResponse = ApiService.instance.search(
       trimmed, lang: AppState.instance.contentLanguage,
     );
     final futureAds = AdManager.instance.getAdsForZone('search');
-    
+
     final response = await futureResponse;
     final ads = await futureAds;
 
     if (!mounted || generation != _queryGeneration) return;
-    if (response.hasErrors) {
+    if (response.error != null) {
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(response.errorMessage ?? tr('no_results'))),
+        SnackBar(content: Text(response.error ?? tr('no_results'))),
       );
       return;
     }
 
     setState(() {
-      _results = response.data ?? [];
+      _results = response.results;
+      _suggestions = response.suggestions
+          .where((s) => s.toLowerCase() != trimmed.toLowerCase())
+          .take(8)
+          .toList();
       _presentedResults = insertAdsIntoFeed<NewsArticle>(
         contentItems: _results,
         eligibleAds: ads.cast(),
@@ -335,24 +342,70 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _buildResults(bool isDark) {
     if (_results.isEmpty) {
+      final telugu = AppState.instance.language == 'Telugu';
+      final muted =
+          isDark ? AppColors.textSecondaryDark : AppColors.textMuted;
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 56,
-              color: isDark ? Colors.white24 : Colors.black26,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              tr('no_results'),
-              style: TextStyle(
-                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
-                fontSize: 14,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.search_off_rounded,
+                size: 56,
+                color: isDark ? Colors.white24 : Colors.black26,
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Text(
+                tr('no_results'),
+                style: TextStyle(
+                  color: isDark ? AppColors.textLight : AppColors.textDark,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                telugu
+                    ? 'మరో పదంతో ప్రయత్నించండి'
+                    : 'Try another keyword',
+                style: TextStyle(color: muted, fontSize: 13),
+              ),
+              if (_suggestions.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  telugu ? 'ఇవి ప్రయత్నించండి' : 'Try these',
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in _suggestions)
+                      ActionChip(
+                        key: ValueKey('search_suggestion_$s'),
+                        avatar: const Icon(Icons.search_rounded, size: 16),
+                        label: Text(s),
+                        onPressed: () {
+                          _controller.text = s;
+                          _controller.selection = TextSelection.collapsed(
+                              offset: s.length);
+                          _runSearch(s);
+                        },
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }

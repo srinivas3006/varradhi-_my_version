@@ -61,6 +61,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (NavigationRequest request) {
+            final uri = Uri.tryParse(request.url);
+            if (uri == null) return NavigationDecision.prevent;
+            final host = uri.host.toLowerCase();
+            if (host.endsWith('youtube.com') ||
+                host.endsWith('youtube-nocookie.com') ||
+                host.endsWith('youtu.be') ||
+                host.endsWith('googlevideo.com')) {
+              return NavigationDecision.navigate;
+            }
+            return NavigationDecision.prevent;
+          },
+        ),
+      )
       ..loadRequest(
         Uri.parse(
             'https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1&origin=https://www.youtube.com'),
