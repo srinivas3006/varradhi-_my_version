@@ -61,8 +61,12 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    AppState.instance.bookmarkedItemIds.clear();
+    AppState.instance.resetBookmarksForTest();
+    // Server calls are for accounts; a guest's bookmarks stay on the phone.
+    AppState.instance.isLoggedIn = true;
   });
+
+  tearDown(() => AppState.instance.isLoggedIn = false);
 
   group('report (handover §12, §17.1)', () {
     test('a desk article posts to the article report endpoint', () async {
@@ -175,18 +179,17 @@ void main() {
     });
   });
 
-  group('save citizen posts (§17.3)', () {
-    test('server {bookmarked: true} is the truth; a copy lists in Bookmarks',
-        () async {
+  group('bookmark citizen posts (handover §4)', () {
+    test('server {bookmarked: true} is the final state', () async {
       final a = _Adapter({
         'POST /api/v1/ugc/sub-1/bookmark/toggle/':
             (201, {'data': {'bookmarked': true}}),
       });
       final saved =
-          await _service(a).setSaved(_story(ugc: true), nowSaved: true);
+          await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true);
       expect(saved, isTrue);
-      expect(AppState.instance.isSavedOnDevice('sub-1'), isTrue,
-          reason: 'GET /bookmarks/ is article-only, so the app lists it');
+      expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse,
+          reason: 'the combined saved list includes citizen posts now');
     });
 
     test('the toggle can disagree with the guess — server wins', () async {
@@ -196,9 +199,10 @@ void main() {
       });
       await AppState.instance.saveStoryOnDevice(_story(ugc: true));
       final saved =
-          await _service(a).setSaved(_story(ugc: true), nowSaved: true);
+          await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true);
       expect(saved, isFalse);
-      expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse);
+      expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse,
+          reason: 'a copy left by an older version is cleaned up');
     });
 
     test('404 is a failure (null), nothing saved', () async {
@@ -206,17 +210,18 @@ void main() {
         'POST /api/v1/ugc/sub-1/bookmark/toggle/':
             (404, _error(404, 'Submission not found.')),
       });
-      expect(await _service(a).setSaved(_story(ugc: true), nowSaved: true),
+      expect(await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true),
           isNull);
-      expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse);
     });
 
-    test('an older server without the route keeps the save on the device',
-        () async {
-      final saved = await _service(_Adapter({}))
-          .setSaved(_story(ugc: true), nowSaved: true);
-      expect(saved, isTrue);
-      expect(AppState.instance.isSavedOnDevice('sub-1'), isTrue);
+    test('a failed request is sent once, never retried', () async {
+      final a = _Adapter({
+        'POST /api/v1/ugc/sub-1/bookmark/toggle/':
+            (500, _error(500, 'Server error.')),
+      });
+      expect(await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true),
+          isNull);
+      expect(a.calls, ['POST /api/v1/ugc/sub-1/bookmark/toggle/']);
     });
   });
 

@@ -7,6 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
+import '../models/saved_item.dart';
+import '../localization/location_translations.dart';
 import '../models/search_result.dart';
 import '../models/submission_status.dart';
 export '../models/submission_status.dart';
@@ -653,7 +655,10 @@ class ApiService {
   }
 
   String _canonicalName(Map<String, dynamic> item) {
-    return (item['name_en'] ?? item['name'] ?? '').toString().trim();
+    final name = (item['name_en'] ?? item['name'] ?? '').toString().trim();
+    // A GPS-matched place keeps its Telugu name too, for Telugu display.
+    LocationTranslations.learn(name, item['name_te']?.toString());
+    return name;
   }
 
   String _canonicalField(Map<String, dynamic>? item, String field) {
@@ -1441,16 +1446,22 @@ class ApiService {
   }
 
   // --- Bookmarks ---
-  Future<List<NewsArticle>> getBookmarks() async {
-    final articles = <NewsArticle>[];
+  //
+  // Bookmark handover: one combined saved list (articles and citizen posts),
+  // cursor-paginated by following meta.next exactly, de-duplicated by the
+  // bookmark id.
+
+  /// GET /api/v1/bookmarks/ — every page, newest first.
+  Future<List<SavedItem>> getBookmarks() async {
+    final items = <SavedItem>[];
     final seen = <String>{};
     final visited = <String>{};
-    String? cursor;
+    String? next;
     do {
-      final response = await _dio.get('/api/v1/bookmarks/', queryParameters: {
-        'page_size': 20,
-        if (cursor != null) 'cursor': cursor,
-      });
+      final response = next == null
+          ? await _dio.get('/api/v1/bookmarks/',
+              queryParameters: {'page_size': 20})
+          : await _dio.get(next);
 
       final rawData = response.data;
       if (rawData is Map) {
@@ -1464,18 +1475,18 @@ class ApiService {
         }
       }
 
-      final items = _extractBookmarkList(rawData);
-      for (final item in items) {
-        final article = _parseBookmarkItem(item);
-        final key = article.id.isNotEmpty ? article.id : article.slug;
-        if (key.isNotEmpty && seen.add(key)) {
-          articles.add(article);
-        }
+      for (final row in _extractBookmarkList(rawData)) {
+        if (row is! Map) continue;
+        final item = SavedItem.fromJson(Map<String, dynamic>.from(row));
+        final key = item.id.isNotEmpty ? item.id : item.contentId;
+        if (key.isNotEmpty && seen.add(key)) items.add(item);
       }
 
-      cursor = _extractBookmarkNextCursor(rawData);
-    } while (cursor != null && cursor.isNotEmpty && visited.add(cursor));
-    return articles;
+      next = _extractBookmarkNext(rawData);
+    } while (next != null && visited.add(next));
+    debugPrint('[Bookmark] GET /api/v1/bookmarks/ -> ${items.length} saved '
+        '(${items.where((i) => i.isUgc).length} citizen posts)');
+    return items;
   }
 
   static List<dynamic> _extractBookmarkList(dynamic rawData) {
@@ -1497,50 +1508,57 @@ class ApiService {
     return const [];
   }
 
-  static NewsArticle _parseBookmarkItem(dynamic item) {
-    if (item is! Map) {
-      return NewsArticle.fromJson(const {});
-    }
-    final map = Map<String, dynamic>.from(item);
-    final nested = map['article'];
-    Map<String, dynamic> articleData;
-    if (nested is Map) {
-      articleData = Map<String, dynamic>.from(nested);
-      if ((articleData['id'] == null || articleData['id'].toString().isEmpty) &&
-          map['article_id'] != null) {
-        articleData['id'] = map['article_id'];
-      }
-    } else {
-      articleData = Map<String, dynamic>.from(map);
-    }
-    articleData['is_bookmarked'] = true;
-    articleData['is_bookmarked_by_user'] = true;
-    return NewsArticle.fromJson(articleData);
-  }
-
-  static String? _extractBookmarkNextCursor(dynamic rawData) {
+  /// The next page's URL, used exactly as the server sent it (meta.next).
+  static String? _extractBookmarkNext(dynamic rawData) {
     if (rawData is! Map) return null;
     final map = Map<String, dynamic>.from(rawData);
     String? next;
     final meta = map['meta'];
-    if (meta is Map) {
-      next = meta['next']?.toString() ?? meta['cursor']?.toString();
-    }
+    if (meta is Map) next = meta['next']?.toString();
     next ??= map['next']?.toString();
     if (map['data'] is Map) {
       final dataMap = Map<String, dynamic>.from(map['data'] as Map);
       next ??= dataMap['next']?.toString();
     }
     if (next == null || next.trim().isEmpty) return null;
-    final uri = Uri.tryParse(next.trim());
-    if (uri != null && uri.queryParameters.containsKey('cursor')) {
-      return uri.queryParameters['cursor'];
-    }
     return next.trim();
   }
 
+  /// POST /api/v1/bookmarks/ — saves an article and never removes one, so it
+  /// is safe to repeat (201 new, 200 already saved). Used for every save.
   Future<void> addBookmark(String articleId) async {
-    await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
+    final response = await _dio
+        .post('/api/v1/bookmarks/', data: {'article_id': articleId});
+    debugPrint('[Bookmark] POST /api/v1/bookmarks/ article_id=$articleId '
+        '-> ${response.statusCode}');
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw ApiException('Bookmark failed (${response.statusCode}).');
+    }
+    final map = response.data;
+    if (map is Map && map['errors'] != null && map['errors'] != false) {
+      throw ApiException('Bookmark failed.');
+    }
+  }
+
+  /// DELETE /api/v1/bookmarks/{bookmarkId}/ — the bookmark's own id from the
+  /// saved list, not the article or post id. Works for both kinds.
+  ///
+  /// Returns true on 204, false when the bookmark was already gone (404), so
+  /// the caller removes the stale row either way. Throws on anything else.
+  Future<bool> deleteBookmark(String bookmarkId) async {
+    try {
+      final response = await _dio.delete('/api/v1/bookmarks/$bookmarkId/');
+      debugPrint('[Bookmark] DELETE /api/v1/bookmarks/$bookmarkId/ '
+          '-> ${response.statusCode}');
+      return true;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        debugPrint('[Bookmark] DELETE /api/v1/bookmarks/$bookmarkId/ '
+            '-> 404, already gone');
+        return false;
+      }
+      rethrow;
+    }
   }
 
   /// POST /api/v1/bookmarks/toggle/ — flips the server's saved state and
@@ -1563,14 +1581,15 @@ class ApiService {
       }
       final data = map['data'];
       if (data is Map && data['bookmarked'] is bool) {
+        debugPrint('[Bookmark] POST /api/v1/bookmarks/toggle/ '
+            'article_id=$articleId -> ${response.statusCode} '
+            'bookmarked=${data['bookmarked']}');
         return data['bookmarked'] as bool;
       }
     }
+    debugPrint('[Bookmark] POST /api/v1/bookmarks/toggle/ '
+        'article_id=$articleId -> ${response.statusCode}, no bookmarked field');
     return null;
-  }
-
-  Future<void> removeBookmark(String bookmarkId) async {
-    await _dio.delete('/api/v1/bookmarks/$bookmarkId/');
   }
 
   // --- Contributor / Reporter ---

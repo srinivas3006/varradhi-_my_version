@@ -28,9 +28,16 @@ class CommentsScreen extends StatefulWidget {
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: 0.82,
-        child: CommentsScreen(article: article, sheetMode: true),
+      // Lift the sheet above the keyboard so the composer stays visible
+      // while typing.
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: FractionallySizedBox(
+          heightFactor: 0.82,
+          child: CommentsScreen(article: article, sheetMode: true),
+        ),
       ),
     );
   }
@@ -1108,6 +1115,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     controller: _commentController,
                     focusNode: _focusNode,
                     enabled: !_isPosting,
+                    // Grows with the text (up to 5 lines, then scrolls) and
+                    // shows the keyboard's Enter key for new lines; the send
+                    // button posts.
+                    minLines: 1,
+                    maxLines: 5,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    textCapitalization: TextCapitalization.sentences,
                     style: TextStyle(
                       fontSize: 14,
                       color: isDark ? AppColors.textLight : AppColors.textDark,
@@ -1144,7 +1159,6 @@ class _CommentsScreenState extends State<CommentsScreen> {
                         ),
                       ),
                     ),
-                    onSubmitted: (_) => _postComment(),
                   ),
                 ),
                 const SizedBox(width: 8),

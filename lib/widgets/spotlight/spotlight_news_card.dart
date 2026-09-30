@@ -224,17 +224,15 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     // available, so large-text users are not left with phone-sized copy.
     final requestedScale =
         MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
-    // The system status bar gets its own solid black band; the photo starts
-    // strictly below it instead of sitting under the clock and icons.
-    final statusBarHeight = MediaQuery.paddingOf(context).top;
-
     // Way2News-style frame: full width, a little shorter than square
-    // (width / 1.22), flush against the status band. The square took half
-    // the screen and cropped most photos into a zoomed look; this gives the
-    // headline and body the room back. The cap only engages on a
+    // (width / 1.22), flush against the card's top edge. SpotlightScreen
+    // places the card directly below the status bar and paints the black
+    // band there itself, so the card owns no status bar space. The square
+    // took half the screen and cropped most photos into a zoomed look; this
+    // gives the headline and body the room back. The cap only engages on a
     // landscape/very wide screen.
-    final mediaHeight = (screenWidth / _mediaAspect)
-        .clamp(0.0, (screenHeight - statusBarHeight) * 0.55);
+    final mediaHeight =
+        (screenWidth / _mediaAspect).clamp(0.0, screenHeight * 0.55);
 
     // Always fully painted. The feed is a FlipPageView now, which owns the
     // transition and passes no drag values — deriving opacity from them left
@@ -247,14 +245,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     final headlineOffset = widget.dragDelta * 1.0;
     final bodyOffset = widget.dragDelta * 0.85;
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      // Light icons on the black status band, in both themes.
-      value: const SystemUiOverlayStyle(
-        statusBarColor: Colors.black,
-        statusBarIconBrightness: Brightness.light,
-        statusBarBrightness: Brightness.dark,
-      ),
-      child: MediaQuery.withClampedTextScaling(
+    return MediaQuery.withClampedTextScaling(
       minScaleFactor: 1.0,
       maxScaleFactor: requestedScale,
       child: GestureDetector(
@@ -264,18 +255,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         color: Theme.of(context).scaffoldBackgroundColor,
         child: Stack(
           children: [
-            // 0. STATUS BAR BAND — solid black, sized to the top safe area.
+            // 1. IMAGE ZONE — flush against the card's top edge
             Positioned(
               top: 0,
-              left: 0,
-              right: 0,
-              height: statusBarHeight,
-              child: const ColoredBox(color: Colors.black),
-            ),
-
-            // 1. IMAGE ZONE — exact square directly below the status band
-            Positioned(
-              top: statusBarHeight,
               left: 0,
               right: 0,
               height: mediaHeight,
@@ -472,7 +454,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
             // 2. CONTENT ZONE
             Positioned.fill(
-              top: statusBarHeight + mediaHeight,
+              top: mediaHeight,
               child: Opacity(
                 opacity: textOpacity,
                 child: Padding(
@@ -1203,7 +1185,6 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         ),
       ),
       ),
-      ),
     );
   }
 
@@ -1246,11 +1227,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   /// ⋮ in the action bar: Report Story and Bookmark.
   Future<void> _showMoreSheet(NewsArticle article) async {
     HapticFeedback.selectionClick();
-    final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    final isSaved = article.isBookmarked ||
-        AppState.instance.isBookmarked(targetId) ||
-        (widget.article.id.isNotEmpty &&
-            AppState.instance.isBookmarked(widget.article.id));
+    final targetId = AppState.bookmarkKey(article);
+    final isSaved = AppState.instance.isStoryBookmarked(article);
 
     final choice = await StoryOptionsSheet.show(
       context,
@@ -1275,17 +1253,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     required NewsArticle article,
   }) {
     if (_bookmarkInFlight) return;
-    if (!AppState.instance.isLoggedIn) {
-      requireAuth(context, () {
-        if (!mounted) return;
-        _executeBookmarkToggle(
-          targetId: targetId,
-          currentSaved: isSaved,
-          article: article,
-        );
-      });
-      return;
-    }
+    // Guests bookmark too (kept on the phone until they log in), so there
+    // is no login gate here.
     _executeBookmarkToggle(
       targetId: targetId,
       currentSaved: isSaved,
@@ -1304,43 +1273,42 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
     final messenger = ScaffoldMessenger.of(context);
     final telugu = AppState.instance.language == 'Telugu';
-    final nowSaved = !currentSaved;
+    final nowBookmarked = !currentSaved;
 
-    // Optimistic: flip both the model field and the local set so they cannot disagree.
-    AppState.instance.setBookmarked(targetId, nowSaved);
-    if (widget.article.id.isNotEmpty && widget.article.id != targetId) {
-      AppState.instance.setBookmarked(widget.article.id, nowSaved);
+    // Optimistic: the shared state every screen reads, plus both copies of
+    // the story this card holds.
+    void apply(bool bookmarked) {
+      AppState.instance.setBookmarked(targetId, bookmarked);
+      if (widget.article.id.isNotEmpty && widget.article.id != targetId) {
+        AppState.instance.setBookmarked(widget.article.id, bookmarked);
+      }
+      widget.article.isBookmarked = bookmarked;
+      if (mounted) {
+        setState(() => article.isBookmarked = bookmarked);
+      } else {
+        article.isBookmarked = bookmarked;
+      }
     }
-    if (mounted) {
-      setState(() => article.isBookmarked = nowSaved);
-    }
+
+    apply(nowBookmarked);
 
     var failed = false;
     try {
-      final saved = await ContentEngagementService.instance
-          .setSaved(article, nowSaved: nowSaved);
-      if (saved == null) {
+      final bookmarked = await ContentEngagementService.instance
+          .setBookmarked(article, nowBookmarked: nowBookmarked);
+      if (bookmarked == null) {
         failed = true;
-      } else if (saved != nowSaved) {
+      } else if (bookmarked != nowBookmarked) {
         // The server's toggle is the truth; adopt it.
-        AppState.instance.setBookmarked(targetId, saved);
-        if (mounted) setState(() => article.isBookmarked = saved);
+        apply(bookmarked);
       }
     } catch (e) {
       debugPrint('[SpotlightNewsCard] Bookmark sync failed: $e');
       failed = true;
     }
 
-    if (failed) {
-      // Roll back rather than claim a save the server never made.
-      AppState.instance.setBookmarked(targetId, currentSaved);
-      if (widget.article.id.isNotEmpty && widget.article.id != targetId) {
-        AppState.instance.setBookmarked(widget.article.id, currentSaved);
-      }
-      if (mounted) {
-        setState(() => article.isBookmarked = currentSaved);
-      }
-    }
+    // Roll back rather than claim a bookmark the server never made.
+    if (failed) apply(currentSaved);
 
     _bookmarkInFlight = false;
     if (!mounted) return;
@@ -1352,7 +1320,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
             ? (telugu
                 ? 'బుక్‌మార్క్ సేవ్ చేయలేకపోయాము.'
                 : 'Could not save the bookmark.')
-            : nowSaved
+            : AppState.instance.isStoryBookmarked(article)
                 ? (telugu
                     ? 'వార్త సేవ్ చేయబడింది'
                     : 'Article saved to bookmarks')

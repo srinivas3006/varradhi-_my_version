@@ -1,144 +1,130 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vaaradhi/models/live_news.dart';
 import 'package:vaaradhi/models/news_article.dart';
-import 'package:vaaradhi/screens/news_feed_tab.dart';
+import 'package:vaaradhi/repositories/home_feed_repository.dart';
+
+/// The hero is built only from the /feed/home/ response — no separate
+/// live, breaking or featured requests.
+NewsArticle _story(
+  String id, {
+  String type = 'article',
+  bool breaking = false,
+  bool featured = false,
+}) =>
+    NewsArticle.fromJson({
+      'id': id,
+      'title': 'Story $id',
+      'type': type,
+      'metadata': {
+        'slug': 'slug-$id',
+        'is_breaking': breaking,
+        'is_featured': featured,
+      },
+    });
 
 void main() {
-  group('Hero Breaking and Live Stream Card Tests', () {
-    final mockActiveLive = LiveNews(
-      id: 'live-1',
-      title: 'Breaking: Telangana Assembly Live Discussion',
-      channelName: 'Vaaradhi TV',
-      youtubeUrl: 'https://youtube.com/watch?v=live123',
-      youtubeVideoId: 'live123',
-      thumbnailUrl: 'https://example.com/live_thumb.jpg',
-      description: 'Live coverage from assembly',
-      isActive: true,
-      autoplay: false,
-      sortOrder: 1,
-      status: 'live',
-    );
-
-    final mockInactiveLive = LiveNews(
-      id: 'live-2',
-      title: 'Past Bulletin',
-      channelName: 'Vaaradhi TV',
-      youtubeUrl: 'https://youtube.com/watch?v=past123',
-      youtubeVideoId: 'past123',
-      thumbnailUrl: 'https://example.com/past_thumb.jpg',
-      description: 'Past bulletin',
-      isActive: false,
-      autoplay: false,
-      sortOrder: 2,
-      status: 'ended',
-    );
-
-    final mockArticle1 = NewsArticle(
-      id: 'art-1',
-      title: 'గణేష్ నిమజ్జనం ప్రశాంతంగా నిర్వహించాలి',
-      summary: 'Summary 1',
-      body: 'Body 1',
-      imageUrl: 'https://example.com/art1.jpg',
-      source: 'Vaaradhi',
-      category: 'General',
-      publishedAt: DateTime.now(),
-      likes: 10,
-      dislikes: 1,
-      comments: 5,
-      shares: 2,
-      readTimeMinutes: 3,
-      viewCount: 120,
-      coverageLevel: 'district',
-      authorName: 'Reporter',
-      language: 'te',
-      isBreaking: true,
-      mediaItems: [],
-    );
-
-    final mockArticle2 = NewsArticle(
-      id: 'art-2',
-      title: 'తెలంగాణకు నిజమైన స్వాతంత్య్రం',
-      summary: 'Summary 2',
-      body: 'Body 2',
-      imageUrl: 'https://example.com/art2.jpg',
-      source: 'Vaaradhi',
-      category: 'Politics',
-      publishedAt: DateTime.now(),
-      likes: 20,
-      dislikes: 0,
-      comments: 8,
-      shares: 4,
-      readTimeMinutes: 2,
-      viewCount: 250,
-      coverageLevel: 'state',
-      authorName: 'Reporter',
-      language: 'te',
-      isBreaking: true,
-      mediaItems: [],
-    );
-
-    test('HeroCardItem correctly differentiates live and article items', () {
-      final liveItem = HeroCardItem.live(mockActiveLive);
-      expect(liveItem.kind, equals(HeroCardKind.liveStream));
-      expect(liveItem.liveStream, isNotNull);
-      expect(liveItem.liveStream?.title, contains('Telangana Assembly'));
-      expect(liveItem.article, isNull);
-
-      final articleItem = HeroCardItem.article(mockArticle1);
-      expect(articleItem.kind, equals(HeroCardKind.breakingArticle));
-      expect(articleItem.article, isNotNull);
-      expect(articleItem.article?.title, contains('గణేష్ నిమజ్జనం'));
-      expect(articleItem.liveStream, isNull);
+  group('hero from the Home response', () {
+    test('live first, then breaking, then featured', () {
+      final hero = homeHeroStories([
+        _story('f1', featured: true),
+        _story('b1', breaking: true),
+        _story('plain'),
+      ], [
+        _story('live1', type: 'live'),
+        _story('b2', breaking: true),
+      ]);
+      expect(hero.map((a) => a.id), ['live1', 'b1', 'b2', 'f1']);
     });
 
-    test('Active live streams precede breaking articles in hero cards', () {
-      final liveNewsList = [mockActiveLive, mockInactiveLive];
-      final breakingArticles = [mockArticle1, mockArticle2];
-
-      final activeStreams = liveNewsList.where((s) => s.isLiveActive).toList();
-      final heroItems = [
-        ...activeStreams.map((s) => HeroCardItem.live(s)),
-        ...breakingArticles.map((a) => HeroCardItem.article(a)),
-      ];
-
-      expect(heroItems.length, equals(3));
-      // First card MUST be the live stream
-      expect(heroItems[0].kind, equals(HeroCardKind.liveStream));
-      expect(heroItems[0].liveStream?.id, equals('live-1'));
-
-      // Subsequent cards are breaking articles (NO live status)
-      expect(heroItems[1].kind, equals(HeroCardKind.breakingArticle));
-      expect(heroItems[1].article?.id, equals('art-1'));
-      expect(heroItems[2].kind, equals(HeroCardKind.breakingArticle));
-      expect(heroItems[2].article?.id, equals('art-2'));
+    test('is_breaking / is_featured are read from metadata', () {
+      expect(_story('x', breaking: true).isBreaking, isTrue);
+      expect(_story('y', featured: true).isFeatured, isTrue);
     });
 
-    test('When no active live streams exist, hero cards contain only breaking articles', () {
-      final liveNewsList = [mockInactiveLive];
-      final breakingArticles = [mockArticle1, mockArticle2];
-
-      final activeStreams = liveNewsList.where((s) => s.isLiveActive).toList();
-      final heroItems = [
-        ...activeStreams.map((s) => HeroCardItem.live(s)),
-        ...breakingArticles.map((a) => HeroCardItem.article(a)),
-      ];
-
-      expect(heroItems.length, equals(2));
-      expect(heroItems.every((item) => item.kind == HeroCardKind.breakingArticle), isTrue);
-      expect(heroItems.any((item) => item.kind == HeroCardKind.liveStream), isFalse);
+    test('a story that is breaking and featured appears once', () {
+      final hero = homeHeroStories(
+          [_story('a1', breaking: true, featured: true)], const []);
+      expect(hero.map((a) => a.id), ['a1']);
     });
 
-    test('When both live streams and articles are empty, hero cards are empty', () {
-      final List<LiveNews> liveNewsList = [];
-      final List<NewsArticle> breakingArticles = [];
+    test('the same story in both sections appears once', () {
+      final hero = homeHeroStories(
+          [_story('a1', breaking: true)], [_story('a1', breaking: true)]);
+      expect(hero, hasLength(1));
+    });
 
-      final activeStreams = liveNewsList.where((s) => s.isLiveActive).toList();
-      final heroItems = [
-        ...activeStreams.map((s) => HeroCardItem.live(s)),
-        ...breakingArticles.map((a) => HeroCardItem.article(a)),
-      ];
+    test('dedupe is by kind:id — an article and a citizen post may share ids',
+        () {
+      final article = _story('same', type: 'article');
+      final post = _story('same', type: 'ugc');
+      expect(homeStoryKey(article), 'article:same');
+      expect(homeStoryKey(post), 'ugc:same');
+      expect(homeStoryKey(article), isNot(homeStoryKey(post)));
+    });
 
-      expect(heroItems.isEmpty, isTrue);
+    test('only articles count as breaking or featured', () {
+      final hero = homeHeroStories(
+          [_story('u1', type: 'ugc', breaking: true)], const []);
+      // Not breaking-eligible, so the fallback applies.
+      expect(hero.map((a) => a.id), ['u1']);
+    });
+
+    test('with none of those, the first five personalized stories', () {
+      final personalized =
+          List.generate(8, (i) => _story('p$i'));
+      final hero = homeHeroStories(personalized, [_story('near')]);
+      expect(hero.map((a) => a.id), ['p0', 'p1', 'p2', 'p3', 'p4']);
+    });
+
+    test('an empty Home gives an empty hero', () {
+      expect(homeHeroStories(const [], const []), isEmpty);
+    });
+  });
+
+  group('For You rail', () {
+    final now = DateTime(2026, 10, 1, 12);
+    NewsArticle aged(String id, double days, {String type = 'article'}) =>
+        NewsArticle.fromJson({
+          'id': id,
+          'title': 'Story $id',
+          'type': type,
+          'published_at': now
+              .subtract(Duration(minutes: (days * 24 * 60).round()))
+              .toIso8601String(),
+        });
+
+    test('newest first, whatever order the server ranked them in', () {
+      final rail = homeForYouStories(
+          [aged('old', 11), aged('new', 8.4), aged('mid', 9.3)], const [],
+          now: now);
+      expect(rail.map((a) => a.id), ['new', 'mid', 'old']);
+    });
+
+    test('once there is fresh news, old stories drop out', () {
+      final rail = homeForYouStories([
+        aged('stale1', 10),
+        aged('f1', 0.2),
+        aged('stale2', 12),
+        aged('f2', 1),
+        aged('f3', 2),
+        aged('f4', 2.5),
+      ], const [], now: now);
+      expect(rail.map((a) => a.id), ['f1', 'f2', 'f3', 'f4']);
+    });
+
+    test('with too little fresh news, all of it — never an empty rail', () {
+      final rail = homeForYouStories(
+          [aged('f1', 0.5), aged('old', 10)], const [],
+          now: now);
+      expect(rail.map((a) => a.id), ['f1', 'old']);
+    });
+
+    test('live streams and hero stories are not repeated in the rail', () {
+      final live = aged('live1', 1, type: 'live');
+      final heroStory = aged('h1', 1);
+      final rail = homeForYouStories(
+          [live, heroStory, aged('a1', 2)], [live, heroStory],
+          now: now);
+      expect(rail.map((a) => a.id), ['a1']);
     });
   });
 }

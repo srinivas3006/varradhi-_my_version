@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/location_model.dart';
+import '../localization/location_translations.dart';
 import '../core/utils/location_detector.dart';
 import '../repositories/location_repository.dart';
 import '../state/app_state.dart';
@@ -223,6 +224,9 @@ class LocationProvider extends ChangeNotifier {
   Future<bool> apply(LocationSearchResult result) async {
     _isApplying = true;
     notifyListeners();
+    // Keep the API's Telugu name for the chosen place, so it can be shown
+    // in Telugu wherever the app names the reader's location.
+    LocationTranslations.learn(result.nameEn, result.nameTe);
     try {
       // Map LocationSearchResult to DeviceLocation to pass to AppState
       final location = DeviceLocation(
@@ -272,6 +276,10 @@ class LocationProvider extends ChangeNotifier {
   }
 
   Future<bool> applyNode(LocationNode node, LocationLevel level) {
+    // The parents picked on the way down carry their Telugu names too.
+    for (final parent in [_selectedState, _selectedDistrict, _selectedSubdistrict]) {
+      if (parent != null) LocationTranslations.learn(parent.nameEn, parent.nameTe);
+    }
     return apply(
       LocationSearchResult(
         type: level,

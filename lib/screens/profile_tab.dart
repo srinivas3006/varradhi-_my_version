@@ -22,7 +22,20 @@ import 'package:google_fonts/google_fonts.dart';
 import '../localization/app_translations.dart';
 
 class ProfileTab extends StatefulWidget {
-  const ProfileTab({super.key});
+  const ProfileTab({super.key, this.showBackButton = false});
+
+  /// True when opened as its own screen (from the Home header's profile
+  /// button) rather than as a tab: adds a top bar with a back arrow.
+  final bool showBackButton;
+
+  /// Opens Profile over the current screen — the Home header's top-left
+  /// button. Profile is no longer a bottom-bar tab.
+  static Future<void> open(BuildContext context) => Navigator.of(context).push(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '/profile'),
+          builder: (_) => const ProfileTab(showBackButton: true),
+        ),
+      );
 
   @override
   State<ProfileTab> createState() => _ProfileTabState();
@@ -82,6 +95,24 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
         return Scaffold(
           backgroundColor: bgColor,
+          appBar: widget.showBackButton
+              ? AppBar(
+                  backgroundColor: bgColor,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  leading: IconButton(
+                    key: const Key('profile_back_btn'),
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded),
+                    tooltip: MaterialLocalizations.of(context)
+                        .backButtonTooltip,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  title: Text(
+                    tr('nav_profile'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                )
+              : null,
           body: SafeArea(
             child: ListView(
               physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),

@@ -138,10 +138,10 @@ void main() {
   });
 
   group('home bootstrap repository', () {
-    test('sends location, scope, mode and limit', () async {
+    test('sends location, mode and limit — and no scope', () async {
       final a = _Adapter((_) => (200, _homeBody()));
       final repo = HomeFeedRepository.forTesting(_dio(a));
-      await repo.fetch(
+      await repo.fetch(viewer: 'guest',
           lang: 'te',
           state: 'Telangana',
           district: 'Suryapet',
@@ -154,7 +154,8 @@ void main() {
       expect(q['district'], 'Suryapet');
       expect(q['subdistrict'], 'Jajireddygudem');
       expect(q['village'], 'Kesaram');
-      expect(q['scope'], 'main');
+      // /feed/home/ builds both the main and the local section itself.
+      expect(q.containsKey('scope'), isFalse);
       expect(q['mode'], 'normal');
       expect(q['limit'], '10');
     });
@@ -162,7 +163,7 @@ void main() {
     test('honours cache_ttl_seconds, refresh bypasses it', () async {
       final a = _Adapter((_) => (200, _homeBody()));
       final repo = HomeFeedRepository.forTesting(_dio(a));
-      Future<HomeBootstrap?> go({bool force = false}) => repo.fetch(
+      Future<HomeBootstrap?> go({bool force = false}) => repo.fetch(viewer: 'guest',
           state: 'Telangana',
           district: 'Suryapet',
           subdistrict: '',
@@ -178,13 +179,13 @@ void main() {
     test('the last response is kept on the device for an instant start',
         () async {
       final a = _Adapter((_) => (200, _homeBody()));
-      await HomeFeedRepository.forTesting(_dio(a)).fetch(
+      await HomeFeedRepository.forTesting(_dio(a)).fetch(viewer: 'guest',
           state: 'Telangana', district: 'Suryapet', subdistrict: '', village: '');
 
       // A fresh repository (new app launch) with no network.
       final offline = HomeFeedRepository.forTesting(
           _dio(_Adapter((_) => (500, {}))));
-      final cached = await offline.cached(
+      final cached = await offline.cached(viewer: 'guest',
           state: 'Telangana', district: 'Suryapet', subdistrict: '', village: '');
       expect(cached, isNotNull);
       expect(cached!.fromDeviceCache, isTrue);
@@ -195,7 +196,7 @@ void main() {
       final repo = HomeFeedRepository.forTesting(
           _dio(_Adapter((_) => (404, {'detail': 'Not found.'}))));
       expect(
-          await repo.fetch(
+          await repo.fetch(viewer: 'guest',
               state: '', district: '', subdistrict: '', village: ''),
           isNull);
     });

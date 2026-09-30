@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vaaradhi/models/saved_item.dart';
 
 void main() {
   final settings =
@@ -19,29 +20,37 @@ void main() {
       expect(settings, contains("'Saved Articles'"));
     });
 
-    test('it is hidden from guests, who have none', () {
+    test('it is shown to guests, whose bookmarks live on the phone', () {
       final entry = settings.indexOf('BookmarksScreen()');
-      final gate = settings.lastIndexOf('if (state.isLoggedIn) ...[', entry);
-      expect(gate, greaterThan(-1),
-          reason: 'bookmarks require an account');
+      final block = settings.substring(entry - 700, entry);
+      expect(block, isNot(contains('if (state.isLoggedIn) ...[')));
     });
   });
 
   group('the bookmark list parser handles what the API may send', () {
     test('a nested article object is unwrapped', () {
-      expect(api, contains("final nested = map['article']"));
-      expect(api, contains("map['article_id']"));
+      final item = SavedItem.fromJson({
+        'id': 'bm1',
+        'article_id': 'a1',
+        'article': {'title': 'Nested'},
+      });
+      expect(item.story.id, 'a1');
+      expect(item.story.title, 'Nested');
     });
 
     test('a flat article object is accepted too', () {
-      expect(api, contains('articleData = Map<String, dynamic>.from(map)'));
+      final item = SavedItem.fromJson({'id': 'bm1', 'title': 'Flat'});
+      expect(item.story.title, 'Flat');
     });
 
     test('items are marked bookmarked regardless of payload', () {
       // The list endpoint returns saved items by definition, so the flag is
       // forced rather than trusted.
-      expect(api, contains("articleData['is_bookmarked'] = true"));
-      expect(api, contains("articleData['is_bookmarked_by_user'] = true"));
+      final item = SavedItem.fromJson({
+        'id': 'bm1',
+        'article': {'id': 'a1', 'is_bookmarked': false},
+      });
+      expect(item.story.isBookmarked, isTrue);
     });
 
     test('several envelope shapes are unwrapped', () {

@@ -30,7 +30,8 @@ import '../screens/notifications_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/poll_detail_screen.dart';
 import '../screens/poster_detail_screen.dart';
-import '../screens/shorts_viewer_screen.dart';
+import '../features/reels/reel_model.dart';
+import '../features/reels/reels_screen.dart';
 import '../screens/ugc_feed_screen.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -858,13 +859,12 @@ class NotificationService {
           ),
         );
     }
+    // The same full-screen Reels as the bottom bar, with the notification's
+    // video first (it may be a regular video, not in the Shorts feed).
     await AppNavigator.pushSafe(
       navContext,
-      MaterialPageRoute(
-        builder: (_) => ShortsViewerScreen(
-          shorts: videos,
-          initialIndex: index < 0 ? 0 : index,
-        ),
+      ReelsScreen.route(
+        initialReel: index < 0 ? null : Reel.fromVideo(videos[index]),
       ),
     );
   }

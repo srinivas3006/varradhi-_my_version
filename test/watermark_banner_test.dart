@@ -54,11 +54,12 @@ void main() {
       }
     });
 
-    test('on the article detail screen', () {
+    test('not on the article detail screen', () {
+      // The masthead belongs on shared and downloaded images, not on the
+      // reading screen.
       final src =
           File('lib/screens/news_detail_screen.dart').readAsStringSync();
-      expect(src.indexOf('WatermarkBanner('),
-          lessThan(src.indexOf('article.title,')));
+      expect(src, isNot(contains('WatermarkBanner(')));
     });
   });
 
@@ -92,8 +93,8 @@ void main() {
       expect(card, isNot(contains('WatermarkBanner(')));
     });
 
-    test('the detail screen has one banner', () {
-      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[1])).length, 1);
+    test('the detail screen has no banner', () {
+      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[1])).length, 0);
     });
 
     test('the overlay itself no longer draws a band', () {

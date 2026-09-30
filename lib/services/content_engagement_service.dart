@@ -57,7 +57,6 @@ class ContentEngagementService {
   final Set<String> _unsupported = {};
 
   static const _kUgcReaction = 'ugc_reaction';
-  static const _kUgcBookmark = 'ugc_bookmark';
   static const _kArticleReport = 'article_report';
 
   /// Only "route/method not available" counts as unsupported. The endpoints
@@ -106,56 +105,154 @@ class ContentEngagementService {
     }
   }
 
-  // --- Save / Bookmark ----------------------------------------------------
+  // --- Bookmark -----------------------------------------------------------
+  //
+  // "Bookmark" is the backend's name for saving a story, and the only one the
+  // app uses for it (bookmark handover):
+  //   save article:    POST /api/v1/bookmarks/          {article_id}  §3
+  //   unsave article:  POST /api/v1/bookmarks/toggle/   {article_id}  §2
+  //   citizen post:    POST /api/v1/ugc/{id}/bookmark/toggle/         §4
+  // Toggles answer {bookmarked: bool}, which is the final state.
 
-  /// Toggles the saved state towards [nowSaved] and returns the state that
-  /// actually holds afterwards, or null on failure.
+  /// Moves the story's bookmark to [nowBookmarked] and returns the state the
+  /// server reports afterwards, or null on failure (the caller restores the
+  /// previous icon).
   ///
-  /// Citizen posts: the server answers `{bookmarked: bool}` and that value
-  /// is the truth (the endpoint is a toggle, so it can disagree with the
-  /// optimistic guess). `GET /api/v1/bookmarks/` is article-only, so a copy
-  /// of each saved citizen post is also kept on the device for the
-  /// Bookmarks screen to list.
-  Future<bool?> setSaved(NewsArticle story, {required bool nowSaved}) async {
+  /// Nothing here is retried after a failure: a timed-out toggle may still
+  /// have gone through, and repeating it would reverse the bookmark.
+  Future<bool?> setBookmarked(NewsArticle story,
+      {required bool nowBookmarked}) async {
     final id = _idOf(story);
-    if (!story.isUgc) {
-      try {
-        var saved = await ApiService.instance.toggleBookmark(id) ?? nowSaved;
-        if (saved != nowSaved) {
-          // The server already had the state the reader asked for (the
-          // app's copy was stale), so the toggle undid it. Toggle once more
-          // so the server ends where the reader tapped.
-          saved = await ApiService.instance.toggleBookmark(id) ?? nowSaved;
-        }
-        return saved;
-      } catch (e) {
-        debugPrint('[Engagement] article bookmark failed: $e');
-        return null;
+    if (id.isEmpty) {
+      debugPrint('[Bookmark] no id on story; nothing sent');
+      return null;
+    }
+    debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+        '-> want bookmarked=$nowBookmarked');
+
+    if (!AppState.instance.isLoggedIn) {
+      // Guests bookmark too, like Way2News: the story is kept on the phone
+      // and copied to the account when they log in (syncGuestBookmarks).
+      // The server has no guest bookmarks, so nothing is sent now.
+      if (nowBookmarked) {
+        await AppState.instance.saveStoryOnDevice(story);
+      } else {
+        await AppState.instance.removeDeviceSavedStory(id);
+        AppState.instance.setBookmarked(id, false);
       }
+      debugPrint('[Bookmark] guest: $id kept on the phone '
+          'bookmarked=$nowBookmarked');
+      return nowBookmarked;
     }
 
-    bool? saved;
-    if (!_unsupported.contains(_kUgcBookmark)) {
+    try {
+      final bookmarked = story.isUgc
+          ? await _toggleUgc(id)
+          : await _setArticle(id, nowBookmarked);
+      debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+          'now bookmarked=$bookmarked');
+      return bookmarked;
+    } catch (e) {
+      debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+          'failed: ${_message(e)}');
+      return null;
+    }
+  }
+
+  Future<bool> _setArticle(String id, bool nowBookmarked) async {
+    if (nowBookmarked) {
+      // Save only — this endpoint can never remove a bookmark, so a stale
+      // app copy cannot turn a save into an unsave.
+      await ApiService.instance.addBookmark(id);
+      return true;
+    }
+    final bookmarked = await ApiService.instance.toggleBookmark(id);
+    if (bookmarked == true) {
+      // It was not bookmarked on the server, so this toggle added it. Toggle
+      // back so the server ends where the reader tapped. This is a reply to
+      // a successful answer, not a retry of a failed request.
+      debugPrint('[Bookmark] article $id was not bookmarked on the server; '
+          'toggling back');
+      return await ApiService.instance.toggleBookmark(id) ?? false;
+    }
+    return bookmarked ?? false;
+  }
+
+  Future<bool> _toggleUgc(String id) async {
+    final r = await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
+    final value = _data(r)['bookmarked'];
+    debugPrint('[Bookmark] POST ${EngagementEndpoints.ugcBookmarkToggle(id)} '
+        '-> ${r.statusCode} bookmarked=$value');
+    if (value is! bool) throw Exception('no bookmarked in response');
+    // A logged-in bookmark lives on the server; drop any phone copy.
+    if (!value) await AppState.instance.removeDeviceSavedStory(id);
+    return value;
+  }
+
+  Future<void>? _guestSync;
+
+  /// Copies the bookmarks a guest made on this phone into the account that
+  /// just logged in, then clears them from the phone. Runs once per login
+  /// and again whenever the Saved screen opens while any are left (e.g. the
+  /// network was down at login).
+  ///
+  /// Checks the account's saved list first so nothing is toggled off: an
+  /// article is added with the safe POST /bookmarks/, and a citizen post is
+  /// toggled only when the account does not have it yet. A story that fails
+  /// stays on the phone for the next attempt.
+  Future<void> syncGuestBookmarks() =>
+      _guestSync ??= _syncGuestBookmarks().whenComplete(() => _guestSync = null);
+
+  Future<void> _syncGuestBookmarks() async {
+    final guest = AppState.instance.deviceSavedStories;
+    if (guest.isEmpty || !AppState.instance.isLoggedIn) return;
+    debugPrint('[Bookmark] copying ${guest.length} guest bookmark(s) '
+        'to the account');
+
+    final Set<String> onServer;
+    try {
+      onServer = (await ApiService.instance.getBookmarks())
+          .map((i) => i.contentId)
+          .toSet();
+    } catch (e) {
+      debugPrint('[Bookmark] guest copy postponed, list failed: '
+          '${_message(e)}');
+      return;
+    }
+
+    for (final story in guest) {
+      final id = _idOf(story);
+      if (id.isEmpty) continue;
       try {
-        final r = await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
-        final value = _data(r)['bookmarked'];
-        saved = value is bool ? value : nowSaved;
-      } catch (e) {
-        if (!_isUnsupported(e)) {
-          debugPrint('[Engagement] UGC bookmark failed: $e');
-          return null;
+        if (!onServer.contains(id)) {
+          if (story.isUgc) {
+            final r =
+                await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
+            if (_data(r)['bookmarked'] != true) {
+              throw Exception('toggle did not add it');
+            }
+          } else {
+            await ApiService.instance.addBookmark(id);
+          }
         }
-        _unsupported.add(_kUgcBookmark);
+        await AppState.instance.removeDeviceSavedStory(id);
+        AppState.instance.setBookmarked(id, true);
+        debugPrint('[Bookmark] guest bookmark $id copied to the account');
+      } catch (e) {
+        final code = e is DioException ? e.response?.statusCode : null;
+        if (code == 400 || code == 404) {
+          // Handover §9: the story is unpublished or gone; it can never be
+          // saved, so stop retrying it.
+          await AppState.instance.removeDeviceSavedStory(id);
+          AppState.instance.setBookmarked(id, false);
+          debugPrint('[Bookmark] guest bookmark $id no longer available '
+              '($code); dropped');
+        } else {
+          debugPrint('[Bookmark] guest bookmark $id kept on the phone: '
+              '${_message(e)}');
+        }
       }
     }
-    saved ??= nowSaved; // older server: device-only
-    if (saved) {
-      await AppState.instance.saveStoryOnDevice(story);
-    } else {
-      await AppState.instance.removeDeviceSavedStory(id);
-      AppState.instance.setBookmarked(id, false);
-    }
-    return saved;
   }
 
   // --- Report -------------------------------------------------------------

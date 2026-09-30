@@ -93,7 +93,8 @@ class _NewsFeedCardState extends State<NewsFeedCard>
 
   void _handleBookmark() {
     HapticFeedback.lightImpact();
-    requireAuth(context, widget.onBookmark);
+    // Guests have bookmarks too (kept on the phone), so no login gate.
+    widget.onBookmark();
   }
 
   void _handleTap() {
@@ -114,6 +115,19 @@ class _NewsFeedCardState extends State<NewsFeedCard>
         article.imageUrls != null && article.imageUrls!.length > 1;
     final images = hasMultipleImages ? article.imageUrls! : [article.imageUrl];
 
+    // The whole card opens the story. Only "Read More" did before, and it
+    // appears only when the summary is cut off — saved stories often arrive
+    // without one, which left no way to open them. The buttons inside keep
+    // their own taps.
+    return GestureDetector(
+      key: const Key('news_feed_card_open'),
+      onTap: _handleTap,
+      child: _buildCard(context, isDark, article, hasMultipleImages, images),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, bool isDark, NewsArticle article,
+      bool hasMultipleImages, List<String> images) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
@@ -180,10 +194,8 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                   child: AnimatedBuilder(
                       animation: AppState.instance,
                       builder: (context, _) {
-                        final isSaved = article.isBookmarked ||
-                            AppState.instance.isBookmarked(article.id) ||
-                            (article.slug.isNotEmpty &&
-                                AppState.instance.isBookmarked(article.slug));
+                        final isSaved =
+                            AppState.instance.isStoryBookmarked(article);
                         return _iconPill(
                           icon:
                               isSaved ? Icons.bookmark : Icons.bookmark_border,

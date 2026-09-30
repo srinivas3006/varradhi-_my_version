@@ -185,10 +185,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Divider(height: 1),
 
-                    // Saved articles. Reachable only from the Profile tab
-                    // and a notification deep link before this — there was
-                    // no way into it from Settings at all.
-                    if (state.isLoggedIn) ...[
+                    // Saved articles. Shown to guests too: a guest's
+                    // bookmarks are kept on the phone until they log in.
+                    ...[
                       ListTile(
                         leading: const Icon(Icons.bookmark_rounded,
                             color: AppColors.primary),

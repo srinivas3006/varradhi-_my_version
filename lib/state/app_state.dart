@@ -9,6 +9,7 @@ import '../models/redeem_request.dart';
 import '../models/reporter_post.dart';
 import '../models/app_notification.dart';
 import '../services/api_service.dart';
+import '../services/content_engagement_service.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../repositories/ad_repository.dart';
@@ -455,6 +456,14 @@ class AppState extends ChangeNotifier {
     dislikedItemIds = (prefs.getStringList('dislikedItemIds') ?? []).toSet();
     bookmarkedItemIds =
         (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
+    // Telugu names of the reader's places, as the location API sent them.
+    try {
+      final raw = prefs.getString(_locationNamesTeKey);
+      if (raw != null && raw.isNotEmpty) {
+        LocationTranslations.restoreLearned(
+            Map<String, String>.from(jsonDecode(raw) as Map));
+      }
+    } catch (_) {}
     blockedUserIds = (prefs.getStringList('blockedUserIds') ?? []).toSet();
   }
 
@@ -533,6 +542,8 @@ class AppState extends ChangeNotifier {
     await prefs.setStringList('likedItemIds', likedItemIds.toList());
     await prefs.setStringList('dislikedItemIds', dislikedItemIds.toList());
     await prefs.setStringList('bookmarkedItemIds', bookmarkedItemIds.toList());
+    await prefs.setString(
+        _locationNamesTeKey, jsonEncode(LocationTranslations.learnedNames));
     await prefs.setBool('locationPrompted', locationPrompted);
     await prefs.setInt('locationPromptShownCount', locationPromptShownCount);
     if (locationPromptLastShownAtMs != null) {
@@ -578,6 +589,10 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    // Bookmarks made as a guest move into the account that just logged in.
+    unawaited(ContentEngagementService.instance
+        .syncGuestBookmarks()
+        .catchError((Object e) => debugPrint('[Bookmark] guest copy: $e')));
   }
 
   /// Called by the Dio interceptor after a successful silent token refresh.
@@ -827,8 +842,14 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
+  static const _locationNamesTeKey = 'location_names_te_v1';
+
+  /// Place names are shown in Telugu when the app is in Telugu.
+  bool get showsTeluguPlaceNames =>
+      uiLanguageCode == 'te' || language.toLowerCase().contains('telugu');
+
   String get displayLocation {
-    if (uiLanguageCode == 'te' || language.toLowerCase().contains('telugu')) {
+    if (showsTeluguPlaceNames) {
       return LocationTranslations.formatDisplayLocation(
         state: stateName,
         district: district,
@@ -1019,13 +1040,7 @@ class AppState extends ChangeNotifier {
 
   void toggleBookmark(String itemId) {
     if (itemId.isEmpty) return;
-    if (bookmarkedItemIds.contains(itemId)) {
-      bookmarkedItemIds.remove(itemId);
-    } else {
-      bookmarkedItemIds.add(itemId);
-    }
-    notifyListeners();
-    _persist();
+    setBookmarked(itemId, !bookmarkedItemIds.contains(itemId));
   }
 
   /// Sets liked state explicitly.
@@ -1043,14 +1058,47 @@ class AppState extends ChangeNotifier {
   }
 
   /// Sets bookmarked state explicitly. See [setLiked].
+  ///
+  /// Also records it as the reader's latest decision for [itemId], which
+  /// [isStoryBookmarked] trusts over any `is_bookmarked` a screen still holds
+  /// from an earlier fetch.
   void setBookmarked(String itemId, bool bookmarked) {
     if (itemId.isEmpty) return;
+    final decisionChanged = _bookmarkDecisions[itemId] != bookmarked;
+    _bookmarkDecisions[itemId] = bookmarked;
     final changed = bookmarked
         ? bookmarkedItemIds.add(itemId)
         : bookmarkedItemIds.remove(itemId);
-    if (!changed) return;
+    if (!changed && !decisionChanged) return;
     notifyListeners();
-    _persist();
+    if (changed) _persist();
+  }
+
+  /// Bookmark state set this session, by the reader or from the server's
+  /// bookmark list. Each screen keeps its own copy of a story, so the copy's
+  /// `is_bookmarked` goes stale the moment the story is bookmarked or removed
+  /// somewhere else; this map is what keeps every screen in agreement.
+  final Map<String, bool> _bookmarkDecisions = {};
+
+  @visibleForTesting
+  void resetBookmarksForTest() {
+    bookmarkedItemIds.clear();
+    _bookmarkDecisions.clear();
+    _deviceSavedStories.clear();
+  }
+
+  /// The id the bookmark API and the local state are keyed by.
+  static String bookmarkKey(NewsArticle story) =>
+      story.id.isNotEmpty ? story.id : story.slug;
+
+  /// Whether [story] is bookmarked — the one question every save icon and
+  /// menu asks.
+  bool isStoryBookmarked(NewsArticle story) {
+    final id = bookmarkKey(story);
+    if (id.isEmpty) return story.isBookmarked;
+    final decided = _bookmarkDecisions[id];
+    if (decided != null) return decided;
+    return story.isBookmarked || bookmarkedItemIds.contains(id);
   }
 
   bool isLiked(String itemId) {
@@ -1100,10 +1148,12 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  // ---- Saved citizen posts kept on the device ----
+  // ---- Guest bookmarks kept on the device ----
   //
-  // Until the backend can bookmark UGC, a saved citizen post is stored here
-  // (whole story, so the Bookmarks screen can show and open it offline).
+  // The server has no guest bookmarks, so a guest's are stored here (whole
+  // story, so the Saved screen can show and open it). On login they are
+  // copied into the account and removed from here
+  // (ContentEngagementService.syncGuestBookmarks).
 
   static const _deviceSavedKey = 'device_saved_stories_v1';
   final Map<String, Map<String, dynamic>> _deviceSavedStories = {};
@@ -1363,10 +1413,12 @@ class AppState extends ChangeNotifier {
     userId = null;
     userName = 'Guest User';
     userPhone = '';
-    // Device-kept saves belong to the account that made them.
-    for (final id in _deviceSavedStories.keys) {
-      bookmarkedItemIds.remove(id);
-    }
+    // Bookmarks belong to the account that made them — both the server ones
+    // and citizen posts kept on the device. Leaving the ids behind showed the
+    // previous account's bookmarks to whoever logged in next; the next
+    // account's own are restored from the server.
+    bookmarkedItemIds.clear();
+    _bookmarkDecisions.clear();
     _deviceSavedStories.clear();
     unawaited(_persistDeviceSavedStories());
     // The reporter role belongs to the account too; it is restored per

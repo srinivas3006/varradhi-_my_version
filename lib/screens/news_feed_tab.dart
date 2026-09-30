@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
 import '../core/navigation/app_navigator.dart';
-import '../core/network/api_response.dart';
 import '../models/news_article.dart';
 import '../theme/app_theme.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import 'news_detail_screen.dart';
@@ -23,36 +23,16 @@ import '../widgets/feed/daily_greeting_widget.dart';
 import '../models/category.dart';
 import '../models/poll.dart';
 import '../widgets/poll_card.dart';
-import '../models/live_news.dart';
-import '../core/errors/app_exception.dart';
-import '../repositories/feed_repository.dart';
-import '../repositories/ugc_repository.dart';
 import '../repositories/home_feed_repository.dart';
+import '../core/ads/home_ads.dart';
 import '../services/analytics_queue.dart';
-import '../core/state/feed_state.dart';
-import 'location_selection_screen.dart';
+import 'profile_tab.dart';
 import 'poster_detail_screen.dart';
 import '../models/poster_images.dart';
 import '../models/video_item.dart';
 import '../repositories/video_repository.dart';
 import 'video_player_screen.dart';
 import 'notifications_screen.dart';
-
-enum HeroCardKind { liveStream, breakingArticle }
-
-class HeroCardItem {
-  final HeroCardKind kind;
-  final LiveNews? liveStream;
-  final NewsArticle? article;
-
-  const HeroCardItem.live(this.liveStream)
-      : kind = HeroCardKind.liveStream,
-        article = null;
-
-  const HeroCardItem.article(this.article)
-      : kind = HeroCardKind.breakingArticle,
-        liveStream = null;
-}
 
 class NewsFeedTab extends StatefulWidget {
   const NewsFeedTab({super.key});
@@ -62,49 +42,72 @@ class NewsFeedTab extends StatefulWidget {
 }
 
 class _NewsFeedTabState extends State<NewsFeedTab> {
-  late List<NewsArticle> _articles;
-  List<NewsArticle> _featuredArticles = [];
-  List<NewsArticle> _recommendedArticles = [];
+  // Home loads news from exactly two endpoints:
+  //   GET /api/v1/feed/home/  — For You, Near You, and the hero's source
+  //   GET /api/v1/feed/       — the Latest list, paged by meta.next
+  // Everything else on the screen is a widget with its own API: categories,
+  // ads (one request, shared through HomeAds), polls, posters, videos and
+  // the daily quote. A widget that fails hides itself; Home stays up.
+
+  /// From `/feed/home/`: `personalized` → For You, `local` → Near You.
+  List<NewsArticle> _forYou = [];
+  List<NewsArticle> _nearYou = [];
+  bool _bootstrapLite = false;
+
+  /// True once a Home response — cached or fresh — has been applied.
+  bool _homeLoaded = false;
+
+  /// The last `/feed/home/` refresh failed; what is shown is the cached copy.
+  bool _homeFailed = false;
+  Timer? _homeRetryTimer;
+
+  /// From `/feed/`: the Latest list and the exact `meta.next` of its last
+  /// page (null = no more).
+  List<NewsArticle> _latest = [];
+  String? _latestNext;
+  bool _latestHasMore = true;
+  bool _latestLoading = false;
+  bool _latestLoaded = false;
+  bool _latestFailed = false;
+
   List<Category> _categories = [];
-  List<LiveNews> _liveNewsList = [];
   String? _selectedCategory;
   Poll? _poll;
   List<dynamic> _posters = [];
 
   /// Regular videos for the Home carousel, from /articles/video-feed/.
   /// Thumbnails only — nothing here creates a player or autoplays.
-  /// Shorts live in the Video tab, which reads /shorts-feed/.
+  /// Shorts live in the Reels tab, which reads /shorts-feed/.
   List<VideoItem> _homeVideos = [];
   List<AdBanner> _feedAds = [];
 
   /// The ticker strip's own pool. It holds a fixed place above the feed and
   /// rotates through these, so they are kept out of the in-feed ad pool.
-  List<AdBanner> get _breakingStripAds =>
-      _feedAds.where((ad) => ad.isBreakingStrip).toList();
+  List<AdBanner> get _breakingStripAds => HomeAds.breakingStrip(_feedAds);
   Map<String, dynamic>? _dailyQuote;
-  bool _isLoadingMore = false;
-  String? _nextCursor;
-  bool _hasMore = true;
-  FeedStatus _feedStatus = FeedStatus.initial;
-  String? _feedError;
   String? get _feedLang => AppState.instance.contentLanguage;
-  /// From `GET /api/v1/feed/home/` — the first paint. `personalized` feeds
-  /// the For You rail, `local` the Near You section.
-  List<NewsArticle> _forYou = [];
-  List<NewsArticle> _nearYou = [];
-  bool _bootstrapLite = false;
-  Future<void>? _bootstrapFuture;
-  List<NewsArticle> _villageSection = [];
-  List<NewsArticle> _mandalSection = [];
-  List<NewsArticle> _districtUgc = [];
-  List<NewsArticle> _stateUgc = [];
-  bool _locationSectionsLoaded = false;
   bool _isProgressivelyHydrated = false;
-  int _sectionGeneration = 0;
-  int _feedGeneration = 0;
-  String get _feedLocationKey => [
+
+  /// Bumped when the reader, language or location changes. A response is
+  /// applied only if it was requested under the current generation, so a
+  /// slow answer for the old place can never land on the new one.
+  int _generation = 0;
+
+  /// Bumped whenever the Latest list restarts (refresh, category), so an
+  /// older page still in flight is dropped.
+  int _latestGeneration = 0;
+
+  /// Who is reading: the personalized Home belongs to one account.
+  String get _viewer {
+    final app = AppState.instance;
+    if (!app.isLoggedIn) return 'guest';
+    final id = app.userId;
+    return (id != null && id.isNotEmpty) ? 'user:$id' : 'user';
+  }
+
+  String get _homeIdentity => [
+        _viewer,
         AppState.instance.contentLanguage,
-        AppState.instance.city,
         AppState.instance.stateName,
         AppState.instance.district,
         AppState.instance.subdistrict,
@@ -114,97 +117,96 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   final PageController _breakingNewsController = PageController();
   int _currentBreakingIndex = 0;
 
-  late String _preferencesIdentity;
+  late String _identity;
 
-  void _onPreferencesChanged() {
-    final identity = _feedLocationKey;
-    if (identity == _preferencesIdentity) return;
-    _preferencesIdentity = identity;
-    ++_sectionGeneration;
-    _articles = [];
-    _recommendedArticles = [];
-    _featuredArticles = [];
-    _forYou = [];
-    _nearYou = [];
-    _villageSection = [];
-    _mandalSection = [];
-    _districtUgc = [];
-    _stateUgc = [];
-    _feedAds = [];
-    _posters = [];
-    _poll = null;
-    _liveNewsList = [];
-    _nextCursor = null;
-    _hasMore = true;
-    _feedStatus = FeedStatus.loading;
-    _refresh();
+  /// Same story in two lists is one story (see [homeStoryKey]).
+  static String _storyKey(NewsArticle a) => homeStoryKey(a);
+
+  void _onAppStateChanged() {
+    final identity = _homeIdentity;
+    if (identity == _identity) return;
+    // New reader, language or place: drop everything in flight, restart
+    // pagination and load Home for the new identity.
+    _identity = identity;
+    final generation = ++_generation;
+    ++_latestGeneration;
+    _homeRetryTimer?.cancel();
+    setState(() {
+      _forYou = [];
+      _nearYou = [];
+      _homeLoaded = false;
+      _homeFailed = false;
+      _latest = [];
+      _latestNext = null;
+      _latestHasMore = true;
+      _latestLoading = false;
+      _latestLoaded = false;
+      _latestFailed = false;
+      _currentBreakingIndex = 0;
+    });
+    _loadHome(generation);
+    _loadLatest(reset: true);
+    _loadWidgets(generation, forceRefresh: true);
   }
 
   @override
   void initState() {
     super.initState();
-    _preferencesIdentity = _feedLocationKey;
-    AppState.instance.addListener(_onPreferencesChanged);
-    _articles = [];
+    _identity = _homeIdentity;
+    AppState.instance.addListener(_onAppStateChanged);
     AnalyticsQueue.instance.start();
-    // 1. Critical first paint: one bootstrap call (For You + Near You, served
-    //    instantly from the device copy when there is one) and the first
-    //    page of the latest feed.
-    _bootstrapFuture = _loadHomeBootstrap();
-    _loadMore();
+
+    // First frame: the cached Home at once, then /feed/home/ and categories.
+    _loadHome(_generation);
     _loadCategories();
     unawaited(AnalyticsQueue.instance
         .track('feed_refresh', metadata: {'source': 'launch'}));
 
-    // 2. Progressive hydration: defer secondary ancillary metadata past initial frame
+    // After the first frame, in parallel: the Latest list and the widgets.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() => _isProgressivelyHydrated = true);
-      Future.microtask(() {
-        _loadLocationSections();
-        _loadFeedAds();
-        _loadFeatured();
-        _loadRecommendations();
-        _loadPoll();
-        _loadPosters();
-        _loadHomeVideos();
-        _loadLiveNews();
-        _loadDailyQuote();
-      });
+      _loadLatest(reset: true);
+      _loadWidgets(_generation);
     });
   }
 
   @override
   void dispose() {
-    AppState.instance.removeListener(_onPreferencesChanged);
+    AppState.instance.removeListener(_onAppStateChanged);
+    _homeRetryTimer?.cancel();
     _breakingNewsController.dispose();
     super.dispose();
   }
 
-  /// Home bootstrap: device copy first (instant, works offline), then the
-  /// network — in lite mode when the connection has been slow.
-  Future<void> _loadHomeBootstrap({bool forceRefresh = false}) async {
-    final identity = _feedLocationKey;
+  /// `/feed/home/`, stale-while-refresh: the cached copy for this reader and
+  /// place is shown first; the network answer replaces it only on success.
+  Future<void> _loadHome(int generation, {bool forceRefresh = false}) async {
     final app = AppState.instance;
     final repo = HomeFeedRepository.instance;
+    final viewer = _viewer;
 
-    if (_forYou.isEmpty && _nearYou.isEmpty) {
+    if (!_homeLoaded) {
       final cached = await repo.cached(
+        viewer: viewer,
         lang: _feedLang,
         state: app.stateName,
         district: app.district,
         subdistrict: app.subdistrict,
         village: app.village,
       );
-      if (cached != null && mounted && identity == _feedLocationKey) {
+      if (cached != null && mounted && generation == _generation) {
         setState(() {
           _forYou = cached.personalized;
           _nearYou = cached.local;
+          _bootstrapLite = cached.lite;
+          _homeLoaded = true;
         });
       }
     }
 
     final fresh = await repo.fetch(
+      viewer: viewer,
       lang: _feedLang,
       state: app.stateName,
       district: app.district,
@@ -212,11 +214,33 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       village: app.village,
       forceRefresh: forceRefresh,
     );
-    if (fresh == null || !mounted || identity != _feedLocationKey) return;
+    // A request for an old reader or place: ignore it.
+    if (!mounted || generation != _generation) return;
+
+    if (fresh == null) {
+      // Keep whatever is on screen (the cached copy).
+      setState(() {
+        _homeLoaded = true;
+        _homeFailed = true;
+      });
+      if (repo.lastFailureStatus == 429) {
+        // Throttled: try once more a little later, still keeping the cache.
+        _homeRetryTimer?.cancel();
+        _homeRetryTimer = Timer(const Duration(seconds: 30), () {
+          if (mounted && generation == _generation) {
+            _loadHome(generation, forceRefresh: true);
+          }
+        });
+      }
+      return;
+    }
+
     setState(() {
       _forYou = fresh.personalized;
       _nearYou = fresh.local;
       _bootstrapLite = fresh.lite;
+      _homeLoaded = true;
+      _homeFailed = false;
     });
 
     final bulk = fresh.analyticsBulkEndpoint;
@@ -225,9 +249,72 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     unawaited(AnalyticsQueue.instance.flush());
   }
 
+  /// `/feed/`: [reset] loads the first page (refresh, category, new place);
+  /// otherwise the next page from `meta.next`, exactly as the server sent it.
+  Future<void> _loadLatest({bool reset = false}) async {
+    if (!reset && (_latestLoading || !_latestHasMore)) return;
+    final generation = reset ? ++_latestGeneration : _latestGeneration;
+    final next = reset ? null : _latestNext;
+    final app = AppState.instance;
+    if (mounted) setState(() => _latestLoading = true);
+
+    try {
+      final page = await HomeFeedRepository.instance.fetchLatest(
+        next: next,
+        lang: _feedLang,
+        state: app.stateName,
+        district: app.district,
+        subdistrict: app.subdistrict,
+        village: app.village,
+        category: _selectedCategory,
+      );
+      if (!mounted || generation != _latestGeneration) return;
+      setState(() {
+        if (reset) {
+          _latest = page.items;
+        } else {
+          final seen = _latest.map(_storyKey).toSet();
+          _latest = [
+            ..._latest,
+            ...page.items.where((a) => seen.add(_storyKey(a))),
+          ];
+        }
+        _latestNext = page.next;
+        _latestHasMore = page.next != null;
+        _latestLoaded = true;
+        _latestFailed = false;
+      });
+      if (_latest.isNotEmpty) {
+        NotificationService.instance.requestPermissionAfterArticlesLoaded();
+      }
+    } catch (e) {
+      debugPrint('[NewsFeedTab] /feed/ failed: $e');
+      // Keep the list already shown; a refresh or scroll retries.
+      if (mounted && generation == _latestGeneration) {
+        setState(() {
+          _latestLoaded = true;
+          _latestFailed = true;
+        });
+      }
+    } finally {
+      if (mounted && generation == _latestGeneration) {
+        setState(() => _latestLoading = false);
+      }
+    }
+  }
+
+  /// The non-news widgets, in parallel. Each hides itself on failure.
+  void _loadWidgets(int generation, {bool forceRefresh = false}) {
+    _loadFeedAds(generation, forceRefresh: forceRefresh);
+    _loadPoll(generation);
+    _loadPosters(generation);
+    _loadHomeVideos(generation);
+    _loadDailyQuote(generation, forceRefresh: forceRefresh);
+  }
+
   /// Opens a Home card. Articles open by slug (detail is
-  /// /api/v1/articles/{slug}/ — never the id). Live streams from
-  /// /feed/home/ have no slug and no article page, so they open Live.
+  /// /api/v1/articles/{slug}/ — never the id). Live streams have no article
+  /// page, so they open Live.
   void _openStory(NewsArticle article) {
     AppNavigator.pushSafe(
       context,
@@ -247,349 +334,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     }));
   }
 
-  Future<void> _loadLiveNews() async {
-    final queryIdentity = _feedLocationKey;
-    try {
-      final list = await ApiService.instance.getLiveNews();
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _liveNewsList = list);
-      }
-    } catch (_) {
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _liveNewsList = []);
-      }
-    }
-  }
-
-  Future<ApiResponse<List<NewsArticle>>?> _settleSectionRequest(
-    Future<ApiResponse<List<NewsArticle>>> request,
-  ) async {
-    try {
-      return await request;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _loadLocationSections({bool clearExisting = false}) async {
-    final generation = ++_sectionGeneration;
-    final state = AppState.instance.stateName;
-    final district = AppState.instance.district;
-    final subdistrict = AppState.instance.subdistrict;
-    final village = AppState.instance.village;
-
-    if (clearExisting && mounted) {
-      setState(() {
-        _locationSectionsLoaded = false;
-        _villageSection = [];
-        _mandalSection = [];
-        _districtUgc = [];
-        _stateUgc = [];
-      });
-    }
-
-    final requests = <Future<ApiResponse<List<NewsArticle>>?>>[
-      if (village.isNotEmpty)
-        _settleSectionRequest(
-          ApiService.instance.getNewsFeed(
-            scope: 'local',
-            lang: _feedLang,
-            state: state,
-            district: district,
-            subdistrict: subdistrict.isEmpty ? null : subdistrict,
-            village: village,
-            pageSize: 10,
-            forceRefresh: true,
-          ),
-        )
-      else
-        Future.value(null),
-      if (village.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'local',
-            state: state,
-            district: district,
-            subdistrict: subdistrict.isEmpty ? null : subdistrict,
-            village: village,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (subdistrict.isNotEmpty)
-        _settleSectionRequest(
-          ApiService.instance.getNewsFeed(
-            scope: 'local',
-            lang: _feedLang,
-            state: state,
-            district: district,
-            subdistrict: subdistrict,
-            village: '',
-            pageSize: 10,
-            forceRefresh: true,
-          ),
-        )
-      else
-        Future.value(null),
-      if (subdistrict.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'local',
-            state: state,
-            district: district,
-            subdistrict: subdistrict,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (district.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'main',
-            state: state,
-            district: district,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (state.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'main',
-            state: state,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-    ];
-
-    final results = await Future.wait(requests);
-    if (!mounted || generation != _sectionGeneration) return;
-
-    final villageAdmin = (results[0]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _coverageIs(article, 'local') &&
-          _matchesVillage(article, state, district, subdistrict, village),
-    );
-    final villageUgc = (results[1]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _matchesVillage(article, state, district, subdistrict, village),
-    );
-    final mergedVillage = _mergeArticles(villageAdmin, villageUgc);
-
-    final mandalAdmin = (results[2]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _coverageIs(article, 'local') &&
-          _matchesMandal(article, state, district, subdistrict),
-    );
-    final mandalUgc = (results[3]?.data ?? <NewsArticle>[]).where(
-      (article) => _matchesMandal(article, state, district, subdistrict),
-    );
-    final villageIds = mergedVillage.map((article) => article.id).toSet();
-    final mergedMandal = _mergeArticles(mandalAdmin, mandalUgc)
-        .where((article) => !villageIds.contains(article.id))
-        .toList();
-
-    setState(() {
-      _locationSectionsLoaded = true;
-      _villageSection = mergedVillage;
-      _mandalSection = mergedMandal;
-      _districtUgc = (results[4]?.data ?? <NewsArticle>[])
-          .where(
-            (article) =>
-                _sameLocation(article.state, state) &&
-                _sameLocation(article.district, district),
-          )
-          .toList();
-      _stateUgc = (results[5]?.data ?? <NewsArticle>[])
-          .where(
-            (article) =>
-                _sameLocation(article.state, state) &&
-                !_hasLocation(article.district),
-          )
-          .toList();
-    });
-  }
-
   bool _hasLocation(String? value) => value?.trim().isNotEmpty == true;
-
-  bool _sameLocation(String? actual, String expected) {
-    return _hasLocation(actual) &&
-        expected.trim().isNotEmpty &&
-        actual!.trim().toLowerCase() == expected.trim().toLowerCase();
-  }
 
   bool _coverageIs(NewsArticle article, String level) {
     return article.coverageLevel.trim().toLowerCase() == level;
-  }
-
-  bool _matchesVillage(
-    NewsArticle article,
-    String state,
-    String district,
-    String subdistrict,
-    String village,
-  ) {
-    return village.isNotEmpty &&
-        _sameLocation(article.state, state) &&
-        _sameLocation(article.district, district) &&
-        (subdistrict.isEmpty ||
-            _sameLocation(article.subdistrict, subdistrict)) &&
-        _sameLocation(article.village, village);
-  }
-
-  bool _matchesMandal(
-    NewsArticle article,
-    String state,
-    String district,
-    String subdistrict,
-  ) {
-    return subdistrict.isNotEmpty &&
-        _sameLocation(article.state, state) &&
-        _sameLocation(article.district, district) &&
-        _sameLocation(article.subdistrict, subdistrict);
-  }
-
-  List<NewsArticle> _mergeArticles(
-    Iterable<NewsArticle> first,
-    Iterable<NewsArticle> second,
-  ) {
-    final byId = <String, NewsArticle>{};
-    for (final article in [...first, ...second]) {
-      byId.putIfAbsent(article.id, () => article);
-    }
-    final merged = byId.values.toList()
-      ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
-    return merged;
-  }
-
-  Future<void> _loadMore() async {
-    if (_isLoadingMore || !_hasMore) return;
-    final generation = _feedGeneration;
-    final locationKey = _feedLocationKey;
-    setState(() {
-      _isLoadingMore = true;
-      if (_articles.isEmpty) {
-        _feedStatus = FeedStatus.loading;
-        _feedError = null;
-      }
-    });
-
-    try {
-      if (_articles.isEmpty && _nextCursor == null) {
-        final state = await FeedRepository.instance.getInitialFeed(
-          scope: 'main',
-          category: _selectedCategory,
-          lang: _feedLang,
-          state: AppState.instance.stateName,
-          district: AppState.instance.district,
-          pageSize: 25,
-        );
-        if (!mounted ||
-            generation != _feedGeneration ||
-            locationKey != _feedLocationKey) {
-          return;
-        }
-        setState(() {
-          _articles = List.from(state.items);
-          _nextCursor = state.nextCursor;
-          _hasMore = state.hasMore;
-          _feedStatus = state.status;
-          _feedError = state.errorMessage;
-        });
-      } else {
-        final currentState = FeedState<NewsArticle>.success(
-          items: _articles,
-          nextCursor: _nextCursor,
-          hasMore: _hasMore,
-        );
-        final state = await FeedRepository.instance.loadNextPage(
-          currentState: currentState,
-          scope: 'main',
-          category: _selectedCategory,
-          lang: _feedLang,
-          state: AppState.instance.stateName,
-          district: AppState.instance.district,
-          pageSize: 25,
-        );
-        if (!mounted ||
-            generation != _feedGeneration ||
-            locationKey != _feedLocationKey) {
-          return;
-        }
-        setState(() {
-          _articles = List.from(state.items);
-          _nextCursor = state.nextCursor;
-          _hasMore = state.hasMore;
-          _feedStatus = state.status;
-          _feedError = state.errorMessage;
-        });
-      }
-
-      if (_articles.isNotEmpty) {
-        NotificationService.instance.requestPermissionAfterArticlesLoaded();
-      }
-    } catch (e) {
-      if (mounted && _articles.isEmpty) {
-        setState(() {
-          _feedStatus = FeedStatus.error;
-          _feedError = e is AppException
-              ? e.message
-              : 'కథనాలు లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
-        });
-      }
-    } finally {
-      if (mounted && generation == _feedGeneration) {
-        setState(() => _isLoadingMore = false);
-      }
-    }
-  }
-
-  Future<void> _loadFeatured() async {
-    final queryIdentity = _feedLocationKey;
-    try {
-      final breakingRes = await ApiService.instance.getNewsFeed(
-        scope: 'main',
-        breaking: true,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-        city: AppState.instance.city,
-        lang: _feedLang,
-        pageSize: 10,
-      );
-      if (mounted && (breakingRes.data?.isNotEmpty ?? false)) {
-        setState(() => _featuredArticles = breakingRes.data!);
-        return;
-      }
-      final featured = await ApiService.instance.getFeaturedArticles(
-        lang: _feedLang,
-      );
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _featuredArticles = featured);
-      }
-    } catch (e) {
-      // Silently fail, fall back to empty list
-    }
-  }
-
-  /// Fallback for the For You rail when the bootstrap has no personalized
-  /// section (older backend, or it failed).
-  Future<void> _loadRecommendations() async {
-    final queryIdentity = _feedLocationKey;
-    await _bootstrapFuture;
-    if (_forYou.isNotEmpty) return;
-    try {
-      final recs = await ApiService.instance.getRecommendations(limit: 15);
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _recommendedArticles = recs);
-      }
-    } catch (e) {
-      // Silently fail
-    }
   }
 
   Future<void> _loadCategories() async {
@@ -599,166 +347,145 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     } catch (_) {}
   }
 
-  Future<void> _loadPoll() async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadPoll(int generation) async {
     try {
       final polls = await ApiService.instance.getPolls();
-      if (mounted && queryIdentity == _feedLocationKey && polls.isNotEmpty) {
-        setState(() => _poll = polls.first);
+      if (mounted && generation == _generation) {
+        setState(() => _poll = polls.isNotEmpty ? polls.first : null);
       }
     } catch (_) {}
   }
 
-  Future<void> _loadHomeVideos() async {
+  Future<void> _loadHomeVideos(int generation) async {
     try {
       final response = await VideoRepository.instance.getVideoFeed();
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       // isShort is the single classification both surfaces use, so a
       // mis-tagged Short cannot leak into the carousel.
       final videos =
           (response.data ?? []).where((v) => !v.isShort).toList();
-      if (videos.isNotEmpty) setState(() => _homeVideos = videos);
+      setState(() => _homeVideos = videos);
     } catch (e) {
       debugPrint('[NewsFeedTab] home video load failed: $e');
     }
   }
 
-  Future<void> _loadPosters() async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadPosters(int generation) async {
     try {
       final posters = await ApiService.instance.getPosters();
-      if (mounted && queryIdentity == _feedLocationKey) {
+      if (mounted && generation == _generation) {
         setState(() => _posters = posters);
       }
     } catch (_) {}
   }
 
-  Future<void> _loadFeedAds({bool forceRefresh = false}) async {
-    final queryIdentity = _feedLocationKey;
+  /// The one `/ads/` request of this Home load. Inline slots, the breaking
+  /// strip and HomeScreen's bottom sticky banner all read this response.
+  Future<void> _loadFeedAds(int generation, {bool forceRefresh = false}) async {
     try {
       final response = await AdRepository.instance.getAds(
         placementZone: 'feed',
         scope: 'main',
         forceRefresh: forceRefresh,
       );
-      if (mounted &&
-          queryIdentity == _feedLocationKey &&
-          response.data != null) {
+      if (mounted && generation == _generation && response.data != null) {
         setState(() => _feedAds = response.data!);
+        HomeAds.current.value = response.data!;
       }
     } catch (_) {}
   }
 
-  Future<void> _loadDailyQuote({bool forceRefresh = false}) async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadDailyQuote(int generation,
+      {bool forceRefresh = false}) async {
     try {
       final q =
           await ApiService.instance.getRandomQuote(forceRefresh: forceRefresh);
-      if (mounted && queryIdentity == _feedLocationKey && q != null) {
+      if (mounted && generation == _generation && q != null) {
         setState(() => _dailyQuote = q);
       }
     } catch (_) {}
   }
 
+  /// Pull-to-refresh. Nothing is cleared: the old content stays until each
+  /// fresh response arrives and replaces it.
   Future<void> _refresh() async {
-    final generation = ++_feedGeneration;
-    if (mounted) setState(() => _isLoadingMore = false);
-    _bootstrapFuture = _loadHomeBootstrap(forceRefresh: true);
+    final generation = _generation;
     unawaited(AnalyticsQueue.instance.track('feed_refresh', metadata: {
       'source': 'pull',
       'mode': HomeFeedRepository.instance.prefersLite ? 'lite' : 'full',
     }));
-    try {
-      final currentState = FeedState<NewsArticle>.success(
-        items: _articles,
-        nextCursor: _nextCursor,
-        hasMore: _hasMore,
-      );
-      final state = await FeedRepository.instance.refreshFeed(
-        currentState: currentState,
-        scope: 'main',
-        category: _selectedCategory,
-        lang: _feedLang,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-      );
-
-      if (!mounted || generation != _feedGeneration) return;
-
-      setState(() {
-        _articles = List.from(state.items);
-        _nextCursor = state.nextCursor;
-        _hasMore = state.hasMore;
-        _feedStatus = state.status;
-        _feedError = state.errorMessage;
-        _dailyQuote = null;
-      });
-
-      if (state.hasRefreshError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.refreshErrorMessage!),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-
-      AdDeliveryService.instance.resetSession();
-      await _loadFeatured();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e is AppException
-                ? e.message
-                : 'రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    }
-
-    await _loadLocationSections();
-
-    // Ancillary sections load in background without blocking
-    _loadCategories();
-    _loadRecommendations();
-    _loadPoll();
-    _loadPosters();
-    _loadHomeVideos();
-    _loadLiveNews();
-    _loadFeedAds(forceRefresh: true);
-    _loadDailyQuote(forceRefresh: true);
-  }
-
-  Future<void> _changeLocation() async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const LocationSelectionScreen()),
-    );
-    if (changed != true || !mounted) return;
-
-    setState(() {
-      _feedGeneration++;
-      _articles = [];
-      _featuredArticles = [];
-      _recommendedArticles = [];
-      _forYou = [];
-      _nearYou = [];
-      _nextCursor = null;
-      _hasMore = true;
-      _isLoadingMore = false;
-      _feedStatus = FeedStatus.loading;
-    });
-    _bootstrapFuture = _loadHomeBootstrap();
+    AdDeliveryService.instance.resetSession();
+    _homeRetryTimer?.cancel();
+    _loadWidgets(generation, forceRefresh: true);
     await Future.wait([
-      _bootstrapFuture!,
-      _loadMore(),
-      _loadLocationSections(clearExisting: true),
-      _loadFeatured(),
-      _loadFeedAds(forceRefresh: true),
+      _loadHome(generation, forceRefresh: true),
+      _loadLatest(reset: true),
     ]);
+    if (mounted && generation == _generation && _homeFailed && _latestFailed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
+
+  /// A category narrows the Latest list only; Home's sections stay.
+  void _selectCategory(String? slug) {
+    setState(() => _selectedCategory = slug);
+    unawaited(AnalyticsQueue.instance.track('category_select',
+        metadata: {'category': slug ?? 'all'}));
+    _loadLatest(reset: true);
+  }
+
+  /// The picture for a story card. Many feed stories carry it only in
+  /// `media_items`, so the hero showed a grey card for them while the For
+  /// You rail (which already looked there) showed the photo.
+  static String _storyImage(NewsArticle a) {
+    if (a.imageUrl.isNotEmpty) return a.imageUrl;
+    for (final m in a.mediaItems) {
+      if (m.thumbnailUrl.isNotEmpty) return m.thumbnailUrl;
+      if (m.mediaType != 'video' && m.url.isNotEmpty) return m.url;
+    }
+    return '';
+  }
+
+  /// Behind a story that has no picture at all: deep brand red to near
+  /// black, so white headline text reads and the card still looks designed.
+  static const _noImageGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF9F1239), Color(0xFF3B0A16), Color(0xFF111111)],
+    stops: [0.0, 0.55, 1.0],
+  );
+
+  /// Card image area for a story with no picture: the brand gradient with
+  /// the app logo, faint — reads as intentional, not as a failed load.
+  Widget _noImageTile() {
+    return DecoratedBox(
+      key: const Key('no_image_tile'),
+      decoration: const BoxDecoration(gradient: _noImageGradient),
+      child: Center(
+        child: Opacity(
+          opacity: 0.85,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/images/logo.png',
+              width: 40,
+              height: 40,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Hero from the Home response only (see [homeHeroStories]).
+  List<NewsArticle> _heroStories() => homeHeroStories(_forYou, _nearYou);
 
   Widget _buildCategorySelector() {
     if (_categories.isEmpty) return const SizedBox.shrink();
@@ -782,12 +509,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
           return GestureDetector(
             onTap: () {
               if (isSelected) return;
-              setState(() {
-                _selectedCategory = isAll ? null : cat?.slug;
-              });
-              unawaited(AnalyticsQueue.instance.track('category_select',
-                  metadata: {'category': _selectedCategory ?? 'all'}));
-              _refresh();
+              _selectCategory(isAll ? null : cat?.slug);
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
@@ -1081,11 +803,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       child: BackdropFilter(
         filter: dart_ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
         child: Container(
+          // 8, not 16: the icon buttons carry their own 12px padding, so
+          // their glyphs now line up with the 16–20px content edge below.
           padding: EdgeInsets.only(
             top: MediaQuery.of(context).padding.top + 8,
             bottom: 12,
-            left: 16,
-            right: 16,
+            left: 8,
+            right: 8,
           ),
           decoration: BoxDecoration(
             color: isDark
@@ -1099,78 +823,133 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               ),
             ),
           ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _changeLocation,
-                    borderRadius: BorderRadius.circular(8),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 48),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Vaaradhi',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w900,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.color,
-                              ),
-                            ),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.location_on_outlined,
-                                  size: 13,
-                                  color: AppColors.primary,
-                                ),
-                                const SizedBox(width: 3),
-                                Flexible(
-                                  child: Text(
-                                    AppState.instance.displayLocation,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
-                                ),
-                                const Icon(
-                                  Icons.keyboard_arrow_down_rounded,
-                                  size: 15,
-                                  color: AppColors.primary,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
+          // Profile left, logo centred, Search + Notifications right. The
+          // logo sits in its own layer so it is centred on the screen, not
+          // between the uneven left and right groups. Location moved to the
+          // bottom bar's Local tab.
+          child: SizedBox(
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Semantics(
+                  image: true,
+                  label: 'Vaaradhi',
+                  // 36pt, the height of the avatar beside it, decoded at
+                  // screen density so the mark stays sharp.
+                  child: ClipRRect(
+                    key: const Key('home_header_logo'),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      cacheWidth: (36 *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round(),
                     ),
                   ),
                 ),
+                Row(
+                  children: [
+                    _buildProfileButton(),
+                    const Spacer(),
+                    ..._buildHeaderActions(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Top-left: Profile, in a 48dp target.
+  /// - Logged in: the reader's avatar — their photo, else their initial on a
+  ///   soft brand tint — a clean 32dp circle with a hairline edge, no glow.
+  /// - Guest: the plain outline person icon, matching Search and the bell.
+  Widget _buildProfileButton() {
+    return AnimatedBuilder(
+      animation: AppState.instance,
+      builder: (context, _) {
+        final state = AppState.instance;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final photo = state.profileImagePath;
+        final hasPhoto =
+            state.isLoggedIn && photo != null && photo.startsWith('http');
+        final name = state.userName.trim();
+        final initial = state.isLoggedIn &&
+                name.isNotEmpty &&
+                name != 'Guest User'
+            ? String.fromCharCode(name.runes.first).toUpperCase()
+            : '';
+
+        final Widget face;
+        if (hasPhoto) {
+          face = CircleAvatar(
+            key: const Key('home_header_avatar'),
+            radius: 16,
+            backgroundColor: AppColors.chipBg,
+            backgroundImage: CachedNetworkImageProvider(photo, maxWidth: 128),
+          );
+        } else if (initial.isNotEmpty) {
+          face = CircleAvatar(
+            key: const Key('home_header_avatar'),
+            radius: 16,
+            backgroundColor:
+                AppColors.primary.withValues(alpha: isDark ? 0.25 : 0.12),
+            child: Text(
+              initial,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+                height: 1,
               ),
+            ),
+          );
+        } else {
+          face = Icon(Icons.person_outline_rounded,
+              color: Theme.of(context).iconTheme.color);
+        }
+
+        return IconButton(
+          key: const Key('home_header_profile'),
+          tooltip: tr('nav_profile'),
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            ProfileTab.open(context);
+          },
+          icon: hasPhoto || initial.isNotEmpty
+              // Hairline ring so a photo's edge is crisp on any header.
+              ? DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : Colors.black.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: face,
+                )
+              : face,
+        );
+      },
+    );
+  }
+
+  /// Top-right: Search and Notifications.
+  List<Widget> _buildHeaderActions() {
+    return [
               IconButton(
+                key: const Key('home_header_search'),
+                tooltip: AppState.instance.language == 'Telugu'
+                    ? 'వెతకండి'
+                    : 'Search',
                 icon: Icon(Icons.search_rounded,
                     color: Theme.of(context).iconTheme.color),
                 onPressed: () {
@@ -1233,18 +1012,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   );
                 },
               ),
-              // Spotlight is reached from the bottom navigation (main / local
-              // news tabs), so the header keeps only Search and Notifications.
-            ],
-          ),
-        ),
-      ),
-    );
+    ];
   }
 
 
 
-  Widget _buildBreakingNewsSection(List<HeroCardItem> heroItems) {
+  /// The hero carousel, from [_heroStories]: live, breaking, featured.
+  Widget _buildBreakingNewsSection(List<NewsArticle> heroItems) {
     if (heroItems.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1264,40 +1038,29 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             },
             itemCount: heroItems.length,
             itemBuilder: (context, index) {
-              final item = heroItems[index];
-              final isLive = item.kind == HeroCardKind.liveStream &&
-                  item.liveStream != null;
-              final stream = item.liveStream;
-              final article = item.article;
+              final NewsArticle? article = heroItems[index];
+              final isLive = article?.contentKind == 'live';
+              // Only a story the server marked says so on its badge.
+              final badge = isLive
+                  ? null
+                  : article!.isBreaking
+                      ? 'BREAKING'
+                      : article.isFeatured
+                          ? 'FEATURED'
+                          : null;
 
-              final imageUrl = isLive
-                  ? (stream?.thumbnailUrl ?? '')
-                  : (article?.imageUrl ?? '');
-              final title = isLive
-                  ? (stream?.title ?? '')
-                  : (article?.title ?? '');
+              final imageUrl = article == null ? '' : _storyImage(article);
+              final title = article?.title ?? '';
               final subtitle = isLive
-                  ? (stream?.channelName.isNotEmpty == true
-                      ? 'లైవ్ ప్రసారం • ${stream!.channelName}'
-                      : 'లైవ్ ప్రసారం • YouTube Live')
+                  ? 'లైవ్ ప్రసారం'
                   : 'Updated ${article?.timeAgo ?? ''}';
 
               return GestureDetector(
                 onTap: () {
-                  if (isLive) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const LiveNewsScreen()),
-                    );
-                  } else if (article != null) {
-                    AppNavigator.pushSafe(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => NewsDetailScreen(
-                              article: article, slug: article.slug)),
-                    );
-                  }
+                  if (article == null) return;
+                  AdManager.instance.recordContentInteraction();
+                  _trackOpen(article, 'hero');
+                  _openStory(article);
                 },
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1325,6 +1088,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             fit: BoxFit.cover,
                           )
                         : null,
+                    // A story with no picture gets the brand's deep red
+                    // instead of a flat grey card.
+                    gradient: imageUrl.isEmpty ? _noImageGradient : null,
                   ),
                   child: Container(
                     decoration: BoxDecoration(
@@ -1437,7 +1203,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       ),
                                     ),
                                   )
-                                else
+                                else if (badge != null)
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(6),
                                     child: BackdropFilter(
@@ -1446,10 +1212,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 10, vertical: 6),
-                                        color: Colors.orange
-                                            .withValues(alpha: 0.3),
-                                        child: const Text(
-                                          'BREAKING',
+                                        // Solid, so it reads on any photo
+                                        // (the 30% orange washed out).
+                                        color: AppColors.primary,
+                                        child: Text(
+                                          badge,
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w900,
@@ -1460,38 +1227,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       ),
                                     ),
                                   ),
-                                if (isLive &&
-                                    stream?.channelName.isNotEmpty == true)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.2),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.3),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          stream!.channelName,
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else if (!isLive &&
+                                if (badge == null && !isLive) const SizedBox(),
+                                if (!isLive &&
                                     article?.category.isNotEmpty == true)
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
@@ -1613,6 +1350,49 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
+  /// Shown over saved content when `/feed/home/` could not be refreshed
+  /// (offline, 5xx, or 429 — which also retries on its own shortly).
+  Widget _buildOfflineNotice() {
+    final telugu = AppState.instance.language == 'Telugu';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      key: const Key('home_offline_notice'),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : const Color(0xFFFFF4E5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 18,
+              color: isDark ? Colors.white70 : const Color(0xFF8A5A00)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              telugu
+                  ? 'సేవ్ చేసిన వార్తలు చూపిస్తున్నాం'
+                  : 'Showing saved stories',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : const Color(0xFF6B4600),
+              ),
+            ),
+          ),
+          TextButton(
+            key: const Key('home_offline_retry'),
+            onPressed: _refresh,
+            child: Text(telugu ? 'మళ్ళీ ప్రయత్నించండి' : 'Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Section title with the brand gradient mark. [caption] is a quiet
   /// right-aligned note (e.g. the lite-mode hint).
   Widget _buildSectionTitle(String title, {String? caption}) {
@@ -1697,10 +1477,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
                 final article = items[index];
-                final image = article.mediaItems.isNotEmpty &&
-                        article.mediaItems.first.thumbnailUrl.isNotEmpty
-                    ? article.mediaItems.first.thumbnailUrl
-                    : article.imageUrl;
+                final image = _storyImage(article);
                 return SizedBox(
                   width: 220,
                   child: Material(
@@ -1725,12 +1502,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             AspectRatio(
                               aspectRatio: 16 / 9,
                               child: image.isEmpty
-                                  ? Container(
-                                      color: AppColors.chipBg,
-                                      child: const Icon(
-                                          Icons.article_outlined,
-                                          color: AppColors.textMuted),
-                                    )
+                                  ? _noImageTile()
                                   : CachedNetworkImage(
                                       imageUrl: image,
                                       fit: BoxFit.cover,
@@ -2058,77 +1830,35 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedState = AppState.instance.stateName;
-    final selectedDistrict = AppState.instance.district;
-    final selectedSubdistrict = AppState.instance.subdistrict;
-    final selectedVillage = AppState.instance.village;
-
-    final districtSection = _mergeArticles(
-      _articles.where(
-        (article) =>
-            _coverageIs(article, 'district') &&
-            _sameLocation(article.district, selectedDistrict),
-      ),
-      _districtUgc,
-    );
-    final stateSection = _mergeArticles(
-      _articles.where(
-        (article) =>
-            _coverageIs(article, 'state') &&
-            _sameLocation(article.state, selectedState),
-      ),
-      _stateUgc,
-    );
-    final globalSection =
-        _articles.where((article) => _coverageIs(article, 'global')).toList();
-    // For You: personalized ranking from the bootstrap; recommendations only
-    // as a fallback when the bootstrap has none.
-    final forYou =
-        _forYou.isNotEmpty ? _forYou : _recommendedArticles;
-    final sectionIds = {
-      ...forYou.map((article) => article.id),
-      ..._nearYou.map((article) => article.id),
-      ..._villageSection.map((article) => article.id),
-      ..._mandalSection.map((article) => article.id),
-      ...districtSection.map((article) => article.id),
-      ...stateSection.map((article) => article.id),
-      ...globalSection.map((article) => article.id),
+    final heroItems = _heroStories();
+    // Newest first, fresh-first, and nothing the hero already shows.
+    final forYou = homeForYouStories(_forYou, heroItems);
+    // Latest is /feed/ itself, so scrolling to the end really loads more.
+    // Nothing already shown above — hero, For You, Near You — repeats here;
+    // matched by kind:id, since article and citizen-post ids are separate.
+    final shownAbove = {
+      ...heroItems.map(_storyKey),
+      ...forYou.map(_storyKey),
+      ..._nearYou.map(_storyKey),
     };
-    final hasHomeContent = _articles.isNotEmpty ||
-        _forYou.isNotEmpty ||
+    final recommended =
+        _latest.where((a) => !shownAbove.contains(_storyKey(a))).toList();
+    final hasHomeContent = heroItems.isNotEmpty ||
+        forYou.isNotEmpty ||
         _nearYou.isNotEmpty ||
-        _liveNewsList.any((s) => s.isLiveActive) ||
-        _villageSection.isNotEmpty ||
-        _mandalSection.isNotEmpty ||
-        _districtUgc.isNotEmpty ||
-        _stateUgc.isNotEmpty ||
-        (_locationSectionsLoaded && selectedState.isNotEmpty);
-    final breakingNews = _featuredArticles.isNotEmpty
-        ? _featuredArticles
-        : _articles.take(5).toList();
-    // Latest: the paginated feed itself, so scrolling to the end really
-    // loads more. (It used to render the 15 recommendations while
-    // pagination appended to a list nobody displayed.) Nothing shown above
-    // — hero, rail, sections — is repeated here.
-    final heroIds = breakingNews.map((a) => a.id).toSet();
-    final recommended = _articles
-        .where((article) =>
-            !sectionIds.contains(article.id) && !heroIds.contains(article.id))
-        .toList();
-    final activeStreams = _liveNewsList.where((s) => s.isLiveActive).toList();
-    final heroItems = [
-      ...activeStreams.map((s) => HeroCardItem.live(s)),
-      ...breakingNews.map((a) => HeroCardItem.article(a)),
-    ];
+        _latest.isNotEmpty;
+    // Still waiting for the first answer from either news endpoint.
+    final stillLoading = !_homeLoaded || (!_latestLoaded && _latestLoading);
+    final bothFailed = _homeFailed && _latestFailed;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           !hasHomeContent
-              ? (_feedStatus == FeedStatus.loading || _isLoadingMore
+              ? (stillLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : _feedStatus == FeedStatus.error
+                  : bothFailed
                       ? Center(
                           child: Padding(
                             padding: const EdgeInsets.all(24.0),
@@ -2145,23 +1875,16 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       fontWeight: FontWeight.w700),
                                 ),
                                 const SizedBox(height: 8),
-                                Text(
-                                  _feedError ??
-                                      'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
+                                const Text(
+                                  'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
                                   textAlign: TextAlign.center,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 13, color: AppColors.textMuted),
                                 ),
                                 const SizedBox(height: 16),
                                 ElevatedButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _nextCursor = null;
-                                      _hasMore = true;
-                                      _feedStatus = FeedStatus.loading;
-                                    });
-                                    _loadMore();
-                                  },
+                                  key: const Key('home_retry'),
+                                  onPressed: _refresh,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,
                                     foregroundColor: Colors.white,
@@ -2197,18 +1920,33 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                 style: TextStyle(
                                     fontSize: 13, color: AppColors.textMuted),
                               ),
+                              const SizedBox(height: 12),
+                              TextButton.icon(
+                                key: const Key('home_empty_refresh'),
+                                onPressed: _refresh,
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: const Text('రిఫ్రెష్ చేయండి'),
+                              ),
                             ],
                           ),
                         ))
               : RefreshIndicator(
+                  key: const Key('home_refresh'),
                   onRefresh: _refresh,
                   color: AppColors.primary,
+                  // The header floats over the list, so the spinner starts
+                  // below it (and below the breaking strip when shown);
+                  // from the very top it appeared hidden behind the header.
+                  edgeOffset: MediaQuery.of(context).padding.top +
+                      (_breakingStripAds.isNotEmpty ? 118 : 68),
+                  displacement: 32,
                   child: NotificationListener<ScrollNotification>(
                     onNotification: (ScrollNotification scrollInfo) {
                       if (scrollInfo.metrics.pixels >=
                               scrollInfo.metrics.maxScrollExtent - 200 &&
-                          !_isLoadingMore) {
-                        _loadMore();
+                          !_latestLoading &&
+                          _latestHasMore) {
+                        _loadLatest();
                       }
                       return false;
                     },
@@ -2222,20 +1960,24 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         final borderColor = isDark
                             ? Colors.white.withValues(alpha: 0.1)
                             : Colors.black.withValues(alpha: 0.05);
-                        final feedAdsWithoutBreakingStrip =
-                            _feedAds.where((ad) => !ad.isBreakingStrip).toList();
-                        
+                        // Inline slots take what the strip and the bottom
+                        // sticky banner do not — all from the one /ads/ call.
+                        final inlineAds = HomeAds.inline(_feedAds);
+
                         final presentationItems = recommended.isNotEmpty
                             ? AdManager.instance
                                 .buildFeedPresentation<NewsArticle>(
                                 contentItems: recommended,
-                                adsPool: feedAdsWithoutBreakingStrip,
+                                adsPool: inlineAds,
                                 contentKey: (article) =>
                                     '${article.contentKind}:${article.id}',
                               )
                             : <FeedPresentationItem<NewsArticle>>[];
 
                         return CustomScrollView(
+                          // A pull must always reach the refresh, even when
+                          // Home is shorter than the screen.
+                          physics: const AlwaysScrollableScrollPhysics(),
                           slivers: [
                             SliverPadding(
                               padding: EdgeInsets.only(
@@ -2245,6 +1987,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                               sliver: SliverToBoxAdapter(
                                 child: Column(
                                   children: [
+                                    // Showing the saved copy because the
+                                    // refresh failed (offline, 5xx, 429).
+                                    if (_homeFailed) _buildOfflineNotice(),
                                     RepaintBoundary(
                                       child: _buildCategorySelector(),
                                     ),
@@ -2257,7 +2002,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       RepaintBoundary(
                                         child: _buildForYouRail(forYou),
                                       ),
-                                    // Near You — the bootstrap's local section.
+                                    // Near You — the bootstrap's local
+                                    // section; hidden when it is empty.
                                     _buildLocationSection(
                                       title: AppState.instance.language ==
                                               'Telugu'
@@ -2271,61 +2017,12 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       cardColor: cardColor,
                                       borderColor: borderColor,
                                     ),
-                                    // Empty sections are hidden, never shown
-                                    // as an empty "no news yet" card.
-                                    if (selectedVillage.isNotEmpty)
-                                      _buildLocationSection(
-                                        title:
-                                            '$selectedVillage స్థానిక వార్తలు',
-                                        location: selectedVillage,
-                                        icon: Icons.holiday_village_outlined,
-                                        accent: AppColors.primary,
-                                        articles: _villageSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                      ),
+                                    // Village, Mandal, District, State and
+                                    // National are not separate sections:
+                                    // /feed/home/ returns only For You and
+                                    // Near You. Those stories reach the
+                                    // reader through Latest (/feed/).
                                     if (_isProgressivelyHydrated) ...[
-                                      if (selectedSubdistrict.isNotEmpty)
-                                        _buildLocationSection(
-                                          title:
-                                              '$selectedSubdistrict మండల వార్తలు',
-                                          location: selectedSubdistrict,
-                                          icon: Icons.location_city_outlined,
-                                          accent: Colors.teal,
-                                          articles: _mandalSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      if (selectedDistrict.isNotEmpty)
-                                        _buildLocationSection(
-                                          title:
-                                              '$selectedDistrict జిల్లా వార్తలు',
-                                          location: '$selectedDistrict జిల్లా',
-                                          icon: Icons.domain_outlined,
-                                          accent: Colors.indigo,
-                                          articles: districtSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      if (selectedState.isNotEmpty)
-                                        _buildLocationSection(
-                                          title: '$selectedState ముఖ్యాంశాలు',
-                                          location: selectedState,
-                                          icon: Icons.map_outlined,
-                                          accent: Colors.deepOrange,
-                                          articles: stateSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      _buildLocationSection(
-                                        title: 'జాతీయ / అంతర్జాతీయ వార్తలు',
-                                        location: 'జాతీయం / అంతర్జాతీయం',
-                                        icon: Icons.public_outlined,
-                                        accent: Colors.blueGrey,
-                                        articles: globalSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                      ),
                                       if (_dailyQuote != null &&
                                           (_dailyQuote!['text'] != null ||
                                               _dailyQuote!['quote'] !=
@@ -2372,7 +2069,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     left: 16, right: 16, top: 8, bottom: 120),
                                 sliver: SliverList.separated(
                                   itemCount: presentationItems.length +
-                                      (_hasMore ? 1 : 0),
+                                      (_latestHasMore ? 1 : 0),
                                   separatorBuilder: (context, index) =>
                                       const SizedBox(height: 10),
                                   itemBuilder: (context, index) {
@@ -2392,7 +2089,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         ad: item.ad!,
                                         placementZone: 'feed',
                                         exposureKey:
-                                            'home_${_feedLocationKey}_${_feedGeneration}_${item.stableKey}',
+                                            'home_${_identity}_${_latestGeneration}_${item.stableKey}',
                                       );
                                     }
 

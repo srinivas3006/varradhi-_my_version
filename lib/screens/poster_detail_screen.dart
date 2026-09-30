@@ -75,7 +75,8 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
           ),
         ),
         title: Text(title, style: const TextStyle(fontSize: 16)),
-        // No share action here: the bottom button is the one Share control.
+        // No share action here: the bottom-right icon is the one Share
+        // control.
       ),
       body: _images.isEmpty
           ? const Center(
@@ -156,24 +157,18 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
                       ],
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(50),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                      // A plain share icon, bottom-right — no button bar
+                      // over the poster.
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: IconButton(
+                          key: const Key('poster_share'),
+                          onPressed: _shareCurrentPoster,
+                          tooltip: telugu ? 'షేర్ చేయండి' : 'Share',
+                          icon: const Icon(Icons.share_rounded,
+                              color: Colors.white, size: 26),
                         ),
-                        icon: const Icon(Icons.share_rounded),
-                        label: Text(
-                          telugu ? 'షేర్ చేయండి' : 'Share',
-                          style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: _shareCurrentPoster,
                       ),
                     ],
                   ),

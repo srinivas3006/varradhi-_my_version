@@ -8,6 +8,7 @@ import '../models/ugc_draft.dart';
 import '../core/utils/indian_mobile.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
+import 'account_signup_screen.dart';
 import 'ugc_phone_verify_screen.dart';
 import 'submission_status_screen.dart';
 
@@ -61,12 +62,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     // Check for any recoverable pending draft
     _controller.checkForPendingDraft();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || AppState.instance.isLoggedIn) return;
-      requireAuth(context, () {
-        if (mounted) setState(() {});
-      });
-    });
+    // A guest is not bounced to the login route on open: build() shows the
+    // "log in to post news" page, whose button starts login. Once logged in,
+    // _onAppStateChanged swaps in the form.
   }
 
   /// Which of the three screens [build] shows: login, join, or the form.
@@ -343,66 +341,105 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             : null,
       );
 
+  /// A guest on the Post tab. Laid out like the login screen it leads to —
+  /// top bar, left-aligned icon tile, title, note, full-width button, and the
+  /// same "new here?" link — so the two read as one flow.
   Widget _buildLoginRequired() {
     final telugu = AppState.instance.language == 'Telugu';
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: _plainAppBar(),
+      appBar: AppBar(
+        title: Text(telugu ? 'పోస్ట్' : 'Post'),
+        // As the Post tab there is nothing to go back to; pushed as a
+        // route, the usual back arrow shows.
+        automaticallyImplyLeading: _isSecondaryRoute,
+      ),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
+        child: SingleChildScrollView(
+          key: const Key('post_login_required'),
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.edit_note_rounded,
+                    color: AppColors.primary, size: 28),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                telugu
+                    ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి'
+                    : 'Log in to post news',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Theme.of(context).textTheme.bodyLarge?.color),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                telugu
+                    ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
+                    : 'Share what is happening in your village and mandal.',
+                style:
+                    const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  key: const Key('post_login_button'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
                   ),
-                  child: const Icon(Icons.edit_note_rounded,
-                      size: 52, color: AppColors.primary),
+                  onPressed: () => requireAuth(context, () {
+                    if (mounted) setState(() {});
+                  }),
+                  child: Text(telugu ? 'లాగిన్' : 'Log in',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  telugu ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి' : 'Log in to post news',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.w800, height: 1.3),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  telugu
-                      ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
-                      : 'Share what is happening in your village and mandal.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 14.5, color: AppColors.textMuted, height: 1.5),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  key: const Key('post_signup_link'),
+                  onPressed: () async {
+                    await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AccountSignupScreen()),
+                    );
+                    if (mounted) setState(() {});
+                  },
+                  child: Text.rich(
+                    TextSpan(
+                      text: telugu ? 'కొత్త వారా? ' : 'New here? ',
+                      style: const TextStyle(color: AppColors.textMuted),
+                      children: [
+                        TextSpan(
+                          text: telugu
+                              ? 'ఖాతాను సృష్టించండి'
+                              : 'Create an account',
+                          style: const TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ],
                     ),
-                    onPressed: () => requireAuth(context, () {
-                      if (mounted) setState(() {});
-                    }),
-                    icon: const Icon(Icons.login_rounded, size: 20),
-                    label: Text(telugu ? 'లాగిన్' : 'Log in',
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

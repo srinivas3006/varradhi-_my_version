@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/news_article.dart';
+import '../models/saved_item.dart';
 import '../localization/app_translations.dart';
 import '../services/api_service.dart';
 import '../services/content_engagement_service.dart';
 import '../widgets/news_feed_card.dart';
 import 'news_detail_screen.dart';
 import 'comments_screen.dart';
-import 'account_login_screen.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/share_service.dart';
@@ -21,20 +20,24 @@ class BookmarksScreen extends StatefulWidget {
 
 class _BookmarksScreenState extends State<BookmarksScreen> {
   bool _isLoading = true;
-  List<NewsArticle> _bookmarks = [];
+
+  /// The combined saved list — articles and citizen posts — straight from
+  /// `GET /api/v1/bookmarks/`.
+  List<SavedItem> _bookmarks = [];
   String? _error;
   int _generation = 0;
+
+  /// Bookmark ids with a DELETE in flight; their button is disabled.
   final Set<String> _removing = {};
+
+  late bool _wasLoggedIn;
 
   @override
   void initState() {
     super.initState();
+    _wasLoggedIn = AppState.instance.isLoggedIn;
     AppState.instance.addListener(_onAppStateChanged);
-    if (AppState.instance.isLoggedIn) {
-      _fetchBookmarks();
-    } else {
-      _isLoading = false;
-    }
+    _fetchBookmarks();
   }
 
   @override
@@ -45,26 +48,33 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
 
   void _onAppStateChanged() {
     if (!mounted) return;
-    if (AppState.instance.isLoggedIn) {
-      if (_bookmarks.isEmpty && !_isLoading) {
-        _fetchBookmarks();
-      } else {
-        setState(() {});
-      }
-    } else {
-      if (_bookmarks.isNotEmpty) {
-        setState(() {
-          _bookmarks = [];
-          _isLoading = false;
-        });
-      } else {
-        setState(() {});
-      }
+    final loggedIn = AppState.instance.isLoggedIn;
+    if (loggedIn != _wasLoggedIn) {
+      // Logged in or out: reload for the new owner of the bookmarks.
+      _wasLoggedIn = loggedIn;
+      _bookmarks = [];
+      _fetchBookmarks();
+    } else if (!loggedIn) {
+      // A guest's list is on the phone; keep it current.
+      setState(() => _bookmarks = _guestItems());
     }
   }
 
+  /// A guest's bookmarks, kept on this phone, newest first.
+  static List<SavedItem> _guestItems() => AppState.instance.deviceSavedStories
+      .map(SavedItem.onDevice)
+      .toList();
+
   Future<void> _fetchBookmarks() async {
-    if (!mounted || !AppState.instance.isLoggedIn) return;
+    if (!mounted) return;
+    if (!AppState.instance.isLoggedIn) {
+      setState(() {
+        _bookmarks = _guestItems();
+        _error = null;
+        _isLoading = false;
+      });
+      return;
+    }
     final generation = ++_generation;
 
     setState(() {
@@ -73,42 +83,62 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
     });
 
     try {
+      // Anything saved as a guest joins the account before the list loads.
+      await ContentEngagementService.instance.syncGuestBookmarks();
       final bookmarks = await ApiService.instance.getBookmarks();
       if (mounted && generation == _generation) {
-        for (final article in bookmarks) {
-          if (!_removing.contains(article.id)) {
-            AppState.instance.setBookmarked(article.id, true);
-          }
+        // The server list is the truth: every screen shows these as saved.
+        for (final item in bookmarks) {
+          AppState.instance
+              .setBookmarked(AppState.bookmarkKey(item.story), true);
         }
+        // Guest bookmarks that could not be copied yet still show.
+        final onServer = bookmarks.map((b) => b.contentId).toSet();
         setState(() {
-          _bookmarks = _withDeviceSaved(bookmarks)
-              .where((a) => !_removing.contains(a.id))
-              .toList();
+          _bookmarks = [
+            ..._guestItems().where((g) => !onServer.contains(g.contentId)),
+            ...bookmarks,
+          ];
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted && generation == _generation) {
-        final device = _withDeviceSaved(const []);
         setState(() {
-          // Saved citizen posts live on the device, so they still show when
-          // the server list cannot be loaded.
-          _bookmarks = device;
-          if (device.isEmpty) _error = tr('saved_load_failed');
+          if (_bookmarks.isEmpty) _error = tr('saved_load_failed');
           _isLoading = false;
         });
       }
     }
   }
 
-  /// Server bookmarks plus citizen posts saved on the device (until the
-  /// backend can bookmark UGC), without duplicates.
-  List<NewsArticle> _withDeviceSaved(List<NewsArticle> server) {
-    final ids = server.map((a) => a.id).toSet();
-    return [
-      ...AppState.instance.deviceSavedStories.where((a) => ids.add(a.id)),
-      ...server,
-    ];
+  /// A server bookmark: DELETE /api/v1/bookmarks/{bookmark id}/, and the row
+  /// stays until the server answers 204 (or 404, already gone), per the
+  /// bookmark handover. A guest bookmark is simply removed from the phone.
+  Future<void> _remove(SavedItem item) async {
+    if (!_removing.add(item.id)) return;
+    HapticFeedback.lightImpact();
+    setState(() {});
+    try {
+      if (!item.onDevice) {
+        await ApiService.instance.deleteBookmark(item.id);
+      }
+      final key = AppState.bookmarkKey(item.story);
+      AppState.instance.setBookmarked(key, false);
+      item.story.isBookmarked = false;
+      await AppState.instance.removeDeviceSavedStory(key);
+      if (!mounted) return;
+      setState(() => _bookmarks.removeWhere((b) => b.id == item.id));
+    } catch (e) {
+      debugPrint('[Bookmark] remove ${item.id} failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('bookmark_update_failed'))),
+      );
+    } finally {
+      _removing.remove(item.id);
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -140,57 +170,6 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   }
 
   Widget _buildBody(bool isDark) {
-    if (!AppState.instance.isLoggedIn) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.bookmark_border_rounded, size: 72, color: isDark ? Colors.white24 : Colors.black26),
-              const SizedBox(height: 16),
-              Text(
-                tr('sign_in_saved'),
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                tr('sign_in_saved_sub'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark ? Colors.white54 : Colors.black54,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                  );
-                  if (AppState.instance.isLoggedIn) {
-                    _fetchBookmarks();
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: Text(tr('sign_in_register'), style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
@@ -263,46 +242,31 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         itemCount: _bookmarks.length,
         separatorBuilder: (context, index) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
-          final article = _bookmarks[index];
-          return NewsFeedCard(
+          final item = _bookmarks[index];
+          final article = item.story;
+          // NewsFeedCard splits its height between image and text, so it
+          // needs a bounded height. Inside this ListView it had none, the
+          // layout failed, and a release build drew a blank white page even
+          // though the saved items had loaded.
+          return SizedBox(
+            height: _cardHeight(context),
+            child: NewsFeedCard(
             article: article,
             onTap: () {
+              // content_id drives navigation: an article opens by slug, a
+              // citizen post by its id (the detail screen fetches either).
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => NewsDetailScreen(article: article, slug: article.slug),
+                  builder: (_) => NewsDetailScreen(
+                    article: article,
+                    slug: item.isUgc ? null : article.slug,
+                  ),
                 ),
               ).then((_) { if (mounted) _fetchBookmarks(); });
             },
             onLike: () {},
-            onBookmark: () async {
-              if (!_removing.add(article.id)) return;
-              HapticFeedback.lightImpact();
-              final oldIndex = _bookmarks.indexWhere((a) => a.id == article.id);
-              final wasSaved = AppState.instance.isBookmarked(article.id);
-              if (wasSaved) AppState.instance.toggleBookmark(article.id);
-              setState(() => _bookmarks.removeWhere((a) => a.id == article.id));
-              try {
-                final saved = await ContentEngagementService.instance
-                    .setSaved(article, nowSaved: false);
-                if (saved != false) throw Exception('Bookmark update failed');
-              } catch (_) {
-                if (wasSaved && !AppState.instance.isBookmarked(article.id)) {
-                  AppState.instance.toggleBookmark(article.id);
-                }
-                if (!mounted) return;
-                setState(() {
-                  if (!_bookmarks.any((a) => a.id == article.id)) {
-                    _bookmarks.insert(oldIndex.clamp(0, _bookmarks.length), article);
-                  }
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(tr('bookmark_update_failed'))),
-                );
-              } finally {
-                _removing.remove(article.id);
-              }
-            },
+            onBookmark: () => _remove(item),
             onShare: () => ShareService.shareArticle(article),
             onComment: () {
               Navigator.push(
@@ -310,9 +274,15 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
                 MaterialPageRoute(builder: (_) => CommentsScreen(article: article)),
               );
             },
+            ),
           );
         },
       ),
     );
   }
+
+  /// One card per story: image on top, headline and summary below. Sized
+  /// from the width so the photo keeps its shape on every phone.
+  static double _cardHeight(BuildContext context) =>
+      (MediaQuery.sizeOf(context).width * 1.25).clamp(420.0, 620.0);
 }

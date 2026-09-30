@@ -32,9 +32,22 @@ void main() {
       expect(body, contains('SpotlightScreen(isLocal: isLocal)'));
     });
 
-    test('the retired standalone tabs are not wired into Home', () {
+    test('the retired Local tab is not wired into Home', () {
       expect(home, isNot(contains('LocalNewsTab(')));
+    });
+
+    test('Reels (3) opens full-screen over Home, not as a tab', () {
+      expect(home, contains('if (index == 3)'));
+      expect(home, contains('ReelsScreen.open(context)'));
       expect(home, isNot(contains('VideoTab(')));
+    });
+
+    test('Profile is not a tab; it opens from the Home header', () {
+      final tabs = home.substring(home.indexOf('final tabs = ['));
+      final body = tabs.substring(0, tabs.indexOf('];'));
+      expect(body, isNot(contains('ProfileTab(')));
+      final feed = File('lib/screens/news_feed_tab.dart').readAsStringSync();
+      expect(feed, contains('ProfileTab.open(context)'));
     });
   });
 
@@ -44,13 +57,13 @@ void main() {
         .map((m) => m.group(1))
         .toList();
 
-    test('Home, Main News, Post, Local, Profile, in that order', () {
+    test('Home, Main, Post, Reels, Local, in that order', () {
       expect(keys, [
         'nav_home',
         'nav_main_news',
         'nav_post',
+        'nav_reels',
         'nav_local',
-        'nav_profile',
       ]);
     });
 
@@ -74,16 +87,19 @@ void main() {
     final tap = home.substring(home.indexOf('onTap: (index) {'));
     final body = tap.substring(0, tap.indexOf('\n          },'));
 
-    test('Main (1) and Local (3) open Spotlight rather than a tab', () {
-      expect(body, contains('if (index == 1 || index == 3)'));
-      expect(body, contains('_openSpotlight(isLocal: index == 3)'));
+    test('Main (1) and Local (4) open Spotlight rather than a tab', () {
+      expect(body, contains('if (index == 1 || index == 4)'));
+      expect(body, contains('_openSpotlight(isLocal: index == 4)'));
     });
 
-    test('Post (2) requires an account before switching', () {
+    test('Post (2) always opens the Post tab, which gates guests itself', () {
+      // A guest lands on the Post screen's "log in to post news" page
+      // rather than being sent straight to the login route.
       expect(body, contains('if (index == 2)'));
       expect(body, contains('_handlePostTap'));
       final fn = home.substring(home.indexOf('void _handlePostTap()'));
-      expect(fn.substring(0, 200), contains('requireAuth'));
+      expect(fn.substring(0, 200), contains('_switchTab(2)'));
+      expect(fn.substring(0, 200), isNot(contains('requireAuth')));
     });
   });
 
