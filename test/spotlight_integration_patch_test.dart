@@ -134,7 +134,9 @@ void main() {
     AppState.instance.district = 'Old';
     adapter.oldRequest = Completer<void>();
     adapter.oldStarted = Completer<void>();
-    final controller = SpotlightController();
+    // Local mode: its article requests carry the location (the main feed's
+    // do not — see the test below).
+    final controller = SpotlightController(isLocal: true);
     addTearDown(controller.dispose);
     final oldLoad = controller.loadFeed();
     await adapter.oldStarted!.future;
@@ -146,5 +148,36 @@ void main() {
     adapter.oldRequest!.complete();
     await oldLoad;
     expect(controller.state.feed.single.article!.id, 'article-New');
+  });
+
+  test('main and local both send the place; scope decides the filtering',
+      () async {
+    // With `state` set, /articles/feed/ filled page 1 with that state's
+    // older stories, so Spotlight never opened on today's news.
+    AppState.instance
+      ..stateName = 'Telangana'
+      ..district = 'Hyderabad';
+    final main = SpotlightController();
+    addTearDown(main.dispose);
+    await main.loadFeed(refresh: true);
+    final mainArticles =
+        adapter.requests.lastWhere((r) => r.path.contains('/articles/feed/'));
+    expect(mainArticles.queryParameters['scope'], 'main');
+    // Backend: scope=main is the broad newest-first feed; location only
+    // ranks within it and never hides other districts, so it is sent.
+    expect(mainArticles.queryParameters['state'], 'Telangana');
+    expect(mainArticles.queryParameters['district'], 'Hyderabad');
+    // Citizen posts and ads keep the reader's location.
+    final ads = adapter.requests.lastWhere((r) => r.path.endsWith('/ads/'));
+    expect(ads.queryParameters['district'], 'Hyderabad');
+
+    final local = SpotlightController(isLocal: true);
+    addTearDown(local.dispose);
+    await local.loadFeed(refresh: true);
+    final localArticles =
+        adapter.requests.lastWhere((r) => r.path.contains('/articles/feed/'));
+    expect(localArticles.queryParameters['scope'], 'local');
+    expect(localArticles.queryParameters['state'], 'Telangana');
+    expect(localArticles.queryParameters['district'], 'Hyderabad');
   });
 }

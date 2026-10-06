@@ -61,7 +61,11 @@ class FeedRepository {
     String? village,
     bool? breaking,
   }) {
-    final effectiveLang = lang ?? AppState.instance.contentLanguage;
+    // News language or 'all' (AppState.feedLang) — never the interface
+    // language, which login can switch; always sent so guest and logged-in
+    // readers get the same feed.
+    final effectiveLang = lang ??
+        AppState.instance.feedLang;
     final s = scope ?? 'all';
     final c = category != null && category.isNotEmpty ? category.toLowerCase() : 'all';
     final st = state ?? (scope == 'local' ? AppState.instance.stateName : 'any');
@@ -457,7 +461,11 @@ class FeedRepository {
     bool? breaking,
     int pageSize = 25,
   }) async {
-    final effectiveLang = lang ?? AppState.instance.contentLanguage;
+    // News language or 'all' (AppState.feedLang) — never the interface
+    // language, which login can switch; always sent so guest and logged-in
+    // readers get the same feed.
+    final effectiveLang = lang ??
+        AppState.instance.feedLang;
     final effectiveState = state ?? (scope == 'local' ? AppState.instance.stateName : null);
     final effectiveDistrict = district ?? (scope == 'local' ? AppState.instance.district : null);
     final effectiveCity = city ?? (scope == 'local' ? AppState.instance.city : null);
@@ -472,7 +480,8 @@ class FeedRepository {
         if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
         'page_size': pageSize,
         if (scope != null && scope.isNotEmpty) 'scope': scope,
-        'lang': effectiveLang,
+        'lang': effectiveLang.isEmpty ? 'all' : effectiveLang,
+        'ordering': '-published_at',
         if (category != null && category.isNotEmpty && category != 'For You' && category != 'Trending')
           'category': category.toLowerCase(),
         if (breaking != null) 'breaking': breaking,

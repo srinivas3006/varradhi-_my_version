@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/controllers/ugc_controller.dart';
 import 'package:vaaradhi/core/utils/media_validator.dart';
-import 'package:vaaradhi/models/reporter_post.dart';
 import 'package:vaaradhi/models/ugc_draft.dart';
 import 'package:vaaradhi/repositories/ugc_draft_repository.dart';
 import 'package:vaaradhi/repositories/ugc_repository.dart';

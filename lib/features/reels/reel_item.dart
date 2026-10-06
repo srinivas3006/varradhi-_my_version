@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import 'reel_model.dart';
@@ -231,6 +232,12 @@ class _YoutubeReelPlayerState extends State<YoutubeReelPlayer>
       ),
     );
     _sub = _c.listen(_onValue);
+    // The YouTube page is loaded here and its WebView drawn inline below —
+    // see build(). The video queued by fromVideoId plays once this is up.
+    _c.webViewController.setBackgroundColor(Colors.black);
+    // Public equivalent of the package's own init(): loads the player page
+    // (with YouTube's origin) and releases the queued video.
+    _c.initWithParams(params: _c.params);
     if (widget.isActive) startBufferWatch();
   }
 
@@ -329,18 +336,19 @@ class _YoutubeReelPlayerState extends State<YoutubeReelPlayer>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // The WebView itself, inline in this reel. Not the package's
+        // YoutubePlayer widget: on phones that lifts the real WebView into
+        // the app-wide Overlay, above the pager, where it took every swipe
+        // (IgnorePointer only reached its placeholder) and escaped this
+        // crop. Here IgnorePointer really covers it, so vertical drags go to
+        // the pager, and CoverBox crops YouTube's title bar and watermark.
         CoverBox(
           aspectRatio: 9 / 16,
           zoom: kYoutubeCropZoom,
           child: IgnorePointer(
-            child: YoutubePlayer(
-              controller: _c,
-              aspectRatio: 9 / 16,
-              backgroundColor: Colors.black,
-              // A vertical drag is the swipe to the next reel, never a
-              // request for YouTube's fullscreen.
-              enableFullScreenOnVerticalDrag: false,
-              autoFullScreen: false,
+            child: WebViewWidget(
+              key: const Key('reel_youtube_webview'),
+              controller: _c.webViewController,
             ),
           ),
         ),

@@ -136,6 +136,14 @@ class AppTranslations {
       'cat_spiritual': 'Spiritual',
       'cat_videos': 'Videos',
       'cat_photos': 'Photos',
+      'cat_general': 'General',
+      'cat_ai': 'AI',
+      'cat_crime': 'Crime',
+      'cat_lifestyle': 'Lifestyle',
+      'cat_automobile': 'Automobile',
+      'cat_world': 'World',
+      'cat_state': 'State',
+      'cat_city': 'City',
     },
 
     'Telugu': {
@@ -257,9 +265,14 @@ class AppTranslations {
       'daily_posters': 'రోజువారీ పోస్టర్లు & శుభాకాంక్షలు',
       'for_you_section': 'మీ కోసం',
       'horoscope_title': 'నేటి రాశి ఫలాలు',
-      'today_reading': 'నేటి రాశి భవిష్యత్తు',
       'cat_general': 'జనరల్',
       'cat_ai': 'కృత్రిమ మేధస్సు (AI)',
+      'cat_crime': 'క్రైమ్',
+      'cat_lifestyle': 'జీవనశైలి',
+      'cat_automobile': 'ఆటోమొబైల్',
+      'cat_world': 'ప్రపంచం',
+      'cat_state': 'రాష్ట్రం',
+      'cat_city': 'నగరం',
       'retry': 'మళ్లీ ప్రయత్నించండి',
       'login': 'లాగిన్ అవ్వండి',
       'login_to_comment': 'కామెంట్ చేయడానికి లాగిన్ అవ్వండి',
@@ -424,32 +437,71 @@ String tr(String key) => AppTranslations.t(key);
 
 /// Category names are used both as filter keys (matched against
 /// NewsArticle.category) and as display labels. This maps the canonical
-/// English key to a translated label without touching the underlying data.
+/// English key or slug to a translated label without touching the underlying data.
 String categoryLabel(String category) {
+  if (category.trim().isEmpty) return category;
+
+  // If already Telugu, return directly
+  for (final rune in category.runes) {
+    if (rune >= 0x0C00 && rune <= 0x0C7F) return category;
+  }
+
+  final normalized = category
+      .trim()
+      .toLowerCase()
+      .replaceAll('-', '_')
+      .replaceAll('&', '_')
+      .replaceAll(' ', '_');
+
   const keyMap = {
-    'For You': 'cat_for_you',
-    'Trending': 'cat_trending',
-    'Latest News': 'cat_latest_news',
-    'Andhra Pradesh': 'cat_andhra_pradesh',
-    'Telangana': 'cat_telangana',
-    'National': 'cat_national',
-    'International': 'cat_international',
-    'Politics': 'cat_politics',
-    'Business': 'cat_business',
-    'Sports': 'cat_sports',
-    'Cinema': 'cat_cinema',
-    'Technology': 'cat_technology',
-    'Education & Jobs': 'cat_education_jobs',
-    'Health': 'cat_health',
-    'Agriculture': 'cat_agriculture',
-    'Spiritual': 'cat_spiritual',
-    'Videos': 'cat_videos',
-    'Photos': 'cat_photos',
-    'General': 'cat_general',
+    'for_you': 'cat_for_you',
+    'trending': 'cat_trending',
+    'latest_news': 'cat_latest_news',
+    'latest': 'cat_latest_news',
+    'andhra_pradesh': 'cat_andhra_pradesh',
+    'andhra': 'cat_andhra_pradesh',
+    'ap': 'cat_andhra_pradesh',
+    'telangana': 'cat_telangana',
+    'ts': 'cat_telangana',
+    'national': 'cat_national',
+    'india': 'cat_national',
+    'international': 'cat_international',
+    'world': 'cat_world',
+    'politics': 'cat_politics',
+    'business': 'cat_business',
+    'finance': 'cat_business',
+    'sports': 'cat_sports',
+    'cricket': 'cat_sports',
+    'cinema': 'cat_cinema',
+    'movies': 'cat_cinema',
+    'entertainment': 'cat_entertainment',
+    'technology': 'cat_technology',
+    'tech': 'cat_tech',
+    'education_jobs': 'cat_education_jobs',
+    'education___jobs': 'cat_education_jobs',
+    'education': 'cat_education_jobs',
+    'jobs': 'cat_education_jobs',
+    'health': 'cat_health',
+    'agriculture': 'cat_agriculture',
+    'farming': 'cat_agriculture',
+    'spiritual': 'cat_spiritual',
+    'bhakti': 'cat_spiritual',
+    'devotional': 'cat_spiritual',
+    'videos': 'cat_videos',
+    'video': 'cat_videos',
+    'photos': 'cat_photos',
+    'photo': 'cat_photos',
     'general': 'cat_general',
+    'local': 'cat_local',
     'ai': 'cat_ai',
-    'AI': 'cat_ai',
+    'crime': 'cat_crime',
+    'lifestyle': 'cat_lifestyle',
+    'automobile': 'cat_automobile',
+    'auto': 'cat_automobile',
+    'state': 'cat_state',
+    'city': 'cat_city',
   };
-  final translationKey = keyMap[category];
+
+  final translationKey = keyMap[normalized];
   return translationKey != null ? tr(translationKey) : category;
 }

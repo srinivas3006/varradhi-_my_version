@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'news_detail_screen.dart';
@@ -470,9 +471,8 @@ class _SearchScreenState extends State<SearchScreen> {
             article.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
+            style: ArticleTypography.heading(
               fontSize: 14.5,
-              fontWeight: FontWeight.w600,
               height: 1.3,
               color: isDark ? AppColors.textLight : AppColors.textDark,
             ),

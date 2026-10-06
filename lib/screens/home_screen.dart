@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime? _lastBackPressTime;
   AdBanner? _homeBottomAd;
   bool _stickyDismissed = false;
+  Key _postScreenKey = UniqueKey();
 
   /// The bottom sticky banner is picked from the one `/ads/` response Home
   /// already loaded (HomeAds), never from a request of its own. A location
@@ -113,6 +114,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _switchTab(int index) {
     setState(() {
+      if (index == 2) {
+        _postScreenKey = UniqueKey();
+      }
       _activatedIndices.add(index);
       _navIndex = index;
     });
@@ -151,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // 2 — Post, keeping the centre slot the nav bar's floating button
       // renders a gap for.
       _activatedIndices.contains(2)
-          ? const CreatePostScreen()
+          ? CreatePostScreen(key: _postScreenKey)
           : const SizedBox.shrink(),
       // 3 — Reels opens full-screen over Home (ReelsScreen), with no
       // bottom bar; back returns here.
@@ -181,11 +185,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ad: _homeBottomAd!,
                     placementZone: 'feed',
                     onDismiss: () {
-                      if (mounted)
+                      if (mounted) {
                         setState(() {
                           _stickyDismissed = true;
                           _homeBottomAd = null;
                         });
+                      }
                     },
                   ),
               ),

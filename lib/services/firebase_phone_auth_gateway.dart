@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import '../core/utils/log_safe.dart';
 
 /// Thin seam over the Firebase Phone Auth SDK so the verification flow can
 /// be driven by a fake in tests.
@@ -32,6 +33,11 @@ abstract class PhoneAuthGateway {
   /// null if there is none.
   Future<String?> refreshIdToken();
 
+  /// A fresh ID token for a Firebase user already signed in on this phone
+  /// with a verified phone number, or null. Lets the backend be asked
+  /// "is this mobile verified?" before any OTP is sent.
+  Future<String?> existingPhoneIdToken();
+
   Future<void> signOut();
 
   void setLanguageCode(String code);
@@ -50,7 +56,7 @@ class FirebasePhoneAuthGateway implements PhoneAuthGateway {
       await Firebase.initializeApp().timeout(const Duration(seconds: 6));
       return Firebase.apps.isNotEmpty;
     } catch (e) {
-      debugPrint('[PhoneAuth] Firebase unavailable: $e');
+      debugPrint('[PhoneAuth] Firebase unavailable: ${LogSafe.scrub(e)}');
       return false;
     }
   }
@@ -89,12 +95,25 @@ class FirebasePhoneAuthGateway implements PhoneAuthGateway {
       throw FirebaseAuthException(
           code: 'user-missing', message: 'Firebase sign-in returned no user.');
     }
+    if ((user.phoneNumber ?? '').isEmpty) {
+      throw FirebaseAuthException(
+          code: 'phone-missing',
+          message: 'Firebase did not verify the phone number.');
+    }
     final token = await user.getIdToken(true);
     if (token == null || token.isEmpty) {
       throw FirebaseAuthException(
           code: 'token-missing', message: 'Firebase returned no ID token.');
     }
     return token;
+  }
+
+  @override
+  Future<String?> existingPhoneIdToken() async {
+    final user = _auth.currentUser;
+    if (user == null || (user.phoneNumber ?? '').isEmpty) return null;
+    final token = await user.getIdToken(true);
+    return (token == null || token.isEmpty) ? null : token;
   }
 
   @override
@@ -109,7 +128,7 @@ class FirebasePhoneAuthGateway implements PhoneAuthGateway {
     try {
       if (_auth.currentUser != null) await _auth.signOut();
     } catch (e) {
-      debugPrint('[PhoneAuth] signOut failed: $e');
+      debugPrint('[PhoneAuth] signOut failed: ${LogSafe.scrub(e)}');
     }
   }
 

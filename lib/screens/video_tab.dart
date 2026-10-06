@@ -377,11 +377,12 @@ class _VideoTabState extends State<VideoTab> {
                   ad: _bottomAd!,
                   placementZone: 'feed',
                   onDismiss: () {
-                    if (mounted)
+                    if (mounted) {
                       setState(() {
                         _bottomAdDismissed = true;
                         _bottomAd = null;
                       });
+                    }
                   },
                 ),
               ),

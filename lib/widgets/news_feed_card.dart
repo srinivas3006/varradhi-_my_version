@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/navigation/auth_guard.dart';
 import '../models/news_article.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../theme/article_typography.dart';
 import '../localization/app_translations.dart';
 import '../services/api_service.dart';
 import 'reaction_buttons.dart';
@@ -396,7 +396,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                     article.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.notoSansTelugu(
+                    style: ArticleTypography.heading(
                       fontSize: 17.0,
                       fontWeight: FontWeight.w700,
                       color: isDark
@@ -414,7 +414,7 @@ class _NewsFeedCardState extends State<NewsFeedCard>
                             ? article.summary.trim()
                             : article.body.trim();
 
-                        final textStyle = GoogleFonts.notoSansTelugu(
+                        final textStyle = ArticleTypography.body(
                           fontSize: 14.5,
                           color: isDark
                               ? AppColors.textSecondaryDark

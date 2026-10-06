@@ -234,8 +234,11 @@ class NewsArticle {
           json['source']?.toString() ??
           'Vaaradhi',
       category: parsedCategory,
-      publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
-      // The backend sends singular *_count names: like_count, dislike_count,
+      publishedAt: DateParser.tryParse(json['published_at'] ??
+              json['created_at'] ??
+              json['publish_date'] ??
+              json['published_date']) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       // comment_count. Only dislike_count was listed, so likes and comments
       // fell through to plural keys that never arrive and rendered 0 no
       // matter what the article actually had. Plural spellings kept as

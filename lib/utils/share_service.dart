@@ -10,6 +10,9 @@ import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../theme/article_typography.dart';
+import '../widgets/sharing/news_share_card.dart';
 import '../widgets/watermark/watermark_banner.dart';
 import '../core/utils/url_normalizer.dart';
 import '../services/sharing/share_content_builder.dart';
@@ -148,11 +151,6 @@ class ShareService {
     return _imageCandidates(article).isNotEmpty;
   }
 
-  /// Where the red strip starts inside the sticker artwork, as a fraction of
-  /// its height. Everything above it is transparent except the logo circle,
-  /// which rises past the strip.
-  static const double _stickerStripTop = 95 / 296;
-
   /// Generates the branded composite article image:
   /// - High-resolution news photo
   /// - Downscaled at decode time if > 3MB (OOM prevention on low-end devices)
@@ -172,31 +170,134 @@ class ShareService {
         if (fallback != null) ..._imageCandidates(fallback),
       };
 
-      // 1. First candidate that downloads AND decodes wins. Memory-safe
-      // decoding: downscale at decode-time if very large (OOM prevention).
-      ui.Image? decoded;
+      // 1. First candidate that downloads AND decodes wins. Decoded at card
+      // width (memory-safe on low-end phones); its shape sets the photo box.
+      Uint8List? photo;
+      double photoRatio = 9 / 16;
       for (final url in candidates) {
         final bytes = await _fetchImageBytes(url);
         if (bytes == null || bytes.isEmpty) continue;
         try {
-          final codec = bytes.lengthInBytes > 3000000
-              ? await ui.instantiateImageCodec(bytes, targetWidth: 1440)
-              : await ui.instantiateImageCodec(bytes);
-          decoded = (await codec.getNextFrame()).image;
+          final codec = await ui.instantiateImageCodec(bytes,
+              targetWidth: NewsShareCard.width.toInt());
+          final frame = (await codec.getNextFrame()).image;
+          // Landscape photos keep their shape; tall ones are cropped to a
+          // square so the headline and summary stay in view.
+          photoRatio = (frame.height / frame.width).clamp(0.5, 1.0);
+          frame.dispose();
+          photo = bytes;
           break;
         } catch (e) {
           debugPrint('[ShareService] Could not decode $url: $e');
         }
       }
 
-      if (decoded == null) {
-        return _buildWatermarkOnlyFile(article);
-      }
-      final ui.Image image = decoded;
+      // 2. The Way2News-style card: photo, headline, summary, brand strip.
+      final source = (fallback?.summary.trim().isNotEmpty ?? false) &&
+              article.summary.trim().isEmpty
+          ? fallback!
+          : article;
+      final card = await _captureNewsCard(NewsShareCard(
+        headline: article.title.trim(),
+        summary: shareSummary(source),
+        meta: shareMeta(article),
+        photo: photo,
+        photoHeightRatio: photoRatio,
+      ));
+      if (card == null) return _buildWatermarkOnlyFile(article);
 
+      final dir = await getTemporaryDirectory();
+      final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final file = File('${dir.path}/vaaradhi_$safeId.jpg');
+      await file.writeAsBytes(card);
+      return file;
+    } catch (e) {
+      debugPrint('[ShareService] Error generating article image: $e');
+      return null;
+    }
+  }
+
+  /// The story text for the card: the summary, else the start of the body
+  /// with any HTML removed.
+  @visibleForTesting
+  static String shareSummary(NewsArticle a) {
+    final s = a.summary.trim();
+    if (s.isNotEmpty) return s;
+    return a.body
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  /// "Local News  |  06 Oct 2026" — category (if any) and the publish date.
+  @visibleForTesting
+  static String shareMeta(NewsArticle a) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final d = a.publishedAt.toLocal();
+    final date = d.year > 2000
+        ? '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]} ${d.year}'
+        : '';
+    // "|" not "·": the Mandali font has no middle dot (drew a box).
+    return [a.category.trim(), date].where((s) => s.isNotEmpty).join('  |  ');
+  }
+
+  /// Renders [card] off-screen (pixel ratio 1 → exactly 1080px wide) and
+  /// returns it as JPEG bytes, or null if it could not be drawn.
+  static Future<Uint8List?> _captureNewsCard(NewsShareCard card) async {
+    try {
+      // The Telugu fonts must be loaded before the frame is drawn, or the
+      // capture would use a fallback font.
+      await GoogleFonts.pendingFonts([
+        ArticleTypography.heading(fontSize: 56, color: Colors.black),
+        ArticleTypography.body(fontSize: 40, color: Colors.black),
+      ]).timeout(const Duration(seconds: 8), onTimeout: () => const []);
+      final png = await _screenshotController.captureFromLongWidget(
+        MediaQuery(
+          data: const MediaQueryData(),
+          child: Directionality(textDirection: TextDirection.ltr, child: card),
+        ),
+        pixelRatio: 1,
+        delay: const Duration(milliseconds: 150),
+        constraints: const BoxConstraints(
+            minWidth: NewsShareCard.width, maxWidth: NewsShareCard.width),
+      );
+      final decoded = img.decodePng(png);
+      if (decoded == null) return null;
+      return Uint8List.fromList(img.encodeJpg(decoded,
+          quality: 88, chroma: img.JpegChroma.yuv420));
+    } catch (e) {
+      debugPrint('[ShareService] news card capture failed: $e');
+      return null;
+    }
+  }
+
+  /// Brands any photo with the Vaaradhi sticker — the exact composite the
+  /// reader share uses. For the admin "add brand" action on citizen news.
+  /// Null when [bytes] is not a decodable image.
+  static Future<File?> brandPhotoBytes(Uint8List bytes, String fileName) async {
+    try {
+      final codec = bytes.lengthInBytes > 3000000
+          ? await ui.instantiateImageCodec(bytes, targetWidth: 1440)
+          : await ui.instantiateImageCodec(bytes);
+      final image = (await codec.getNextFrame()).image;
+      final safe = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      return await _composeBranded(image, safe);
+    } catch (e) {
+      debugPrint('[ShareService] Could not brand photo: $e');
+      return null;
+    }
+  }
+
+  /// Photo + full-width sticker → JPEG file in the temp dir.
+  static Future<File?> _composeBranded(ui.Image image, String fileName) async {
+    try {
       // 2. Banner decoding
       final bannerByteData =
-          await rootBundle.load('assets/images/watermark_banner.png');
+          await rootBundle.load(WatermarkBanner.asset);
       final bannerBytes = bannerByteData.buffer.asUint8List();
       final ui.Image banner = await decodeImageFromList(bannerBytes);
 
@@ -210,10 +311,15 @@ class ShareService {
       // Scaled sticker height matching exact width ratio. It is placed so
       // the strip's top edge lands on the photo's bottom edge; only the part
       // from the strip down extends the canvas.
+      // Only the red strip and logo (the artwork is an opaque JPEG with
+      // black margins), placed directly BELOW the photo so none of the photo
+      // is covered.
+      final double srcTop = banner.height * WatermarkBanner.stripTop;
+      final double srcHeight = banner.height *
+          (WatermarkBanner.stripBottom - WatermarkBanner.stripTop);
       final double bannerHeight =
-          banner.height.toDouble() * targetWidth / banner.width.toDouble();
-      final double bannerTop =
-          targetHeight - bannerHeight * _stickerStripTop;
+          srcHeight * targetWidth / banner.width.toDouble();
+      final double bannerTop = targetHeight.toDouble();
       final int totalHeight = (bannerTop + bannerHeight).ceil();
 
       // 4. Paint to Canvas with high quality and anti-aliasing
@@ -237,9 +343,9 @@ class ShareService {
           Rect.fromLTWH(0, 0, targetWidth.toDouble(), targetHeight.toDouble());
       canvas.drawImageRect(image, imgSrcRect, imgDstRect, paint);
 
-      // Draw the sticker: strip below the photo, logo circle over it.
+      // Draw the cropped strip below the photo.
       final bannerSrcRect =
-          Rect.fromLTWH(0, 0, banner.width.toDouble(), banner.height.toDouble());
+          Rect.fromLTWH(0, srcTop, banner.width.toDouble(), srcHeight);
       final bannerDstRect = Rect.fromLTWH(
           0, bannerTop, targetWidth.toDouble(), bannerHeight);
       canvas.drawImageRect(banner, bannerSrcRect, bannerDstRect, paint);
@@ -267,12 +373,11 @@ class ShareService {
       );
 
       final dir = await getTemporaryDirectory();
-      final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final file = File('${dir.path}/vaaradhi_$safeId.jpg');
+      final file = File('${dir.path}/$fileName.jpg');
       await file.writeAsBytes(jpgBytes);
       return file;
     } catch (e) {
-      debugPrint('[ShareService] Error generating article image: $e');
+      debugPrint('[ShareService] Error composing branded image: $e');
       return null;
     }
   }
@@ -281,8 +386,10 @@ class ShareService {
   static Future<File?> buildPosterFile(
     NewsArticle article, {
     bool includeText = false,
-  }) =>
-      generateArticleImage(article);
+  }) async =>
+      // Download is offered only where canGeneratePoster says so; anything
+      // else gets no file (sharing still sends the text-only news card).
+      canGeneratePoster(article) ? generateArticleImage(article) : null;
 
   /// Outcome of a download, so the UI can say what actually happened rather
   /// than guessing.
@@ -346,7 +453,21 @@ class ShareService {
     try {
       final file = await buildPosterFile(article);
       if (file == null) return downloadFailed;
+      return await saveFileToGallery(file.path);
+    } finally {
+      _isSharing = false;
+    }
+  }
 
+  /// Saves a local image (or video, [isVideo]) to the phone's gallery, in a
+  /// "Vaaradhi" album where the OEM allows it. Returns [downloadSaved],
+  /// [downloadPermissionDenied] or [downloadFailed].
+  static Future<int> saveFileToGallery(String path,
+      {bool isVideo = false}) async {
+    Future<void> put({String? album}) => isVideo
+        ? Gal.putVideo(path, album: album)
+        : Gal.putImage(path, album: album);
+    try {
       // On Android 10+ (API 29+), Scoped Storage lets the app save its own files
       // to MediaStore without storage permissions. On Android <= 28 or iOS,
       // check and request access if needed.
@@ -363,12 +484,12 @@ class ShareService {
       // conflicts occur on Android 13+ (e.g. MIUI/OneUI/ColorOS), seamlessly
       // fall back to saving directly to the root Pictures gallery without an album.
       try {
-        await Gal.putImage(file.path, album: 'Vaaradhi');
+        await put(album: 'Vaaradhi');
         return downloadSaved;
       } catch (albumError) {
         debugPrint('ShareService: Album save error ($albumError), retrying root gallery...');
         try {
-          await Gal.putImage(file.path);
+          await put();
           return downloadSaved;
         } catch (fallbackError) {
           debugPrint('ShareService: Fallback save also failed: $fallbackError');
@@ -385,10 +506,8 @@ class ShareService {
           ? downloadPermissionDenied
           : downloadFailed;
     } catch (e) {
-      debugPrint('ShareService: poster download failed: $e');
+      debugPrint('ShareService: gallery save failed: $e');
       return downloadFailed;
-    } finally {
-      _isSharing = false;
     }
   }
 

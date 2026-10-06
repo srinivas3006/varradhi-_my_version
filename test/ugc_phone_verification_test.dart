@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/controllers/ugc_controller.dart';
@@ -67,7 +68,16 @@ class FakeGateway implements PhoneAuthGateway {
   }
 
   @override
-  Future<void> signOut() async => signOuts++;
+  Future<void> signOut() async {
+    signOuts++;
+    existingSessionToken = null;
+  }
+
+  /// Token of a Firebase phone session still signed in on the phone.
+  String? existingSessionToken;
+
+  @override
+  Future<String?> existingPhoneIdToken() async => existingSessionToken;
 
   @override
   void setLanguageCode(String code) {}
@@ -159,6 +169,7 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    UgcPhoneVerificationController.resetSessionState();
     AppState.instance.language = 'English';
     AppState.instance.ugcMobileVerified = false;
     AppState.instance.ugcVerifiedMobile = '';
@@ -251,6 +262,7 @@ void main() {
         gateway: gateway,
         api: api,
         resendCooldown: Duration.zero,
+        initialMode: UgcVerifyMode.firebase,
       );
     });
 
@@ -276,8 +288,90 @@ void main() {
       expect(c.verifiedMobile, '9876543210');
       expect(AppState.instance.uploadVerified, isTrue);
       expect(AppState.instance.ugcVerifiedMobile, '9876543210');
-      // The Firebase user existed only to mint the token.
-      expect(gateway.signOuts, greaterThanOrEqualTo(1));
+      // The Firebase phone session is kept for the next pre-OTP check.
+      expect(gateway.signOuts, 0);
+    });
+
+    group('before any OTP: is this account already verified?', () {
+      setUp(() async {
+        FlutterSecureStorage.setMockInitialValues({});
+        await AppState.instance.clearUgcVerification();
+        AppState.instance
+          ..userId = 'acct-1'
+          ..isLoggedIn = true;
+      });
+
+      test('kept session of this account → "Mobile verified." → no OTP',
+          () async {
+        await AppState.instance.writeUgcFirebaseOwner('acct-1');
+        gateway.existingSessionToken = 'kept-token';
+        api.firebaseResponses.add({
+          'message': 'Mobile verified.',
+          'verified': true,
+          'mobile': '9014066807',
+        });
+
+        expect(await c.checkExistingVerification(), isTrue);
+        expect(c.step, UgcVerifyStep.verified);
+        expect(api.idTokensSeen, ['kept-token']);
+        expect(gateway.lastPhone, isNull, reason: 'no OTP was sent');
+        expect(AppState.instance.ugcVerifiedMobile, '9014066807');
+      });
+
+      test('sendCode asks the backend first, then skips the OTP', () async {
+        await AppState.instance.writeUgcFirebaseOwner('acct-1');
+        gateway.existingSessionToken = 'kept-token';
+        api.firebaseResponses.add({'verified': true, 'mobile': '9014066807'});
+        c.setMobile('9014066807');
+        await c.sendCode();
+        expect(c.step, UgcVerifyStep.verified);
+        expect(gateway.lastPhone, isNull);
+      });
+
+      test('no kept session → normal OTP, nothing sent to the backend',
+          () async {
+        expect(await c.checkExistingVerification(), isFalse);
+        expect(api.idTokensSeen, isEmpty);
+        c.setMobile('9876543210');
+        await c.sendCode();
+        expect(gateway.lastPhone, '+919876543210');
+      });
+
+      test("another account's session is signed out, never reused",
+          () async {
+        await AppState.instance.writeUgcFirebaseOwner('someone-else');
+        gateway.existingSessionToken = 'their-token';
+        expect(await c.checkExistingVerification(), isFalse);
+        expect(api.idTokensSeen, isEmpty);
+        expect(gateway.signOuts, 1);
+      });
+
+      test('backend does not confirm → session dropped, OTP next', () async {
+        await AppState.instance.writeUgcFirebaseOwner('acct-1');
+        gateway.existingSessionToken = 'kept-token';
+        api.firebaseResponses.add(backendError(401, 'Invalid Firebase token.'));
+        expect(await c.checkExistingVerification(), isFalse);
+        expect(c.errorMessage, isNull, reason: 'the check is silent');
+        expect(gateway.signOuts, 1);
+        expect(AppState.instance.uploadVerified, isFalse);
+      });
+
+      test('a reply without verified:true is not a verification', () async {
+        await AppState.instance.writeUgcFirebaseOwner('acct-1');
+        gateway.existingSessionToken = 'kept-token';
+        api.firebaseResponses.add({'message': 'ok'});
+        expect(await c.checkExistingVerification(), isFalse);
+        expect(AppState.instance.uploadVerified, isFalse);
+      });
+
+      test('a successful OTP tags the kept session with the account',
+          () async {
+        c.setMobile('9876543210');
+        await c.sendCode();
+        await c.submitCode('123456');
+        expect(c.step, UgcVerifyStep.verified);
+        expect(await AppState.instance.readUgcFirebaseOwner(), 'acct-1');
+      });
     });
 
     test('backend-returned mobile wins over what was typed', () async {
@@ -287,6 +381,33 @@ void main() {
       await c.submitCode('123456');
       expect(AppState.instance.ugcVerifiedMobile, '9123456789');
     });
+
+    for (final body in <Map<String, dynamic>>[
+      {},
+      {'message': 'ok'},
+      {'verified': true},
+      {'verified': 'yes', 'mobile': '9876543210'},
+    ]) {
+      test('bridge reply $body is NOT a verification', () async {
+        await AppState.instance.clearUgcVerification();
+        c.setMobile('9876543210');
+        await c.sendCode();
+        api.firebaseResponses.add(body);
+        await c.submitCode('123456');
+
+        expect(c.step, isNot(UgcVerifyStep.verified));
+        expect(AppState.instance.uploadVerified, isFalse);
+        // Firebase user kept: the reporter can retry the bridge call
+        // from the OTP screen without a new SMS.
+        expect(c.canRetryLink, isTrue);
+        expect(c.errorMessage, isNotNull);
+
+        api.firebaseResponses.add({'verified': true, 'mobile': '9876543210'});
+        await c.retryLink();
+        expect(c.step, UgcVerifyStep.verified);
+        expect(AppState.instance.ugcVerifiedMobile, '9876543210');
+      });
+    }
 
     test('Android auto-retrieval finishes without typing the code', () async {
       gateway.autoVerify = true;
@@ -387,27 +508,69 @@ void main() {
       expect(api.idTokensSeen, isEmpty);
     });
 
-    test('an unset-up Firebase project shows its reason on screen', () async {
-      // Production on 2026-09-28: Authentication was never initialised, so
-      // Firebase answered CONFIGURATION_NOT_FOUND behind a generic message.
+    Future<void> settle() async {
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+
+    // Client APK on 2026-10-06: the Firebase project has no Blaze plan, so
+    // every OTP failed with BILLING_NOT_ENABLED and the screen showed the
+    // raw code. A setup error now goes straight to the backend SMS OTP.
+    test('BILLING_NOT_ENABLED → backend SMS OTP sent automatically',
+        () async {
+      gateway.sendError = FirebaseAuthException(
+          code: 'unknown',
+          message: 'An internal error has occurred. [ BILLING_NOT_ENABLED ]');
+      c.setMobile('9876543210');
+      await c.sendCode();
+      await settle();
+      expect(c.mode, UgcVerifyMode.backendSms);
+      expect(api.otpMobiles, ['9876543210']);
+      expect(c.step, UgcVerifyStep.enterCode);
+      expect(c.errorMessage, isNull, reason: 'no error, no code on screen');
+    });
+
+    test('CONFIGURATION_NOT_FOUND is a setup error too', () async {
       gateway.sendError = FirebaseAuthException(
           code: 'internal-error',
           message: 'An internal error has occurred. [ CONFIGURATION_NOT_FOUND ]');
       c.setMobile('9876543210');
       await c.sendCode();
-      expect(c.canUseFallback, isTrue);
-      expect(c.errorMessage,
-          contains('internal-error · CONFIGURATION_NOT_FOUND'));
+      await settle();
+      expect(api.otpMobiles, ['9876543210']);
     });
 
-    test('Firebase misconfigured → backend SMS fallback with 10 digits',
+    test('after a setup error the next screen starts on SMS', () async {
+      gateway.sendError = FirebaseAuthException(
+          code: 'unknown', message: '[ BILLING_NOT_ENABLED ]');
+      c.setMobile('9876543210');
+      await c.sendCode();
+      await settle();
+      final next = UgcPhoneVerificationController(
+          gateway: FakeGateway(), api: FakeApi());
+      expect(next.mode, UgcVerifyMode.backendSms);
+      next.dispose();
+    });
+
+    test('a reader-side failure is not treated as a setup error', () async {
+      gateway.sendError =
+          FirebaseAuthException(code: 'internal-error', message: 'timeout');
+      c.setMobile('9876543210');
+      await c.sendCode();
+      await settle();
+      expect(c.mode, UgcVerifyMode.firebase);
+      expect(api.otpMobiles, isEmpty);
+      expect(c.canUseFallback, isTrue);
+      expect(c.errorMessage, isNot(contains('internal-error')));
+    });
+
+    test('Firebase misconfigured → backend SMS with 10 digits, verified',
         () async {
       gateway.sendError = FirebaseAuthException(code: 'app-not-authorized');
       c.setMobile('+91 98765 43210');
       await c.sendCode();
-      expect(c.canUseFallback, isTrue);
-
-      await c.useFallback();
+      await settle();
       expect(c.mode, UgcVerifyMode.backendSms);
       expect(api.otpMobiles, ['9876543210']);
       expect(c.step, UgcVerifyStep.enterCode);
@@ -433,7 +596,55 @@ void main() {
       // Only an explicit choice reaches the backend SMS flow.
       await c.useFallback();
       expect(c.mode, UgcVerifyMode.backendSms);
+    });
+  });
+
+  test('defaults to Firebase mode', () {
+    final c = UgcPhoneVerificationController(
+        gateway: FakeGateway(), api: FakeApi());
+    expect(c.mode, UgcVerifyMode.firebase);
+    c.dispose();
+  });
+
+  group('Backend SMS phone verification flow (fallback)', () {
+    late FakeApi api;
+    late UgcPhoneVerificationController c;
+
+    setUp(() {
+      api = FakeApi();
+      c = UgcPhoneVerificationController(
+        api: api,
+        resendCooldown: Duration.zero,
+        initialMode: UgcVerifyMode.backendSms,
+      );
+    });
+
+    tearDown(() => c.dispose());
+
+    test('happy path: mobile → backend send-otp → enter code → verify-otp → verified',
+        () async {
+      c.setMobile('9876543210');
+      await c.sendCode();
       expect(api.otpMobiles, ['9876543210']);
+      expect(c.step, UgcVerifyStep.enterCode);
+
+      await c.submitCode('123456');
+      expect(c.step, UgcVerifyStep.verified);
+      expect(c.verifiedMobile, '9876543210');
+      expect(AppState.instance.uploadVerified, isTrue);
+      expect(AppState.instance.ugcVerifiedMobile, '9876543210');
+    });
+
+    test('invalid OTP shows error and stays on enterCode step', () async {
+      api.otpOk = false;
+      c.setMobile('9876543210');
+      await c.sendCode();
+      expect(c.step, UgcVerifyStep.enterCode);
+
+      await c.submitCode('654321');
+      expect(c.step, UgcVerifyStep.enterCode);
+      expect(c.errorMessage, isNotNull);
+      expect(AppState.instance.uploadVerified, isFalse);
     });
   });
 
@@ -606,6 +817,40 @@ void main() {
 
       expect(result, '9876543210');
       controller.dispose();
+    });
+
+    testWidgets('billing off → OTP code step appears, no error shown',
+        (tester) async {
+      final gateway = FakeGateway()
+        ..sendError = FirebaseAuthException(
+            code: 'unknown',
+            message: 'An internal error has occurred. [ BILLING_NOT_ENABLED ]');
+      final api = FakeApi();
+      final controller = UgcPhoneVerificationController(
+          gateway: gateway, api: api, resendCooldown: Duration.zero);
+      await tester.pumpWidget(MaterialApp(
+          home: UgcPhoneVerifyScreen(controller: controller)));
+      await tester.enterText(
+          find.byKey(const Key('ugc-verify-phone')), '9876543210');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('ugc-verify-send')));
+      await tester.pumpAndSettle();
+
+      // Switched to the backend SMS by itself: straight to the code step.
+      expect(api.otpMobiles, ['9876543210']);
+      expect(find.byKey(const Key('ugc-verify-code')), findsOneWidget);
+      expect(find.textContaining('BILLING_NOT_ENABLED'), findsNothing);
+      controller.dispose();
+    });
+  });
+
+  group('the login phone is never the verified UGC mobile', () {
+    test('uploadVerified needs the bridge flag, not just a number', () async {
+      await AppState.instance.clearUgcVerification();
+      AppState.instance.ugcVerifiedMobile = '9876543210';
+      expect(AppState.instance.uploadVerified, isFalse);
+      expect(AppState.instance.ugcMobileVerified, isFalse);
+      await AppState.instance.clearUgcVerification();
     });
   });
 }

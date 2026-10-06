@@ -62,7 +62,9 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
         _secondsRemaining <= 0 ||
         (WidgetsBinding.instance.lifecycleState != null &&
             WidgetsBinding.instance.lifecycleState !=
-                AppLifecycleState.resumed)) return;
+                AppLifecycleState.resumed)) {
+      return;
+    }
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
       if (_secondsRemaining <= 1) {

@@ -3,6 +3,7 @@ import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
 import '../core/navigation/app_navigator.dart';
 import '../models/news_article.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import '../localization/app_translations.dart';
@@ -146,6 +147,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     });
     _loadHome(generation);
     _loadLatest(reset: true);
+    _loadCategories();
     _loadWidgets(generation, forceRefresh: true);
   }
 
@@ -255,10 +257,15 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     if (!reset && (_latestLoading || !_latestHasMore)) return;
     final generation = reset ? ++_latestGeneration : _latestGeneration;
     final next = reset ? null : _latestNext;
-    final app = AppState.instance;
     if (mounted) setState(() => _latestLoading = true);
 
     try {
+      // Location is sent again: the backend's scope=main ranking now puts
+      // freshness first (today → yesterday → 3 days → older, newest-first
+      // inside each band) and uses location only within a band — checked
+      // live on /feed/. Before that fix, location pushed today's news off
+      // page 1, which is why it was left out.
+      final app = AppState.instance;
       final page = await HomeFeedRepository.instance.fetchLatest(
         next: next,
         lang: _feedLang,
@@ -269,14 +276,19 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         category: _selectedCategory,
       );
       if (!mounted || generation != _latestGeneration) return;
+      // Newest first within each page. /feed/ is not date-ordered even
+      // without location; a later page is sorted on its own and added
+      // below, so stories already on screen never jump.
+      final pageItems = [...page.items]
+        ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
       setState(() {
         if (reset) {
-          _latest = page.items;
+          _latest = pageItems;
         } else {
           final seen = _latest.map(_storyKey).toSet();
           _latest = [
             ..._latest,
-            ...page.items.where((a) => seen.add(_storyKey(a))),
+            ...pageItems.where((a) => seen.add(_storyKey(a))),
           ];
         }
         _latestNext = page.next;
@@ -342,7 +354,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   Future<void> _loadCategories() async {
     try {
-      final cats = await ApiService.instance.getCategories();
+      final lang = AppState.instance.contentLanguage ??
+          (AppState.instance.language == 'Telugu' ? 'te' : 'en');
+      final cats = await ApiService.instance.getCategories(lang: lang);
       if (mounted) setState(() => _categories = cats);
     } catch (_) {}
   }
@@ -485,7 +499,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   /// Hero from the Home response only (see [homeHeroStories]).
-  List<NewsArticle> _heroStories() => homeHeroStories(_forYou, _nearYou);
+  List<NewsArticle> _heroStories() =>
+      homeHeroStories(_forYou, _nearYou, latest: _latest);
 
   Widget _buildCategorySelector() {
     if (_categories.isEmpty) return const SizedBox.shrink();
@@ -529,7 +544,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               ),
               child: Center(
                 child: Text(
-                  isAll ? tr('all') : categoryLabel(cat!.name),
+                  isAll ? tr('all') : cat!.localizedName,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
@@ -1038,26 +1053,24 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             },
             itemCount: heroItems.length,
             itemBuilder: (context, index) {
-              final NewsArticle? article = heroItems[index];
-              final isLive = article?.contentKind == 'live';
-              // Only a story the server marked says so on its badge.
-              final badge = isLive
+              final NewsArticle article = heroItems[index];
+              final isLive = article.contentKind == 'live';
+              // Only a recent story the server marked says so on its badge.
+              final badge = isLive || !homeIsRecent(article)
                   ? null
-                  : article!.isBreaking
+                  : article.isBreaking
                       ? 'BREAKING'
                       : article.isFeatured
                           ? 'FEATURED'
                           : null;
 
-              final imageUrl = article == null ? '' : _storyImage(article);
-              final title = article?.title ?? '';
-              final subtitle = isLive
-                  ? 'లైవ్ ప్రసారం'
-                  : 'Updated ${article?.timeAgo ?? ''}';
+              final imageUrl = _storyImage(article);
+              final title = article.title;
+              final subtitle =
+                  isLive ? 'లైవ్ ప్రసారం' : 'Updated ${article.timeAgo}';
 
               return GestureDetector(
                 onTap: () {
-                  if (article == null) return;
                   AdManager.instance.recordContentInteraction();
                   _trackOpen(article, 'hero');
                   _openStory(article);
@@ -1217,7 +1230,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                         color: AppColors.primary,
                                         child: Text(
                                           badge,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w900,
                                             letterSpacing: 1.2,
@@ -1229,7 +1242,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                   ),
                                 if (badge == null && !isLive) const SizedBox(),
                                 if (!isLive &&
-                                    article?.category.isNotEmpty == true)
+                                    article.category.isNotEmpty)
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
                                     child: BackdropFilter(
@@ -1249,7 +1262,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                           ),
                                         ),
                                         child: Text(
-                                          article!.category.toUpperCase(),
+                                          article.category.toUpperCase(),
                                           style: const TextStyle(
                                             fontSize: 9,
                                             fontWeight: FontWeight.w700,
@@ -1347,6 +1360,80 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         ),
         const SizedBox(height: 8),
       ],
+    );
+  }
+
+  /// Latest stories shown before the quote / poll / posters / videos.
+  static const _latestLeadCount = 5;
+
+  /// The non-news widgets: daily quote, poll, posters, videos. Each shows
+  /// only once loaded; nothing before the first frame is done.
+  List<Widget> _homeExtras() {
+    if (!_isProgressivelyHydrated) return const [];
+    return [
+      if (_dailyQuote != null &&
+          (_dailyQuote!['text'] != null || _dailyQuote!['quote'] != null)) ...[
+        const SizedBox(height: 16),
+        DailyGreetingWidget(
+          imageUrl: _dailyQuote!['image_url'] ?? _dailyQuote!['imageUrl'] ?? '',
+          title: _dailyQuote!['author'] ?? 'Daily Quote',
+          quote: _dailyQuote!['text'] ?? _dailyQuote!['quote'] ?? '',
+        ),
+      ],
+      if (_poll != null) ...[
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: PollCard(poll: _poll!),
+        ),
+      ],
+      if (_posters.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _buildPostersStrip(),
+      ],
+      if (_homeVideos.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _buildHomeVideosStrip(),
+      ],
+    ];
+  }
+
+  /// A run of the Latest list (stories and inline ads), with an optional
+  /// loading spinner at its end.
+  Widget _buildLatestSliver(
+    List<FeedPresentationItem<NewsArticle>> items, {
+    required Color cardColor,
+    required Color borderColor,
+    required EdgeInsets padding,
+    required bool showSpinner,
+  }) {
+    return SliverPadding(
+      padding: padding,
+      sliver: SliverList.separated(
+        itemCount: items.length + (showSpinner ? 1 : 0),
+        separatorBuilder: (context, index) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          if (index == items.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+          final item = items[index];
+          if (item.isAd && item.ad != null) {
+            return UnifiedAdWidget(
+              key: ValueKey(item.stableKey),
+              ad: item.ad!,
+              placementZone: 'feed',
+              exposureKey:
+                  'home_${_identity}_${_latestGeneration}_${item.stableKey}',
+            );
+          }
+          return _buildFeedArticleCard(item, cardColor, borderColor);
+        },
+      ),
     );
   }
 
@@ -1541,10 +1628,18 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                 article.title,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
+                                style: ArticleTypography.heading(
                                   fontSize: 14,
                                   height: 1.35,
                                   fontWeight: FontWeight.w700,
+                                  color: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge
+                                          ?.color ??
+                                      (Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? AppColors.readingTitleDark
+                                          : AppColors.readingTitleLight),
                                 ),
                               ),
                             ),
@@ -1680,11 +1775,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         article.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: ArticleTypography.heading(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w800,
                           height: 1.3,
-                          letterSpacing: -0.2,
+                          letterSpacing: 0.0,
+                          color:
+                              Theme.of(context).textTheme.bodyLarge?.color ??
+                                  (Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? AppColors.readingTitleDark
+                                      : AppColors.readingTitleLight),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -2022,83 +2123,52 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     // /feed/home/ returns only For You and
                                     // Near You. Those stories reach the
                                     // reader through Latest (/feed/).
-                                    if (_isProgressivelyHydrated) ...[
-                                      if (_dailyQuote != null &&
-                                          (_dailyQuote!['text'] != null ||
-                                              _dailyQuote!['quote'] !=
-                                                  null)) ...[
-                                        const SizedBox(height: 16),
-                                        DailyGreetingWidget(
-                                          imageUrl: _dailyQuote!['image_url'] ??
-                                              _dailyQuote!['imageUrl'] ??
-                                              '',
-                                          title: _dailyQuote!['author'] ??
-                                              'Daily Quote',
-                                          quote: _dailyQuote!['text'] ??
-                                              _dailyQuote!['quote'] ??
-                                              '',
-                                        ),
-                                      ],
-                                      if (_poll != null) ...[
-                                        const SizedBox(height: 16),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16),
-                                          child: PollCard(poll: _poll!),
-                                        ),
-                                      ],
-                                      if (_posters.isNotEmpty) ...[
-                                        const SizedBox(height: 16),
-                                        _buildPostersStrip(),
-                                      ],
-                                      if (_homeVideos.isNotEmpty) ...[
-                                        const SizedBox(height: 16),
-                                        _buildHomeVideosStrip(),
-                                      ],
-                                    ],
                                     const SizedBox(height: 16),
                                     if (recommended.isNotEmpty)
                                       _buildLatestHeader(),
+                                    // No Latest stories yet: the extras show
+                                    // here rather than not at all.
+                                    if (presentationItems.isEmpty)
+                                      ..._homeExtras(),
                                   ],
                                 ),
                               ),
                             ),
-                            if (presentationItems.isNotEmpty)
-                              SliverPadding(
+                            // News first, Way2News-style: the opening Latest
+                            // stories come straight after the sections, then
+                            // the quote / poll / posters / videos, then the
+                            // rest of Latest.
+                            if (presentationItems.isNotEmpty) ...[
+                              _buildLatestSliver(
+                                presentationItems
+                                    .take(_latestLeadCount)
+                                    .toList(),
+                                cardColor: cardColor,
+                                borderColor: borderColor,
                                 padding: const EdgeInsets.only(
-                                    left: 16, right: 16, top: 8, bottom: 120),
-                                sliver: SliverList.separated(
-                                  itemCount: presentationItems.length +
-                                      (_latestHasMore ? 1 : 0),
-                                  separatorBuilder: (context, index) =>
-                                      const SizedBox(height: 10),
-                                  itemBuilder: (context, index) {
-                                    if (index == presentationItems.length) {
-                                      return const Center(
-                                        child: Padding(
-                                          padding: EdgeInsets.all(16.0),
-                                          child: CircularProgressIndicator(),
-                                        ),
-                                      );
-                                    }
-
-                                    final item = presentationItems[index];
-                                    if (item.isAd && item.ad != null) {
-                                      return UnifiedAdWidget(
-                                        key: ValueKey(item.stableKey),
-                                        ad: item.ad!,
-                                        placementZone: 'feed',
-                                        exposureKey:
-                                            'home_${_identity}_${_latestGeneration}_${item.stableKey}',
-                                      );
-                                    }
-
-                                    return _buildFeedArticleCard(
-                                        item, cardColor, borderColor);
-                                  },
+                                    left: 16, right: 16, top: 8),
+                                showSpinner: false,
+                              ),
+                              SliverToBoxAdapter(
+                                child: Column(
+                                  key: const Key('home_extras'),
+                                  children: [
+                                    ..._homeExtras(),
+                                    const SizedBox(height: 10),
+                                  ],
                                 ),
-                              )
-                            else
+                              ),
+                              _buildLatestSliver(
+                                presentationItems
+                                    .skip(_latestLeadCount)
+                                    .toList(),
+                                cardColor: cardColor,
+                                borderColor: borderColor,
+                                padding: const EdgeInsets.only(
+                                    left: 16, right: 16, bottom: 120),
+                                showSpinner: _latestHasMore,
+                              ),
+                            ] else
                               const SliverToBoxAdapter(
                                 child: SizedBox(height: 120),
                               ),

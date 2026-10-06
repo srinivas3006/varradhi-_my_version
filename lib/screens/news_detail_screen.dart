@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../theme/article_typography.dart';
 import '../utils/share_service.dart';
 import '../services/tts_service.dart';
 import '../repositories/news_article_repository.dart';
@@ -582,8 +582,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
         Text(
           article.title,
-          style: GoogleFonts.notoSansTelugu(
-            fontSize: 22.0,
+          style: ArticleTypography.heading(
+            fontSize: 25.0,
             fontWeight: FontWeight.w700,
             height: 1.4,
             color: isDark ? AppColors.readingTitleDark : const Color(0xFF1A1A1A),
@@ -633,10 +633,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     animation: AppState.instance,
                     builder: (context, _) => Text(
                       article.summary,
-                      style: GoogleFonts.notoSansTelugu(
+                      style: ArticleTypography.body(
                         fontSize: AppState.instance.readingFontSize > 0
-                            ? (AppState.instance.readingFontSize * (18.5 / 19.0))
-                            : 18.5,
+                            ? (AppState.instance.readingFontSize * (21.0 / 19.0))
+                            : 21.0,
                         height: 1.65,
                         letterSpacing: 0.2,
                         color: isDark
@@ -885,8 +885,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (text.isEmpty) {
       return Text(
         tr('no_content'),
-        style: GoogleFonts.notoSansTelugu(
-          fontSize: AppState.instance.readingFontSize,
+        style: ArticleTypography.body(
+          fontSize: AppState.instance.readingFontSize * (21.0 / 19.0),
           color: bodyColor.withValues(alpha: 0.7),
         ),
       );
@@ -916,11 +916,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
 
     final effectiveFontSize = AppState.instance.readingFontSize > 0
-        ? (AppState.instance.readingFontSize * (18.5 / 19.0))
-        : 18.5; // larger for easy reading (was 16)
+        ? (AppState.instance.readingFontSize * (21.0 / 19.0))
+        : 21.0; // Way2News-sized: Mandali sets small (was 18.5)
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final paragraphStyle = GoogleFonts.notoSansTelugu(
+    final paragraphStyle = ArticleTypography.body(
       fontSize: effectiveFontSize,
       height: 1.65,
       color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),

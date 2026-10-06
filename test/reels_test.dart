@@ -277,6 +277,39 @@ void main() {
     });
   });
 
+  group('the YouTube player never takes the swipe', () {
+    // The package's YoutubePlayer widget (6.x) lifts the real WebView into
+    // the app-wide Overlay on phones, above the pager. There it received
+    // every vertical drag — swipe-up did nothing on a device — and escaped
+    // the crop. A real WebView cannot be created in a widget test, so this
+    // guards the wiring in the source.
+    final src = File('lib/features/reels/reel_item.dart')
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('the WebView is drawn inline, not through YoutubePlayer', () {
+      expect(src, isNot(contains('YoutubePlayer(')));
+      expect(src, contains('WebViewWidget('));
+      expect(src, contains('controller: _c.webViewController'));
+    });
+
+    test('it sits under IgnorePointer, inside the crop', () {
+      final crop = src.indexOf('CoverBox(\n          aspectRatio: 9 / 16');
+      final ignore = src.indexOf('IgnorePointer(', crop);
+      final web = src.indexOf('WebViewWidget(', crop);
+      expect(crop, greaterThan(-1));
+      expect(ignore, greaterThan(crop));
+      expect(web, greaterThan(ignore));
+    });
+
+    test('the player is started by the reel itself', () {
+      expect(src, contains('_c.initWithParams(params: _c.params)'));
+      expect(src, contains('pointerEvents: PointerEvents.none'));
+    });
+  });
+
   group('the Reels screen', () {
     testWidgets('opens full-screen from Home — no bottom bar — and back returns',
         (tester) async {

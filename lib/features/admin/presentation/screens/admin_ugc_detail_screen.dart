@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/models/admin_ugc_status.dart';
 import '../../data/models/admin_ugc_submission_model.dart';
+import '../../data/services/admin_media_tools.dart';
 import '../controllers/admin_ugc_detail_controller.dart';
 import '../theme/admin_colors.dart';
 import '../widgets/admin_access_guard.dart';
@@ -44,6 +45,95 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
       submission: _controller.submission,
       onApprove: (notes, level, push) => _controller.approve(notes: notes, publicationLevel: level, push: push),
     );
+  }
+
+  final AdminMediaTools _mediaTools = AdminMediaTools();
+  bool _downloading = false;
+  bool _branding = false;
+
+  /// Saves the reporter's original photos / videos to the gallery.
+  Future<void> _downloadMedia() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _downloading = true);
+    final r = await _mediaTools.downloadAll(_controller.submission);
+    if (!mounted) return;
+    setState(() => _downloading = false);
+    messenger.showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: r.saved > 0 && r.failed == 0
+          ? AdminColors.success
+          : AdminColors.error,
+      content: Text(r.permissionDenied
+          ? 'గ్యాలరీ అనుమతి ఇవ్వలేదు. సెట్టింగ్స్‌లో అనుమతించండి.'
+          : r.failed == 0
+              ? '${r.saved} ఫైల్(లు) గ్యాలరీలో సేవ్ అయ్యాయి (Vaaradhi).'
+              : '${r.saved} సేవ్ అయ్యాయి, ${r.failed} విఫలమయ్యాయి.'),
+    ));
+  }
+
+  /// Stamps the Vaaradhi sticker on the first photo, shows it, and on the
+  /// admin's OK uploads it as the branded media — the same endpoint as the
+  /// manual "Upload Branded" sheet.
+  Future<void> _autoBrand() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _branding = true);
+    final file = await _mediaTools.brandFirstPhoto(_controller.submission);
+    if (!mounted) return;
+    if (file == null) {
+      setState(() => _branding = false);
+      messenger.showSnackBar(const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AdminColors.error,
+        content: Text('ఫోటోకు బ్రాండ్ జోడించడం సాధ్యం కాలేదు. మళ్లీ ప్రయత్నించండి.'),
+      ));
+      return;
+    }
+    final upload = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('వారధి బ్రాండ్ ప్రివ్యూ'),
+        content: SingleChildScrollView(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.file(file, key: const Key('admin_brand_preview')),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('రద్దు')),
+          ElevatedButton.icon(
+            key: const Key('admin_brand_upload'),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+            label: const Text('అప్‌లోడ్ చేయండి'),
+          ),
+        ],
+      ),
+    );
+    if (upload != true || !mounted) {
+      setState(() => _branding = false);
+      return;
+    }
+    try {
+      await _controller.uploadBrandedMedia(
+          imageFile: file, notes: 'VARADHI brand added in app');
+      if (!mounted) return;
+      messenger.showSnackBar(const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AdminColors.success,
+        content: Text('బ్రాండెడ్ ఫోటో అప్‌లోడ్ అయింది.'),
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(const SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AdminColors.error,
+        content: Text('బ్రాండెడ్ ఫోటో అప్‌లోడ్ విఫలమైంది.'),
+      ));
+    } finally {
+      if (mounted) setState(() => _branding = false);
+    }
   }
 
   Future<void> _reject() async {
@@ -140,7 +230,14 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
             children: [
               _buildStatusBanner(s, isDark),
               const SizedBox(height: 14),
-              AdminMediaViewer(submission: s, onUploadBranded: () => showAdminBrandedMediaSheet(context, controller: _controller)),
+              AdminMediaViewer(
+                submission: s,
+                onUploadBranded: () => showAdminBrandedMediaSheet(context, controller: _controller),
+                onDownload: _downloadMedia,
+                onAutoBrand: _autoBrand,
+                downloading: _downloading,
+                branding: _branding,
+              ),
               const SizedBox(height: 14),
               _buildContentDetailsCard(s, isDark),
               const SizedBox(height: 14),

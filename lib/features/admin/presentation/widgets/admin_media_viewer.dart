@@ -8,7 +8,25 @@ class AdminMediaViewer extends StatefulWidget {
   final AdminUgcSubmissionModel submission;
   final VoidCallback? onUploadBranded;
 
-  const AdminMediaViewer({super.key, required this.submission, this.onUploadBranded});
+  /// Saves every original photo / video to the gallery.
+  final VoidCallback? onDownload;
+
+  /// Stamps the Vaaradhi sticker on the first photo and uploads it as the
+  /// branded media (after a preview).
+  final VoidCallback? onAutoBrand;
+
+  final bool downloading;
+  final bool branding;
+
+  const AdminMediaViewer({
+    super.key,
+    required this.submission,
+    this.onUploadBranded,
+    this.onDownload,
+    this.onAutoBrand,
+    this.downloading = false,
+    this.branding = false,
+  });
 
   @override
   State<AdminMediaViewer> createState() => _AdminMediaViewerState();
@@ -76,6 +94,60 @@ class _AdminMediaViewerState extends State<AdminMediaViewer> {
               ),
             ),
           ),
+          if (widget.onDownload != null || widget.onAutoBrand != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (widget.onDownload != null && s.allMedia.isNotEmpty)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('admin_media_download'),
+                      onPressed: widget.downloading || widget.branding
+                          ? null
+                          : widget.onDownload,
+                      icon: widget.downloading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        s.allMedia.length > 1
+                            ? 'డౌన్‌లోడ్ (${s.allMedia.length})'
+                            : 'డౌన్‌లోడ్',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                if (widget.onDownload != null &&
+                    widget.onAutoBrand != null &&
+                    s.firstImage != null)
+                  const SizedBox(width: 10),
+                if (widget.onAutoBrand != null && s.firstImage != null)
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      key: const Key('admin_media_auto_brand'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AdminColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: widget.downloading || widget.branding
+                          ? null
+                          : widget.onAutoBrand,
+                      icon: widget.branding
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.verified_rounded, size: 18),
+                      label: const Text('వారధి బ్రాండ్ జోడించు',
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,

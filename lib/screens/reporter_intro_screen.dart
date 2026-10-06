@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/navigation/auth_guard.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
@@ -70,14 +71,16 @@ class ReporterIntroScreen extends StatelessWidget {
                     elevation: 0,
                   ),
                   onPressed: () {
-                    AppState.instance.registerAsReporter();
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('మీరు ఇప్పుడు రిపోర్టర్‌గా నమోదయ్యారు! వార్తలు పంపడానికి డ్యాష్‌బోర్డ్‌కు వెళ్లండి.'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                    requireAuth(context, () {
+                      AppState.instance.registerAsReporter();
+                      Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('మీరు ఇప్పుడు రిపోర్టర్‌గా నమోదయ్యారు! వార్తలు పంపడానికి డ్యాష్‌బోర్డ్‌కు వెళ్లండి.'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    });
                   },
                   child: const Text('రిపోర్టర్‌గా నమోదు చేసుకోండి',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),

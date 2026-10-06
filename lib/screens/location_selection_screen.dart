@@ -347,7 +347,7 @@ class _SearchResults extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (provider.results.isEmpty && !provider.isSearching) {
-      return EmptyStateView(
+      return const EmptyStateView(
         icon: Icons.travel_explore_outlined,
         title: 'ఫలితాలు లేవు',
         message: 'దయచేసి సరైన పేరుతో వెతకండి',

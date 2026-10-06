@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vaaradhi/screens/account_login_screen.dart';
 import 'package:vaaradhi/screens/create_post_screen.dart';
 import 'package:vaaradhi/state/app_state.dart';
 import 'package:vaaradhi/widgets/bottom_nav_bar.dart';
@@ -66,6 +67,21 @@ void main() {
                 w.decoration is BoxDecoration &&
                 (w.decoration as BoxDecoration).shape == BoxShape.circle)),
         findsNothing);
+  });
+
+  testWidgets('tapping login button on Post tab redirects guest to AccountLoginScreen',
+      (tester) async {
+    AppState.instance.isLoggedIn = false;
+    await tester.pumpWidget(const MaterialApp(home: CreatePostScreen()));
+    await tester.pump();
+
+    final loginButton = find.byKey(const Key('post_login_button'));
+    expect(loginButton, findsOneWidget);
+
+    await tester.tap(loginButton);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AccountLoginScreen), findsOneWidget);
   });
 
   group('a guest reaches the Post screen', () {

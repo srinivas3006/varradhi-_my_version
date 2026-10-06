@@ -43,7 +43,15 @@ Dio _dio(_Api a) =>
     Dio(BaseOptions(baseUrl: 'https://api.test'))..httpClientAdapter = a;
 
 Map<String, dynamic> _item(String id, {String type = 'article'}) =>
-    {'id': id, 'type': type, 'title': 'T $id', 'metadata': {'slug': 's-$id'}};
+    {
+      'id': id,
+      'type': type,
+      'title': 'T $id',
+      // Real stories always carry a date (checked live); undated ones are
+      // treated as oldest by the app.
+      'published_at': DateTime.now().toIso8601String(),
+      'metadata': {'slug': 's-$id'},
+    };
 
 Map<String, dynamic> _home(List<String> personalized, List<String> local) => {
       'data': {
@@ -176,6 +184,7 @@ void main() {
                     'id': 'b1',
                     'type': 'article',
                     'title': 'Breaking with photo',
+                    'published_at': DateTime.now().toIso8601String(),
                     'metadata': {'slug': 's-b1', 'is_breaking': true},
                     // The picture is only here, not in image_url.
                     'media_items': [
@@ -186,7 +195,9 @@ void main() {
                       },
                     ],
                   },
-                  _item('p2'),
+                  // Enough stories that some stay in For You after the
+                  // hero takes its five.
+                  for (var i = 2; i < 10; i++) _item('p$i'),
                 ],
               },
               {'key': 'local', 'items': []},
@@ -213,6 +224,70 @@ void main() {
 
     // p2 has no picture: the branded tile, not a grey box.
     expect(find.byKey(const Key('no_image_tile')), findsWidgets);
+  });
+
+  testWidgets('Latest: newest news, with location, extras after 5 stories',
+      (tester) async {
+    final app = AppState.instance;
+    app
+      ..stateName = 'Telangana'
+      ..district = 'Hyderabad';
+    Map<String, dynamic> dated(String id, int daysAgo) => {
+          ..._item(id),
+          'published_at': DateTime.now()
+              .subtract(Duration(days: daysAgo))
+              .toIso8601String(),
+        };
+    final api = _Api((o) {
+      switch (o.path) {
+        case '/api/v1/feed/':
+          // Out of date order, as the server sends it.
+          return (200, {
+            'data': [
+              dated('d9', 9),
+              dated('d12', 12),
+              dated('today', 0),
+              dated('d2', 2),
+              dated('d5', 5),
+              dated('d7', 7),
+              dated('d10', 10),
+            ],
+            'meta': {'next': null},
+          });
+        case '/api/v1/feed/home/':
+          return (200, _home(const [], const []));
+        case '/api/v1/polls/':
+          return (200, {
+            'data': [
+              {'id': 'poll1', 'question': 'Q?', 'options': []}
+            ],
+          });
+        default:
+          return (200, {'data': [], 'meta': {}, 'errors': null});
+      }
+    });
+    ApiClient.instance.dio.httpClientAdapter = api;
+
+    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+
+    final latest = api.requests.firstWhere((r) => r.path == '/api/v1/feed/');
+    // Backend ranks freshness first now, so the reader's place is sent.
+    expect(latest.queryParameters['state'], 'Telangana');
+    expect(latest.queryParameters['district'], 'Hyderabad');
+
+    // The newest story leads Home (the hero), and Latest reads newest-first.
+    final titles = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data ?? '')
+        .where((s) => s.startsWith('T '))
+        .toList();
+    expect(titles.first, 'T today');
+    final order = ['T d2', 'T d5', 'T d7', 'T d9', 'T d10', 'T d12']
+        .where(titles.contains)
+        .toList();
+    final seen = titles.where(order.contains).toList();
+    expect(seen, order, reason: 'Latest is newest-first');
   });
 
   group('/feed/ — the Latest list', () {

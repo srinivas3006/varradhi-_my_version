@@ -12,6 +12,7 @@ import '../services/api_service.dart';
 import '../services/location_permission_coordinator.dart';
 import '../services/location_service.dart';
 import '../state/app_state.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ads/unified_ad_widget.dart';
 import 'create_post_screen.dart';
@@ -411,7 +412,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
       if (!mounted ||
           generation != _loadGeneration ||
-          locationKey != _currentLocationKey) return;
+          locationKey != _currentLocationKey) {
+        return;
+      }
       if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) => _isVillageArticle(
@@ -434,8 +437,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {
       if (mounted &&
           generation == _loadGeneration &&
-          locationKey == _currentLocationKey)
+          locationKey == _currentLocationKey) {
         setState(() => _isLoadingMoreVillage = false);
+      }
     }
   }
 
@@ -464,7 +468,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
       if (!mounted ||
           generation != _loadGeneration ||
-          locationKey != _currentLocationKey) return;
+          locationKey != _currentLocationKey) {
+        return;
+      }
       if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) => _isMandalArticle(
@@ -489,8 +495,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {
       if (mounted &&
           generation == _loadGeneration &&
-          locationKey == _currentLocationKey)
+          locationKey == _currentLocationKey) {
         setState(() => _isLoadingMoreMandal = false);
+      }
     }
   }
 
@@ -519,7 +526,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
       if (!mounted ||
           generation != _loadGeneration ||
-          locationKey != _currentLocationKey) return;
+          locationKey != _currentLocationKey) {
+        return;
+      }
       if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = (res.data ?? <NewsArticle>[]).where(
         (article) =>
@@ -542,8 +551,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {
       if (mounted &&
           generation == _loadGeneration &&
-          locationKey == _currentLocationKey)
+          locationKey == _currentLocationKey) {
         setState(() => _isLoadingMoreDistrict = false);
+      }
     }
   }
 
@@ -551,7 +561,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     if (_sectionsRefreshing ||
         _isLoadingMoreState ||
         !_stateHasMore ||
-        _stateCursor == null) return;
+        _stateCursor == null) {
+      return;
+    }
     final locationKey = _currentLocationKey;
     final generation = _loadGeneration;
     setState(() => _isLoadingMoreState = true);
@@ -573,7 +585,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
 
       if (!mounted ||
           generation != _loadGeneration ||
-          locationKey != _currentLocationKey) return;
+          locationKey != _currentLocationKey) {
+        return;
+      }
       if (res.hasErrors) throw Exception(res.errorMessage);
       final newItems = res.data ?? <NewsArticle>[];
       final existingIds = {
@@ -600,8 +614,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {
       if (mounted &&
           generation == _loadGeneration &&
-          locationKey == _currentLocationKey)
+          locationKey == _currentLocationKey) {
         setState(() => _isLoadingMoreState = false);
+      }
     }
   }
 
@@ -609,7 +624,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     if (_sectionsRefreshing ||
         _isLoadingMoreGlobal ||
         !_globalHasMore ||
-        _globalCursor == null) return;
+        _globalCursor == null) {
+      return;
+    }
     final generation = _loadGeneration;
     setState(() => _isLoadingMoreGlobal = true);
     try {
@@ -635,8 +652,9 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
     } catch (_) {
       // Keep this section cursor intact so the existing load-more action can retry.
     } finally {
-      if (mounted && generation == _loadGeneration)
+      if (mounted && generation == _loadGeneration) {
         setState(() => _isLoadingMoreGlobal = false);
+      }
     }
   }
 
@@ -1214,11 +1232,17 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                         article.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: ArticleTypography.heading(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w800,
                           height: 1.3,
-                          letterSpacing: -0.2,
+                          letterSpacing: 0.0,
+                          color:
+                              Theme.of(context).textTheme.bodyLarge?.color ??
+                                  (Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? AppColors.readingTitleDark
+                                      : AppColors.readingTitleLight),
                         ),
                       ),
                       const SizedBox(height: 6),

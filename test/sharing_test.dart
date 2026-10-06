@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vaaradhi/models/news_article.dart';
 import 'package:vaaradhi/models/video_item.dart';
-import 'package:vaaradhi/services/sharing/share_brand_config.dart';
 import 'package:vaaradhi/services/sharing/share_content_builder.dart';
 import 'package:vaaradhi/services/sharing/share_models.dart';
 import 'package:vaaradhi/services/sharing/share_text_builder.dart';

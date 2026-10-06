@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../config/network_config.dart';
 import '../errors/app_exception.dart';
 import 'network_logger_interceptor.dart';
+import '../utils/log_safe.dart';
 import '../../state/app_state.dart';
 
 /// Central API Client for VARADHI.
@@ -166,7 +167,7 @@ class ApiClient {
         await AppState.instance.updateTokensAfterRefresh(newAccess, newRefresh);
         return newAccess;
       } catch (e) {
-        debugPrint('Token refresh request failed: $e');
+        debugPrint('Token refresh request failed: ${LogSafe.scrub(e)}');
         return null;
       }
     }();

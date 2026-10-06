@@ -683,8 +683,9 @@ class ApiService {
     for (final rawItem in items) {
       if (rawItem is! Map) continue;
       final item = Map<String, dynamic>.from(rawItem);
-      if (_normaliseLocationName(_canonicalName(item)) == requested)
+      if (_normaliseLocationName(_canonicalName(item)) == requested) {
         return item;
+      }
     }
     return null;
   }
@@ -724,8 +725,9 @@ class ApiService {
       if (itemState == expectedState && itemState.isNotEmpty) score += 20;
       final itemDistrict =
           _normaliseLocationName(_canonicalField(item, 'district'));
-      if (itemDistrict == expectedDistrict && itemDistrict.isNotEmpty)
+      if (itemDistrict == expectedDistrict && itemDistrict.isNotEmpty) {
         score += 20;
+      }
       if (score > bestScore) {
         best = item;
         bestScore = score;
@@ -1055,7 +1057,8 @@ class ApiService {
 
   Future<List<LiveNews>> getLiveNews() async {
     try {
-      final response = await _dio.get('/api/v1/articles/live/');
+      final response = await _dio.get('/api/v1/articles/live/',
+          queryParameters: {'lang': AppState.instance.feedLang});
       final List data = response.data['data'] as List? ?? [];
       return data
           .map((i) => LiveNews.fromJson(i as Map<String, dynamic>))
@@ -1418,9 +1421,14 @@ class ApiService {
   }
 
   // --- Categories ---
-  Future<List<Category>> getCategories() async {
+  Future<List<Category>> getCategories({String? lang}) async {
     try {
-      final response = await _dio.get('/api/v1/categories/');
+      final effectiveLang = lang ??
+          AppState.instance.contentLanguage ??
+          (AppState.instance.language == 'Telugu' ? 'te' : 'en');
+      final response = await _dio.get('/api/v1/categories/', queryParameters: {
+        'lang': effectiveLang,
+      });
       return (response.data['data'] as List)
           .map((i) => Category.fromJson(i))
           .toList();
@@ -1656,12 +1664,16 @@ class ApiService {
   }) async {
     final Map<String, dynamic> params = {
       'page_size': pageSize,
+      // Same language rule as every feed (backend contract): explicit
+      // te / en / all, never left to the backend's account default.
+      'lang': AppState.instance.feedLang,
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
     if (state != null) params['state'] = state;
     if (district != null) params['district'] = district;
-    if (subdistrict != null && subdistrict.isNotEmpty)
+    if (subdistrict != null && subdistrict.isNotEmpty) {
       params['subdistrict'] = subdistrict;
+    }
     if (village != null && village.isNotEmpty) params['village'] = village;
     if (scope != null) params['scope'] = scope;
 
@@ -1871,7 +1883,7 @@ class ApiService {
     return raw;
   }
 
-  static ReporterPost _reporterPostFromJson(Map json) {
+  static ReporterPost reporterPostFromJson(Map json) {
     // reporter_status (pending | published | rejected) is the
     // reporter-facing value; status (PENDING_REVIEW, APPROVED, …) is the
     // fallback for older payloads.
@@ -1905,6 +1917,9 @@ class ApiService {
           (json['review_note'] ?? json['rejection_reason'])?.toString(),
     );
   }
+
+  static ReporterPost _reporterPostFromJson(Map json) =>
+      reporterPostFromJson(json);
 
   Future<bool> reportUgcSubmission({
     required String submissionId,
@@ -1977,7 +1992,11 @@ class ApiService {
     final effectiveLang = lang;
     final Map<String, dynamic> params = {
       'page_size': pageSize,
-      if (effectiveLang != null && effectiveLang.isNotEmpty)
+      // Posters match `lang` literally: `all` finds nothing, so "all
+      // languages" means no parameter at all (backend confirmed).
+      if (effectiveLang != null &&
+          effectiveLang.isNotEmpty &&
+          effectiveLang.toLowerCase() != 'all')
         'lang': effectiveLang,
     };
     if (category != null) params['category'] = category;
@@ -2023,6 +2042,20 @@ class ApiService {
       'duration_days': durationDays,
     });
     return response.data['data'] as Map<String, dynamic>;
+  }
+
+  /// Every bookable package with its price —
+  /// `GET /api/v1/ads/pricing/options/`. The booking screen offers exactly
+  /// these (no app-side 7/14/30). Returns the raw `data` for
+  /// [AdPricingCatalog.parse]; null when the endpoint does not exist (404).
+  Future<dynamic> getAdPricingOptions() async {
+    try {
+      final response = await _dio.get('/api/v1/ads/pricing/options/');
+      return response.data is Map ? response.data['data'] : null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> submitAdBooking(

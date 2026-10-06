@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../core/navigation/auth_guard.dart';
 import '../state/app_state.dart';
-import '../models/reporter_post.dart';
 import 'account_login_screen.dart';
 import 'reporter_intro_screen.dart';
 import '../features/admin/presentation/screens/admin_ugc_screen.dart';
@@ -14,6 +13,7 @@ import 'about_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_screen.dart';
 import 'notifications_screen.dart';
+import '../widgets/spotlight/news_language_sheet.dart';
 import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
@@ -59,6 +59,11 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     if (AppState.instance.themeMode == ThemeMode.dark) {
       _themeAnimController.value = 1.0;
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && AppState.instance.isLoggedIn) {
+        AppState.instance.refreshReporterDashboard();
+      }
+    });
   }
 
   @override
@@ -114,28 +119,32 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 )
               : null,
           body: SafeArea(
-            child: ListView(
-              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 40),
-              children: [
-                // 1. Identity Header Card
-                _buildIdentityCard(state, isDark),
-                const SizedBox(height: 16),
+            child: RefreshIndicator(
+              onRefresh: () async {
+                await AppState.instance.refreshReporterDashboard();
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 40),
+                children: [
+                  // 1. Identity Header Card
+                  _buildIdentityCard(state, isDark),
+                  const SizedBox(height: 16),
 
-                // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
-                if (state.isLoggedIn &&
-                    !state.hasJoinedAsReporter &&
-                    !state.isAdmin) ...[
-                  _buildBecomeReporterCard(),
-                  const SizedBox(height: 16),
-                ] else if (state.isLoggedIn &&
-                    state.hasJoinedAsReporter &&
-                    !state.isAdmin) ...[
-                  _buildReporterDashboardCard(state, isDark),
-                  const SizedBox(height: 16),
-                  _buildRewardsCard(state, isDark),
-                  const SizedBox(height: 16),
-                ],
+                  // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
+                  if (!state.hasJoinedAsReporter &&
+                      !state.isAdmin) ...[
+                    _buildBecomeReporterCard(),
+                    const SizedBox(height: 16),
+                  ] else if (state.isLoggedIn &&
+                      state.hasJoinedAsReporter) ...[
+                    _buildReporterDashboardCard(state, isDark),
+                    const SizedBox(height: 16),
+                    _buildRewardsCard(state, isDark),
+                    const SizedBox(height: 16),
+                  ],
 
                 // 3. Admin Access Badge (Conditional)
                 if (state.isAdmin || state.isContributor) ...[
@@ -164,16 +173,17 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                       Navigator.push(context, MaterialPageRoute(builder: (_) => const AdBookingScreen()));
                     },
                   ),
-                  if (state.isLoggedIn)
-                    _buildListTile(
-                      isDark: isDark,
-                      icon: Icons.devices_rounded,
-                      title: 'యాక్టివ్ పరికర సెషన్‌లు',
-                      trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
-                      onTap: () {
+                  _buildListTile(
+                    isDark: isDark,
+                    icon: Icons.devices_rounded,
+                    title: 'యాక్టివ్ పరికర సెషన్‌లు',
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () {
+                      requireAuth(context, () {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceSessionsScreen()));
-                      },
-                    ),
+                      });
+                    },
+                  ),
                 ]),
 
                 const SizedBox(height: 20),
@@ -186,6 +196,38 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     title: tr('news_preferences'),
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PreferencesScreen())),
+                  ),
+                  // News language: which news every feed shows (lang=te /
+                  // en / all). Same sheet as the first-launch prompt.
+                  _buildListTile(
+                    key: const Key('profile_news_language'),
+                    isDark: isDark,
+                    icon: Icons.translate_rounded,
+                    title: tr('content_language'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          switch (state.contentLanguage) {
+                            'te' => 'తెలుగు',
+                            'en' => 'English',
+                            _ => state.language == 'Telugu'
+                                ? 'అన్ని భాషలు'
+                                : 'All',
+                          },
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(Icons.arrow_forward_ios_rounded,
+                            color: isDark ? Colors.white38 : Colors.black26,
+                            size: 16),
+                      ],
+                    ),
+                    onTap: () => NewsLanguageSheet.show(context),
                   ),
                   // Push Notifications Toggle
                   // Premium Notifications Tile
@@ -269,7 +311,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
                 const SizedBox(height: 24),
 
-                // 5. Account Management / Logout Button
+                // 5. Account Management / Logout or Login Button
                 if (state.isLoggedIn)
                   SizedBox(
                     width: double.infinity,
@@ -284,6 +326,28 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                       onPressed: () {
                         HapticFeedback.mediumImpact();
                         state.logout();
+                      },
+                    ),
+                  )
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF3D3D),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: const Icon(Icons.login_rounded, color: Colors.white, size: 20),
+                      label: const Text(
+                        'లాగిన్ / రిజిస్టర్',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountLoginScreen()));
                       },
                     ),
                   ),
@@ -302,122 +366,113 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
               ],
             ),
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   /// Identity Header Card (Guest vs Logged-In)
   Widget _buildIdentityCard(AppState state, bool isDark) {
     if (!state.isLoggedIn) {
-      // Premium Guest User Card
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      // Premium Guest User Card (Symmetric with Logged-In Card)
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
-              blurRadius: 14,
-              offset: const Offset(0, 4),
+          onTap: () {
+            HapticFeedback.lightImpact();
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+              border: Border.all(
+                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
+              ),
             ),
-          ],
-          border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04),
+            child: Row(
+              children: [
+                // Avatar (Diameter 56, matching Logged-In avatar)
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFF6A6A), Color(0xFFFF3D3D)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF3D3D).withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'G',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+
+                // Text Block (Name + Action Cue)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'గెస్ట్ యూజర్',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'లాగిన్ చేయడానికి ఇక్కడ నొక్కండి',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white54 : Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Trailing Arrow
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: isDark ? Colors.white38 : Colors.black26,
+                  size: 16,
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            // Avatar (Size 58, vibrant red gradient, clean centered G)
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6A6A), Color(0xFFFF3D3D)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFFF3D3D).withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Center(
-                child: Text(
-                  'G',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 16),
-
-            // Text Block (Greeting + User State)
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'స్వాగతం',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white60 : Colors.black54,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    'గెస్ట్ యూజర్',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : const Color(0xFF1A1A1A),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Login Button (Primary CTA)
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF3D3D),
-                foregroundColor: Colors.white,
-                elevation: 2,
-                shadowColor: const Color(0xFFFF3D3D).withValues(alpha: 0.4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              icon: const Icon(Icons.login_rounded, size: 16, color: Colors.white),
-              label: const Text(
-                'లాగిన్ అవ్వండి',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                ),
-              ),
-              onPressed: () {
-                HapticFeedback.lightImpact();
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
-                );
-              },
-            ),
-          ],
         ),
       );
     }
@@ -589,10 +644,10 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
 
   /// Reporter Dashboard Card (Wallet + Submissions)
   Widget _buildReporterDashboardCard(AppState state, bool isDark) {
-    final pendingCount = state.reporterPosts.where((p) => p.status == PostStatus.pending).length;
-    final approvedCount = state.reporterPosts.where((p) => p.status == PostStatus.approved).length;
-    final publishedCount = state.reporterPosts.where((p) => p.status == PostStatus.published).length;
-    final rejectedCount = state.reporterPosts.where((p) => p.status == PostStatus.rejected).length;
+    final pendingCount = state.pendingCount;
+    final approvedCount = state.approvedCount;
+    final publishedCount = state.publishedCount;
+    final rejectedCount = state.rejectedCount;
 
     return GestureDetector(
       onTap: () {
@@ -764,6 +819,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
   }
 
   Widget _buildListTile({
+    Key? key,
     required bool isDark,
     required IconData icon,
     required String title,
@@ -772,6 +828,7 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
     int badgeCount = 0,
   }) {
     return ListTile(
+      key: key,
       onTap: onTap,
       leading: Stack(
         clipBehavior: Clip.none,

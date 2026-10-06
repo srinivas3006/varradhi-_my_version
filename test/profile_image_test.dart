@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/core/network/dio_client.dart';
-import 'package:vaaradhi/services/api_service.dart';
 import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {

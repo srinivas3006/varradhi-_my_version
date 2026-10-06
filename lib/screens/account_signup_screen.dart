@@ -45,6 +45,10 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
       setState(() => _error = 'పాస్‌వర్డ్ కనీసం 8 అక్షరాలు ఉండాలి.');
       return;
     }
+    if (RegExp(r'^\d+$').hasMatch(password)) {
+      setState(() => _error = 'పాస్‌వర్డ్ కేవలం అంకెలు మాత్రమే ఉండకూడదు. అక్షరాలు మరియు సంఖ్యలతో కూడిన బలమైన పాస్‌వర్డ్‌ను ఎంచుకోండి.');
+      return;
+    }
     if (password != confirmPassword) {
       setState(() => _error = 'పాస్‌వర్డ్‌లు సరిపోలడం లేదు.');
       return;
@@ -64,6 +68,7 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
         'password_confirm': confirmPassword,
         'full_name': name,
         'preferred_language': langCode,
+        'theme': AppState.instance.themeMode.name,
         'device_id': AppState.instance.deviceId,
         'device_name': 'Mobile Device',
         'device_type': ApiService.deviceType,
@@ -131,24 +136,71 @@ class _AccountSignupScreenState extends State<AccountSignupScreen> {
             errorMsg = 'చాలా ఎక్కువ ప్రయత్నాలు జరిగాయి. దయచేసి కాసేపు ఆగి మళ్లీ ప్రయత్నించండి.';
           } else if (e.response?.data is Map) {
             final resp = e.response!.data as Map;
+
+            // Extract nested field errors from various backend formats
+            Map? fieldErrors;
             if (resp['errors'] is Map) {
-              final errMap = resp['errors'] as Map;
-              if (errMap['message'] != null) {
-                errorMsg = errMap['message'].toString();
-              } else if (errMap['details'] is Map) {
-                final details = errMap['details'] as Map;
-                if (details['email'] != null) {
-                  errorMsg = (details['email'] is List)
-                      ? (details['email'] as List).first.toString()
-                      : details['email'].toString();
-                } else if (details['password'] != null) {
-                  errorMsg = (details['password'] is List)
-                      ? (details['password'] as List).first.toString()
-                      : details['password'].toString();
+              fieldErrors = resp['errors'] as Map;
+              if (fieldErrors['details'] is Map) {
+                fieldErrors = fieldErrors['details'] as Map;
+              }
+            } else if (resp['details'] is Map) {
+              fieldErrors = resp['details'] as Map;
+            } else if (resp['data'] is Map && (resp['data'] as Map)['errors'] is Map) {
+              fieldErrors = (resp['data'] as Map)['errors'] as Map;
+            } else {
+              fieldErrors = resp;
+            }
+
+            final passwordErr = fieldErrors['password'];
+            final emailErr = fieldErrors['email'];
+            final nonFieldErr = fieldErrors['non_field_errors'] ?? fieldErrors['detail'] ?? fieldErrors['error'];
+
+            if (passwordErr != null) {
+              final str = (passwordErr is List && passwordErr.isNotEmpty)
+                  ? passwordErr.first.toString()
+                  : passwordErr.toString();
+              if (str.toLowerCase().contains('common') ||
+                  str.toLowerCase().contains('numeric') ||
+                  str.toLowerCase().contains('entirely') ||
+                  str.toLowerCase().contains('short')) {
+                errorMsg = 'పాస్‌వర్డ్ చాలా సాధారణమైనది (12345678 వంటివి అనుమతించబడవు). దయచేసి అక్షరాలు, సంఖ్యలతో బలమైన పాస్‌వర్డ్‌ను ఎంచుకోండి.\n($str)';
+              } else {
+                errorMsg = 'పాస్‌వర్డ్ లోపం: $str';
+              }
+            } else if (emailErr != null) {
+              final str = (emailErr is List && emailErr.isNotEmpty)
+                  ? emailErr.first.toString()
+                  : emailErr.toString();
+              if (str.toLowerCase().contains('already exists') || str.toLowerCase().contains('unique')) {
+                errorMsg = 'ఈ ఇమెయిల్ చిరునామాతో ఇప్పటికే ఖాతా ఉంది. దయచేసి లాగిన్ అవ్వండి.\n($str)';
+              } else {
+                errorMsg = 'ఇమెయిల్ లోపం: $str';
+              }
+            } else if (nonFieldErr != null) {
+              final str = (nonFieldErr is List && nonFieldErr.isNotEmpty)
+                  ? nonFieldErr.first.toString()
+                  : nonFieldErr.toString();
+              errorMsg = str;
+            } else if (resp['errors'] is Map && (resp['errors'] as Map)['message'] != null && (resp['errors'] as Map)['message'].toString().trim() != 'An error occurred.') {
+              errorMsg = (resp['errors'] as Map)['message'].toString();
+            } else if (resp['message'] != null && resp['message'].toString().trim() != 'An error occurred.') {
+              errorMsg = resp['message'].toString();
+            } else {
+              String? fallbackKeyMsg;
+              for (final entry in fieldErrors.entries) {
+                final k = entry.key.toString();
+                if (['status', 'message', 'code', 'errors', 'details', 'data'].contains(k)) continue;
+                final v = entry.value;
+                if (v is List && v.isNotEmpty) {
+                  fallbackKeyMsg = '$k: ${v.first}';
+                  break;
+                } else if (v is String && v.isNotEmpty) {
+                  fallbackKeyMsg = '$k: $v';
+                  break;
                 }
               }
-            } else if (resp['message'] != null) {
-              errorMsg = resp['message'].toString();
+              errorMsg = fallbackKeyMsg ?? (resp['message']?.toString() ?? 'రిజిస్ట్రేషన్ విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.');
             }
           }
         }

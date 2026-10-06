@@ -110,14 +110,28 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
             errorMsg = 'చాలా ఎక్కువ ప్రయత్నాలు జరిగాయి. దయచేసి కాసేపు ఆగి మళ్లీ ప్రయత్నించండి.';
           } else if (e.response?.data is Map) {
             final resp = e.response!.data as Map;
+            Map? fieldErrors;
             if (resp['errors'] is Map) {
-              final errMap = resp['errors'] as Map;
-              if (errMap['message'] != null) {
-                errorMsg = errMap['message'].toString();
-              } else if (errMap['details'] is Map && errMap['details']['detail'] != null) {
-                errorMsg = errMap['details']['detail'].toString();
+              fieldErrors = resp['errors'] as Map;
+              if (fieldErrors['details'] is Map) {
+                fieldErrors = fieldErrors['details'] as Map;
               }
-            } else if (resp['message'] != null) {
+            } else if (resp['details'] is Map) {
+              fieldErrors = resp['details'] as Map;
+            } else {
+              fieldErrors = resp;
+            }
+
+            final nonField = fieldErrors['non_field_errors'] ?? fieldErrors['detail'] ?? fieldErrors['error'];
+            if (nonField != null) {
+              errorMsg = (nonField is List && nonField.isNotEmpty) ? nonField.first.toString() : nonField.toString();
+            } else if (fieldErrors['password'] != null) {
+              final p = fieldErrors['password'];
+              errorMsg = (p is List && p.isNotEmpty) ? p.first.toString() : p.toString();
+            } else if (fieldErrors['email'] != null) {
+              final em = fieldErrors['email'];
+              errorMsg = (em is List && em.isNotEmpty) ? em.first.toString() : em.toString();
+            } else if (resp['message'] != null && resp['message'].toString().trim() != 'An error occurred.') {
               errorMsg = resp['message'].toString();
             } else if (resp['detail'] != null) {
               errorMsg = resp['detail'].toString();
@@ -264,9 +278,9 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                       context,
                       MaterialPageRoute(builder: (_) => const AccountSignupScreen()),
                     );
-                    if (!mounted || registered != true) return;
+                    if (!context.mounted || registered != true) return;
                     widget.onLoginSuccess?.call();
-                    if (mounted) Navigator.of(context).pop(true);
+                    if (context.mounted) Navigator.of(context).pop(true);
                   },
                   child: const Text.rich(
                     TextSpan(

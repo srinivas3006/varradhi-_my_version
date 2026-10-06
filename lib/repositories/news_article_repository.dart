@@ -13,19 +13,35 @@ class NewsArticleRepository {
 
   // ignore: unused_field
   final ApiClient _api;
-  final Map<String, NewsArticle> _cache = {};
+  final Map<String, ({NewsArticle article, DateTime at})> _cache = {};
   final Map<String, Future<NewsArticle>> _pending = {};
 
-  /// Fetches article detail by slug, returning cached version if available.
+  /// How long a fetched article is reused. It was kept for the whole
+  /// session: the Spotlight card shows the detail copy over the feed copy,
+  /// so an edit made after first view (e.g. a second image added) never
+  /// appeared until the app restarted. Short enough for edits to show, long
+  /// enough that swiping back and forth does not refetch.
+  static const cacheTtl = Duration(minutes: 2);
+
+  /// Clock, replaceable in tests.
+  DateTime Function() now = DateTime.now;
+
+  /// Fetches article detail by slug, reusing a copy fetched within
+  /// [cacheTtl].
   Future<NewsArticle> getDetail(String slug, {bool forceRefresh = false}) async {
-    if (!forceRefresh && _cache.containsKey(slug)) return _cache[slug]!;
+    final cached = _cache[slug];
+    if (!forceRefresh &&
+        cached != null &&
+        now().difference(cached.at) < cacheTtl) {
+      return cached.article;
+    }
     final pending = _pending[slug];
     if (pending != null) return pending;
     final request = ApiService.instance.getArticleDetail(slug);
     _pending[slug] = request;
     try {
       final article = await request;
-      _cache[slug] = article;
+      _cache[slug] = (article: article, at: now());
       return article;
     } finally {
       if (identical(_pending[slug], request)) _pending.remove(slug);

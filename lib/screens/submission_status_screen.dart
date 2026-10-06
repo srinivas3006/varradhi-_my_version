@@ -8,9 +8,9 @@ import '../core/errors/ugc_error.dart';
 import '../core/utils/media_picker_helper.dart';
 import '../core/utils/media_validator.dart';
 import '../models/news_article.dart';
-import '../models/submission_status.dart';
 import '../repositories/ugc_repository.dart';
 import '../services/api_service.dart';
+import '../models/reporter_post.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'create_post_screen.dart';
@@ -48,10 +48,10 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
   Timer? _poll;
   int _pollCount = 0;
 
-  /// Poll every 5s while media processes, for at most ~2 minutes; after that
+  /// Poll every 5s while media processes, for at most 1 minute; after that
   /// the reader refreshes by pulling down.
   static const _pollEvery = Duration(seconds: 5);
-  static const _maxPolls = 24;
+  static const _maxPolls = 12;
 
   static bool get _te => AppState.instance.language == 'Telugu';
   static String _t(String te, String en) => _te ? te : en;
@@ -96,6 +96,17 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
         _error = null;
         _loading = false;
       });
+      final postStatus = switch (status.reporterStatus.toLowerCase()) {
+        'approved' => PostStatus.approved,
+        'published' => PostStatus.published,
+        'rejected' => PostStatus.rejected,
+        _ => PostStatus.pending,
+      };
+      AppState.instance.onPostStatusChanged(
+        status.id,
+        postStatus,
+        status.reviewNote.isNotEmpty ? status.reviewNote : null,
+      );
       _schedulePoll(status);
     } catch (e) {
       if (!mounted) return;
@@ -142,8 +153,12 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
   }
 
   void _createNew() {
-    Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const CreatePostScreen()));
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const CreatePostScreen()));
+    }
   }
 
   /// `upload_failed_retry_media`: re-upload to the same submission. Needs
@@ -152,6 +167,11 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
     final status = _status;
     if (status == null || !status.canUploadMedia || _uploading) return;
 
+    // Already verified for this account? Then no OTP.
+    if (!AppState.instance.uploadVerified) {
+      await AppState.instance.syncUgcVerificationFromServer();
+      if (!mounted) return;
+    }
     if (!AppState.instance.uploadVerified) {
       final mobile = await UgcPhoneVerifyScreen.open(context);
       if (mobile == null || !mounted) return;

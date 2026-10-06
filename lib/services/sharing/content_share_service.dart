@@ -41,7 +41,8 @@ class ContentShareService {
     try {
       switch (format) {
         case ShareFormat.link:
-          await Share.share(ShareTextBuilder.forContent(content));
+          await SharePlus.instance
+              .share(ShareParams(text: ShareTextBuilder.forContent(content)));
           return ShareResult.shared;
 
         case ShareFormat.image:
@@ -51,8 +52,8 @@ class ContentShareService {
           // No video file is downloaded: the canonical link plays it, and
           // pulling a full video down to hand to the share sheet costs the
           // reader bandwidth for no gain.
-          await Share.share(
-              ShareTextBuilder.forMedia(content, ShareFormat.video));
+          await SharePlus.instance.share(ShareParams(
+              text: ShareTextBuilder.forMedia(content, ShareFormat.video)));
           return ShareResult.shared;
       }
     } catch (e) {
@@ -83,10 +84,10 @@ class ContentShareService {
       return ShareResult.failed;
     }
 
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'image/png')],
+    await SharePlus.instance.share(ShareParams(
+      files: [XFile(file.path, mimeType: 'image/png')],
       text: ShareTextBuilder.forMedia(content, ShareFormat.image),
-    );
+    ));
     return ShareResult.shared;
   }
 

@@ -139,9 +139,9 @@ void main() {
       final home = File('lib/screens/news_feed_tab.dart').readAsStringSync();
       final repo =
           File('lib/repositories/home_feed_repository.dart').readAsStringSync();
-      expect(home, contains('homeHeroStories(_forYou, _nearYou)'));
+      expect(home, contains('homeHeroStories(_forYou, _nearYou'));
       expect(repo, contains("a.contentKind == 'live'"));
-      expect(home, contains("article?.contentKind == 'live'"));
+      expect(home, contains("article.contentKind == 'live'"));
       expect(home, contains('LiveNewsScreen()'));
     });
 
@@ -163,8 +163,6 @@ void main() {
 
   group('the Video tab is the Reels viewer', () {
     final tab = File('lib/screens/video_tab.dart').readAsStringSync();
-    final viewer =
-        File('lib/screens/shorts_viewer_screen.dart').readAsStringSync();
 
     test('the tab renders the fullscreen viewer', () {
       expect(tab, contains('ShortsViewerScreen('));

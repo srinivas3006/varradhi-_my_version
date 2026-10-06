@@ -252,12 +252,15 @@ class LocationProvider extends ChangeNotifier {
       );
 
       final patchData = <String, dynamic>{};
-      if (result.type == LocationLevel.village)
+      if (result.type == LocationLevel.village) {
         patchData['village_id'] = result.id;
-      if (result.type == LocationLevel.subdistrict)
+      }
+      if (result.type == LocationLevel.subdistrict) {
         patchData['subdistrict_id'] = result.id;
-      if (result.type == LocationLevel.district)
+      }
+      if (result.type == LocationLevel.district) {
         patchData['district_id'] = result.id;
+      }
       if (result.type == LocationLevel.state) patchData['state_id'] = result.id;
 
       if (patchData.isNotEmpty) {

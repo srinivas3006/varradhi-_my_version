@@ -268,6 +268,11 @@ class NotificationService {
           messageId: message.messageId,
         ));
 
+        final pushTarget = NotificationDeepLinkResolver.resolveFromPayload(data);
+        if (pushTarget.type == NotificationTargetType.ugc) {
+          unawaited(AppState.instance.refreshReporterDashboard());
+        }
+
         messengerKey.currentState?.showSnackBar(
           SnackBar(
             content: InkWell(
@@ -665,6 +670,7 @@ class NotificationService {
           break;
 
         case NotificationTargetType.ugc:
+          unawaited(AppState.instance.refreshReporterDashboard());
           if (target.screenName == 'dashboard') {
             AppNavigator.pushSafe(
               navContext,

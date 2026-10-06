@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -30,6 +31,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   void initState() {
     super.initState();
     _fetchSubmissions();
+    AppState.instance.refreshReporterDashboard();
   }
 
   Future<void> _fetchSubmissions() async {
@@ -38,6 +40,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
       _isLoading = true;
       _loadingMore = false;
     });
+    unawaited(AppState.instance.refreshReporterDashboard());
     try {
       final page = await ApiService.instance.getReporterSubmissionsPage(
         status: _selectedFilter == 'all' ? null : _selectedFilter,
@@ -48,6 +51,9 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
           _nextCursor = page.nextCursor;
           _isLoading = false;
         });
+        if (_selectedFilter == 'all') {
+          AppState.instance.syncReporterPosts(page.posts);
+        }
       }
     } catch (_) {
       if (mounted && generation == _generation) {
@@ -220,14 +226,31 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
     return AnimatedBuilder(
       animation: AppState.instance,
       builder: (context, _) {
-        final sourcePosts = _posts.isNotEmpty ? _posts : AppState.instance.reporterPosts;
-        final displayPosts = _selectedFilter == 'all'
-            ? sourcePosts
-            : sourcePosts.where((p) => p.status.name == _selectedFilter).toList();
-
         int countFor(String filter) {
-          if (filter == 'all') return sourcePosts.length;
-          return sourcePosts.where((p) => p.status.name == filter).length;
+          switch (filter) {
+            case 'pending':
+              return AppState.instance.pendingCount;
+            case 'approved':
+              return AppState.instance.approvedCount;
+            case 'published':
+              return AppState.instance.publishedCount;
+            case 'rejected':
+              return AppState.instance.rejectedCount;
+            default:
+              return AppState.instance.totalSubmissionsCount;
+          }
+        }
+
+        final List<ReporterPost> displayPosts;
+        if (_posts.isNotEmpty) {
+          displayPosts = _selectedFilter == 'all'
+              ? _posts
+              : _posts.where((p) => p.status.name == _selectedFilter).toList();
+        } else {
+          final localPosts = AppState.instance.reporterPosts;
+          displayPosts = _selectedFilter == 'all'
+              ? localPosts
+              : localPosts.where((p) => p.status.name == _selectedFilter).toList();
         }
 
         return Scaffold(
@@ -245,7 +268,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
             children: [
               _buildFilterBar(isDark, countFor),
               Expanded(
-                child: _isLoading && sourcePosts.isEmpty
+                child: _isLoading && _posts.isEmpty && AppState.instance.reporterPosts.isEmpty
                     ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                     : displayPosts.isEmpty
                         ? Center(

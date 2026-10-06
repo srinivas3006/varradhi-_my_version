@@ -4,6 +4,8 @@ import '../../data/models/admin_push_notification_payload.dart';
 import '../../data/models/admin_ugc_submission_model.dart';
 import '../../data/repositories/admin_ugc_repository.dart';
 import 'admin_load_status.dart';
+import '../../../../models/reporter_post.dart';
+import '../../../../state/app_state.dart';
 
 class AdminUgcDetailController extends ChangeNotifier {
   final AdminUgcRepository _repository = AdminUgcRepository();
@@ -37,11 +39,13 @@ class AdminUgcDetailController extends ChangeNotifier {
   }) async {
     submission = await _repository.approveSubmission(submission.id, notes: notes, publicationLevel: publicationLevel, push: push);
     notifyListeners();
+    AppState.instance.onPostStatusChanged(submission.id, PostStatus.approved);
   }
 
   Future<void> reject({required String notes}) async {
     submission = await _repository.rejectSubmission(submission.id, notes: notes);
     notifyListeners();
+    AppState.instance.onPostStatusChanged(submission.id, PostStatus.rejected, notes);
   }
 
   Future<void> flag() async {

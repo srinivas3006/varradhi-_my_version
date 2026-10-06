@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/news_article.dart';
 import '../core/errors/app_exception.dart';
 import '../services/api_service.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
 import '../widgets/ads/banner_ad_slot.dart';
@@ -311,11 +312,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                           article.title,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
+                                          style: ArticleTypography.heading(
                                             fontSize: 14.5,
-                                            fontWeight: FontWeight.w800,
+                                            color: Theme.of(context)
+                                                    .textTheme
+                                                    .titleMedium
+                                                    ?.color ??
+                                                (isDark
+                                                    ? AppColors.textLight
+                                                    : AppColors.textDark),
                                             height: 1.25,
-                                            letterSpacing: -0.2,
                                           ),
                                         ),
                                         const SizedBox(height: 6),

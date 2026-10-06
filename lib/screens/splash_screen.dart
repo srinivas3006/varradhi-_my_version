@@ -137,7 +137,9 @@ class _SplashScreenState extends State<SplashScreen>
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
               }
             }
-            if (mounted) Navigator.of(dialogContext).pop();
+            // The ad may have closed itself (countdown ended) while the link
+            // was opening; popping again would close the splash, not the ad.
+            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
           },
           onSkip: () {
             AdManager.instance.recordSkip(ad, placementZone: 'splash');

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../core/navigation/auth_guard.dart';
 import '../../services/tts_service.dart';
 import '../../screens/news_detail_screen.dart';
@@ -9,6 +8,7 @@ import '../../models/news_article.dart';
 import '../../state/app_state.dart';
 import '../../utils/share_service.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/article_typography.dart';
 import '../../screens/comments_screen.dart';
 import '../../repositories/news_article_repository.dart';
 import '../news_article_video_player.dart';
@@ -654,8 +654,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             applyHeightToFirstAscent: false,
                             applyHeightToLastDescent: false,
                           ),
-                          style: GoogleFonts.notoSansTelugu(
-                            fontSize: 19.0,
+                          style: ArticleTypography.heading(
+                            fontSize: 22.0,
                             fontWeight: FontWeight.w700,
                             color: isDark
                                 ? AppColors.readingTitleDark
@@ -725,7 +725,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // comfortably — Way2News reference.
                                 const double bodyLineHeight = 1.55;
                                 const double referenceBody = 214.0; // compact
-                                const double referenceFont = 17.2;
+                                // Mandali sets small for its size, so the
+                                // base is higher than a Latin font would need
+                                // (Way2News-sized Telugu body text).
+                                const double referenceFont = 19.5;
 
                                 final fitted = referenceFont *
                                     (constraints.maxHeight / referenceBody)
@@ -743,9 +746,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // Bounded so neither a tiny nor a huge screen
                                 // produces type nobody can read.
                                 final effectiveFontSize =
-                                    (fitted * preference).clamp(16.5, 19.0);
+                                    (fitted * preference).clamp(18.5, 22.0);
 
-                                final textStyle = GoogleFonts.notoSansTelugu(
+                                final textStyle = ArticleTypography.body(
                                   fontSize: effectiveFontSize,
                                   color: isDark
                                       ? AppColors.readingBodyDark

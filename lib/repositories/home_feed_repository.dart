@@ -104,23 +104,48 @@ class HomeBootstrap {
 String homeStoryKey(NewsArticle a) =>
     '${a.contentKind}:${a.id.isNotEmpty ? a.id : a.slug}';
 
-/// The hero carousel, built only from the `/feed/home/` response:
-/// live streams, then breaking articles, then featured articles, each once
-/// (by [homeStoryKey]). With none of those, the first five personalized.
+/// How recent a story must be to lead Home as breaking or featured.
+const homeHeroFreshness = Duration(days: 3);
+
+/// True when [a] was published within [homeHeroFreshness] of [now].
+bool homeIsRecent(NewsArticle a, {DateTime? now}) =>
+    (now ?? DateTime.now()).difference(a.publishedAt) <= homeHeroFreshness;
+
+/// The hero carousel:
+/// 1. live streams;
+/// 2. breaking, then featured articles — only recent ones: a 10-day-old
+///    "breaking" story is no longer news and kept leading Home;
+/// 3. topped up to [fill] with the newest stories from For You, Near You and
+///    [latest], so the hero opens on today's news.
+/// Each story once, by [homeStoryKey].
 List<NewsArticle> homeHeroStories(
   List<NewsArticle> personalized,
   List<NewsArticle> local, {
+  List<NewsArticle> latest = const [],
+  DateTime? now,
+  int fill = 5,
   int max = 10,
 }) {
   final all = [...personalized, ...local];
   final seen = <String>{};
+  bool fresh(NewsArticle a) => homeIsRecent(a, now: now);
   final hero = <NewsArticle>[
     ...all.where((a) => a.contentKind == 'live'),
-    ...all.where((a) => a.contentKind == 'article' && a.isBreaking),
-    ...all.where((a) => a.contentKind == 'article' && a.isFeatured),
+    ...all.where((a) => a.contentKind == 'article' && a.isBreaking && fresh(a)),
+    ...all.where((a) => a.contentKind == 'article' && a.isFeatured && fresh(a)),
   ].where((a) => seen.add(homeStoryKey(a))).toList();
-  if (hero.isNotEmpty) return hero.take(max).toList();
-  return personalized.take(5).toList();
+
+  if (hero.length < fill) {
+    final newest = [...all, ...latest]
+        .where((a) => a.contentKind != 'live')
+        .toList()
+      ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
+    for (final a in newest) {
+      if (hero.length >= fill) break;
+      if (seen.add(homeStoryKey(a))) hero.add(a);
+    }
+  }
+  return hero.take(max).toList();
 }
 
 /// The For You rail, from the `personalized` section:
@@ -230,7 +255,7 @@ class HomeFeedRepository {
     int limit = 10,
   }) =>
       {
-        if (lang != null && lang.isNotEmpty) 'lang': lang,
+        'lang': (lang != null && lang.isNotEmpty) ? lang : 'all',
         'mode': lite ? 'lite' : 'normal',
         'limit': '$limit',
         if (state.isNotEmpty) 'state': state,
@@ -370,7 +395,7 @@ class HomeFeedRepository {
         : await _dio.get(latestEndpoint, queryParameters: {
             'include': 'all',
             'scope': 'main',
-            if (lang != null && lang.isNotEmpty) 'lang': lang,
+            'lang': (lang != null && lang.isNotEmpty) ? lang : 'all',
             'page_size': pageSize,
             if (state.isNotEmpty) 'state': state,
             if (district.isNotEmpty) 'district': district,

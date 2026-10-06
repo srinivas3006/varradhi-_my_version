@@ -11,7 +11,7 @@ void main() {
           const MaterialApp(home: Scaffold(body: WatermarkBanner())));
       final img = tester.widget<Image>(find.byType(Image));
       expect((img.image as AssetImage).assetName,
-          'assets/images/watermark_banner.png');
+          WatermarkBanner.asset);
     });
 
     testWidgets('it keeps the artwork ratio when given no height',
@@ -19,8 +19,8 @@ void main() {
       await tester.pumpWidget(
           const MaterialApp(home: Scaffold(body: WatermarkBanner())));
       final ar = tester.widget<AspectRatio>(find.byType(AspectRatio));
-      // 1600x296 — laid out at its own shape rather than squeezed.
-      expect(ar.aspectRatio, closeTo(1600 / 296, 0.001));
+      // 1600x533 — laid out at its own shape rather than squeezed.
+      expect(ar.aspectRatio, closeTo(1600 / 533, 0.001));
     });
 
     testWidgets('a fixed height wins when supplied', (tester) async {
@@ -31,10 +31,10 @@ void main() {
           tester.widget<SizedBox>(find.byType(SizedBox).first).height, 26);
     });
 
-    test('the asset exists and is a real png', () {
-      final f = File('assets/images/watermark_banner.png');
+    test('the asset exists and is a real jpeg', () {
+      final f = File(WatermarkBanner.asset);
       expect(f.existsSync(), isTrue);
-      expect(f.readAsBytesSync().sublist(1, 4), [0x50, 0x4E, 0x47]);
+      expect(f.readAsBytesSync().sublist(0, 2), [0xFF, 0xD8]);
     });
   });
 
@@ -107,7 +107,8 @@ void main() {
       final share = code('lib/utils/share_service.dart');
       // The photo image paints the banner asset straight onto its canvas;
       // only the black no-image fallback card lays out the widget.
-      expect("'assets/images/watermark_banner.png'".allMatches(share).length,
+      // Same artwork as on screen: the shared image uses WatermarkBanner.asset.
+      expect('WatermarkBanner.asset'.allMatches(share).length,
           1);
       expect('WatermarkBanner('.allMatches(share).length, 1);
       expect(share, isNot(contains('ArticleWatermarkOverlay(')));

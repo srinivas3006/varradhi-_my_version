@@ -6,6 +6,8 @@ import '../../data/models/admin_ugc_status.dart';
 import '../../data/models/admin_ugc_submission_model.dart';
 import '../../data/repositories/admin_ugc_repository.dart';
 import 'admin_load_status.dart';
+import '../../../../models/reporter_post.dart';
+import '../../../../state/app_state.dart';
 
 enum AdminQueueRefinement { all, duplicatesOnly, reported }
 
@@ -184,11 +186,13 @@ class AdminUgcQueueController extends ChangeNotifier {
   }) async {
     final updated = await _repository.approveSubmission(id, notes: notes, publicationLevel: publicationLevel, push: push);
     _replaceItem(updated);
+    AppState.instance.onPostStatusChanged(id, PostStatus.approved);
   }
 
   Future<void> rejectItem(String id, {required String notes}) async {
     final updated = await _repository.rejectSubmission(id, notes: notes);
     _replaceItem(updated);
+    AppState.instance.onPostStatusChanged(id, PostStatus.rejected, notes);
   }
 
   Future<void> flagItem(String id) async {
@@ -244,6 +248,11 @@ class AdminUgcQueueController extends ChangeNotifier {
       for (final id in ids) {
         final index = _items.indexWhere((e) => e.id == id);
         if (index != -1) _items[index] = _items[index].copyWith(status: newStatus);
+      }
+      if (newStatus == AdminUgcStatus.approved) {
+        AppState.instance.onPostsBulkAction(ids, PostStatus.approved);
+      } else if (newStatus == AdminUgcStatus.rejected) {
+        AppState.instance.onPostsBulkAction(ids, PostStatus.rejected);
       }
     }
     selectedIds.clear();

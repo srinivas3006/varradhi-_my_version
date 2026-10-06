@@ -12,6 +12,7 @@ import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
 import '../repositories/feed_repository.dart';
+import '../repositories/news_article_repository.dart';
 import '../services/notification_service.dart';
 import '../state/app_state.dart';
 import '../core/errors/app_exception.dart';
@@ -56,6 +57,8 @@ class SpotlightController extends ChangeNotifier {
         AppState.instance.city,
         AppState.instance.subdistrict,
         AppState.instance.village,
+        AppState.instance.isLoggedIn,
+        AppState.instance.userId,
       ].join('|');
 
   void _onPreferencesChanged() {
@@ -185,6 +188,7 @@ class SpotlightController extends ChangeNotifier {
       final isLocal = _state.isLocalNews;
       final category = _state.selectedCategory;
       final app = AppState.instance;
+      // Same rule as Home: the news language only, null = all languages.
       final lang = app.contentLanguage;
       final selectedState = app.stateName;
       final district = app.district;
@@ -201,14 +205,20 @@ class SpotlightController extends ChangeNotifier {
           items: currentArticles,
           nextCursor: _state.nextCursor,
           hasMore: _articleHasMore);
+      // Location is sent in both modes (backend contract, verified live):
+      // scope=main returns the broad newest-first feed and never hides other
+      // districts; scope=local returns only that place's stories.
+      final articleState = selectedState;
+      final articleDistrict = district;
+      final articleCity = city;
       final primary = refresh
           ? _feedRepository.getInitialFeed(
               scope: scope,
               category: category,
               lang: lang,
-              state: selectedState,
-              district: district,
-              city: city,
+              state: articleState,
+              district: articleDistrict,
+              city: articleCity,
               subdistrict: subdistrict,
               village: village,
               pageSize: 25,
@@ -219,9 +229,9 @@ class SpotlightController extends ChangeNotifier {
                   scope: scope,
                   category: category,
                   lang: lang,
-                  state: selectedState,
-                  district: district,
-                  city: city,
+                  state: articleState,
+                  district: articleDistrict,
+                  city: articleCity,
                   subdistrict: subdistrict,
                   village: village,
                   pageSize: 25)
@@ -231,10 +241,10 @@ class SpotlightController extends ChangeNotifier {
               .getUgcFeed(
                   cursor: refresh ? null : _ugcCursor,
                   scope: scope,
-                  state: selectedState,
-                  district: district,
-                  subdistrict: subdistrict,
-                  village: village)
+                  state: isLocal ? selectedState : null,
+                  district: isLocal ? district : null,
+                  subdistrict: isLocal ? subdistrict : null,
+                  village: isLocal ? village : null)
               .catchError((Object e) =>
                   ApiResponse<List<NewsArticle>>.error(message: e.toString()))
           : Future.value(
@@ -259,8 +269,9 @@ class SpotlightController extends ChangeNotifier {
             ? ApiService.instance.getPolls()
             : Future.value(List<Poll>.from(_pollsPool)),
       ]);
-      if (_disposed || gen != _requestGeneration || seq != _paginationSequence)
+      if (_disposed || gen != _requestGeneration || seq != _paginationSequence) {
         return;
+      }
       final feedState = results[0] as FeedState<NewsArticle>;
       final ugc = results[1] as ApiResponse<List<NewsArticle>>;
       final ads = results[2] as ApiResponse<List<AdBanner>>;
@@ -336,8 +347,9 @@ class SpotlightController extends ChangeNotifier {
               : entry.content!)
           .toList();
       final hasMore = _articleHasMore || _ugcHasMore;
-      if (updatedFeed.isNotEmpty && hasMore)
+      if (updatedFeed.isNotEmpty && hasMore) {
         updatedFeed.add(SpotlightItem.shimmer());
+      }
       _state = _state.copyWith(
           feed: updatedFeed,
           nextCursor: feedState.nextCursor,
@@ -347,8 +359,9 @@ class SpotlightController extends ChangeNotifier {
           isFetching: false,
           errorMessage: failure,
           clearError: failure == null);
-      if (stories.isNotEmpty)
+      if (stories.isNotEmpty) {
         NotificationService.instance.requestPermissionAfterArticlesLoaded();
+      }
     } catch (e) {
       if (gen != _requestGeneration) return;
       debugPrint('[SpotlightController] feed load error: $e');
@@ -455,6 +468,9 @@ class SpotlightController extends ChangeNotifier {
   }
 
   Future<void> refreshFeed() async {
+    // A refresh shows each story as it is now — new images included — not
+    // the full-article copies fetched earlier.
+    NewsArticleRepository.instance.clearCache();
     await loadFeed(refresh: true);
   }
 

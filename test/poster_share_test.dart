@@ -55,11 +55,20 @@ void main() {
         File('lib/widgets/watermark/article_watermark_overlay.dart')
             .readAsStringSync();
 
-    test('the downloaded image carries no article text', () {
-      // Download is the picture plus the watermark; the text travels beside
-      // it in the share sheet, not burned into the pixels.
+    test('the floating overlay carries no article text', () {
       expect(card, isNot(contains('article.title')));
       expect(card, isNot(contains('article.summary')));
+    });
+
+    test('the shared image is a Way2News-style news card', () {
+      // Headline and summary are in the picture, so the story reads
+      // without opening the link; the brand strip is always drawn.
+      expect(source, contains('NewsShareCard('));
+      expect(source, contains('headline: article.title.trim()'));
+      expect(source, contains('summary: shareSummary(source)'));
+      final card =
+          File('lib/widgets/sharing/news_share_card.dart').readAsStringSync();
+      expect(card, contains('const _BrandStrip()'));
     });
 
     test('the poster card embeds the logo asset', () {
@@ -84,7 +93,10 @@ void main() {
     });
 
     test('the generated file is a .jpg', () {
+      // The news card is vaaradhi_<id>.jpg; the admin brand stamp writes
+      // <name>.jpg through the shared composer.
       expect(source, contains("vaaradhi_\$safeId.jpg"));
+      expect(source, contains("/\$fileName.jpg"));
       expect(source, contains("mimeType: 'image/jpeg'"));
     });
   });

@@ -71,8 +71,8 @@ void main() {
 
       // Verify guest user title in Telugu
       expect(find.text('గెస్ట్ యూజర్'), findsOneWidget);
-      expect(find.text('స్వాగతం'), findsOneWidget);
-      expect(find.text('లాగిన్ అవ్వండి'), findsOneWidget);
+      // Redesigned guest card: name + "tap here to log in".
+      expect(find.text('లాగిన్ చేయడానికి ఇక్కడ నొక్కండి'), findsOneWidget);
 
       // Verify notifications tile in Telugu
       expect(find.text('నోటిఫికేషన్‌లు'), findsOneWidget);

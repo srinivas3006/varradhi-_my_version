@@ -4,16 +4,22 @@ import 'package:vaaradhi/repositories/home_feed_repository.dart';
 
 /// The hero is built only from the /feed/home/ response — no separate
 /// live, breaking or featured requests.
+final _now = DateTime(2026, 10, 1, 12);
+
 NewsArticle _story(
   String id, {
   String type = 'article',
   bool breaking = false,
   bool featured = false,
+  double ageDays = 0,
 }) =>
     NewsArticle.fromJson({
       'id': id,
       'title': 'Story $id',
       'type': type,
+      'published_at': _now
+          .subtract(Duration(minutes: (ageDays * 24 * 60).round()))
+          .toIso8601String(),
       'metadata': {
         'slug': 'slug-$id',
         'is_breaking': breaking,
@@ -21,18 +27,54 @@ NewsArticle _story(
       },
     });
 
+List<String> _hero(List<NewsArticle> personalized, List<NewsArticle> local,
+        {List<NewsArticle> latest = const []}) =>
+    homeHeroStories(personalized, local, latest: latest, now: _now)
+        .map((a) => a.id)
+        .toList();
+
 void main() {
   group('hero from the Home response', () {
-    test('live first, then breaking, then featured', () {
-      final hero = homeHeroStories([
-        _story('f1', featured: true),
-        _story('b1', breaking: true),
-        _story('plain'),
-      ], [
-        _story('live1', type: 'live'),
-        _story('b2', breaking: true),
-      ]);
-      expect(hero.map((a) => a.id), ['live1', 'b1', 'b2', 'f1']);
+    test('live first, then recent breaking, then recent featured', () {
+      expect(
+        _hero([
+          _story('f1', featured: true, ageDays: 1),
+          _story('b1', breaking: true, ageDays: 0.5),
+          _story('plain', ageDays: 2),
+        ], [
+          _story('live1', type: 'live'),
+          _story('b2', breaking: true, ageDays: 1),
+        ]),
+        ['live1', 'b1', 'b2', 'f1', 'plain'],
+      );
+    });
+
+    test('an old "breaking" story no longer leads Home', () {
+      // Regression: 9–11-day-old breaking stories filled the hero.
+      expect(
+        _hero([
+          _story('oldBreaking', breaking: true, ageDays: 10),
+          _story('today', ageDays: 0.1),
+        ], const []),
+        ['today', 'oldBreaking'],
+        reason: 'it may still fill a slot, by date, after newer news',
+      );
+    });
+
+    test('the hero is topped up with the newest stories, Latest included',
+        () {
+      expect(
+        _hero(
+          [_story('p-old', ageDays: 9), _story('p-mid', ageDays: 4)],
+          const [],
+          latest: [
+            _story('test1', ageDays: 0.03),
+            _story('l-old', ageDays: 12),
+            _story('l-new', ageDays: 1),
+          ],
+        ),
+        ['test1', 'l-new', 'p-mid', 'p-old', 'l-old'],
+      );
     });
 
     test('is_breaking / is_featured are read from metadata', () {
@@ -41,15 +83,14 @@ void main() {
     });
 
     test('a story that is breaking and featured appears once', () {
-      final hero = homeHeroStories(
-          [_story('a1', breaking: true, featured: true)], const []);
-      expect(hero.map((a) => a.id), ['a1']);
+      expect(_hero([_story('a1', breaking: true, featured: true)], const []),
+          ['a1']);
     });
 
     test('the same story in both sections appears once', () {
-      final hero = homeHeroStories(
-          [_story('a1', breaking: true)], [_story('a1', breaking: true)]);
-      expect(hero, hasLength(1));
+      expect(
+          _hero([_story('a1', breaking: true)], [_story('a1', breaking: true)]),
+          hasLength(1));
     });
 
     test('dedupe is by kind:id — an article and a citizen post may share ids',
@@ -62,21 +103,19 @@ void main() {
     });
 
     test('only articles count as breaking or featured', () {
-      final hero = homeHeroStories(
-          [_story('u1', type: 'ugc', breaking: true)], const []);
-      // Not breaking-eligible, so the fallback applies.
-      expect(hero.map((a) => a.id), ['u1']);
+      // A citizen post is not hero-eligible as breaking; it only fills a
+      // slot by date.
+      expect(_hero([_story('u1', type: 'ugc', breaking: true)], const []),
+          ['u1']);
     });
 
-    test('with none of those, the first five personalized stories', () {
-      final personalized =
-          List.generate(8, (i) => _story('p$i'));
-      final hero = homeHeroStories(personalized, [_story('near')]);
-      expect(hero.map((a) => a.id), ['p0', 'p1', 'p2', 'p3', 'p4']);
+    test('the badge is only for recent stories', () {
+      expect(homeIsRecent(_story('a', ageDays: 2), now: _now), isTrue);
+      expect(homeIsRecent(_story('b', ageDays: 10), now: _now), isFalse);
     });
 
     test('an empty Home gives an empty hero', () {
-      expect(homeHeroStories(const [], const []), isEmpty);
+      expect(homeHeroStories(const [], const [], now: _now), isEmpty);
     });
   });
 
