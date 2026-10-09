@@ -53,7 +53,8 @@ void main() {
   }
 
   group('raise a request', () {
-    test('POSTs to the deletion-request endpoint with confirm true', () async {
+    test('POSTs to /accounts/delete-request/ with reason and feedback',
+        () async {
       String? method, path;
       Object? body;
       serve((o) async {
@@ -70,10 +71,12 @@ void main() {
       );
 
       expect(method, 'POST');
-      expect(path, '/api/v1/auth/account/deletion-request/');
-      expect((body as Map)['confirm'], isTrue);
-      expect((body as Map)['reason'], 'privacy');
-      expect((body as Map)['notes'], 'Remove my data');
+      // Backend contract (Oct 2026): readable reason + optional feedback.
+      // (Fallback to the older endpoint is covered in
+      // account_deletion_request_test.dart.)
+      expect(path, '/api/v1/accounts/delete-request/');
+      expect((body as Map)['reason'], 'Privacy concerns / Remove my data');
+      expect((body as Map)['feedback'], 'Remove my data');
       expect(req.status, 'pending');
       expect(req.isPending, isTrue);
     });
@@ -206,6 +209,18 @@ void main() {
       );
       expect(state.isLoggedIn, isTrue);
       expect(state.authToken, 'token-abc');
+    });
+  });
+
+  group('the in-app flow is API-only', () {
+    test('the deletion screen has no web link', () {
+      // The web page exists only for the Play Console form; inside the app
+      // the request goes through the API.
+      final src =
+          File('lib/screens/account_deletion_screen.dart').readAsStringSync();
+      expect(src, isNot(contains('launchUrl')));
+      expect(src, isNot(contains('delete-account')));
+      expect(src, isNot(contains('account-deletion/')));
     });
   });
 

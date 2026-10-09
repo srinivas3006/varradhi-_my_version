@@ -264,8 +264,36 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     }
   }
 
-  void _shareArticle(NewsArticle article) {
-    ShareService.shareArticle(article);
+  /// Instant feedback: the share image takes a moment to make, so a
+  /// "preparing" note shows at once and goes when the share sheet opens.
+  Future<void> _shareArticle(NewsArticle article) async {
+    HapticFeedback.selectionClick();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final preparing = messenger?.showSnackBar(
+      const SnackBar(
+        key: Key('share_preparing'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 20),
+        content: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 14),
+            Expanded(child: Text('షేర్ కోసం సిద్ధం చేస్తోంది…')),
+          ],
+        ),
+      ),
+    );
+    void hide() => preparing?.close();
+    try {
+      await ShareService.shareArticle(article, onReady: hide);
+    } finally {
+      hide();
+    }
   }
 
   void _openArticle(NewsArticle article) {

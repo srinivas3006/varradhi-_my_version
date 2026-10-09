@@ -917,7 +917,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     final effectiveFontSize = AppState.instance.readingFontSize > 0
         ? (AppState.instance.readingFontSize * (21.0 / 19.0))
-        : 21.0; // Way2News-sized: Mandali sets small (was 18.5)
+        : 21.0; // Comfortable size: Mandali sets small (was 18.5)
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final paragraphStyle = ArticleTypography.body(

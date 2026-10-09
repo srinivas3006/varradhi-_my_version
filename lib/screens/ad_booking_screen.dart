@@ -52,6 +52,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   /// the backend sent them.
   AdPackage? _selected;
 
+  /// The local area chosen in the dropdown; its packages show below it.
+  String? _localAreaId;
+
   // Populated after successful booking submission
   Map<String, dynamic>? _bookingSuccessData;
 
@@ -93,6 +96,10 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
           _adType = 'main';
         }
         _selected = null;
+        // Nothing to choose between when only one area is priced.
+        _localAreaId = catalog.localByArea.length == 1
+            ? catalog.localByArea.keys.first
+            : null;
       });
     } catch (_) {
       if (!mounted) return;
@@ -325,9 +332,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         decoration: BoxDecoration(
           color: selected
               ? AppColors.primary
-              : (isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : Colors.white),
+              : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected
@@ -379,58 +384,146 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         children: [for (final p in catalog.main) _packageChip(p, isDark)],
       );
     }
+    final areaId = _localAreaId;
+    final packages = areaId == null ? null : catalog.localByArea[areaId];
     return Column(
       children: [
-        for (final entry in catalog.localByArea.entries)
-          Container(
-            key: Key('ad_area_${entry.key}'),
-            width: double.infinity,
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _selected?.areaId == entry.key
-                    ? AppColors.primary
-                    : (isDark ? Colors.white12 : Colors.grey.shade200),
-                width: _selected?.areaId == entry.key ? 1.6 : 1,
+        _buildAreaDropdown(catalog, isDark),
+        const SizedBox(height: 12),
+        if (areaId != null && packages != null)
+          for (final entry in [MapEntry(areaId, packages)])
+            Container(
+              key: Key('ad_area_${entry.key}'),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _selected?.areaId == entry.key
+                      ? AppColors.primary
+                      : (isDark ? Colors.white12 : Colors.grey.shade200),
+                  width: _selected?.areaId == entry.key ? 1.6 : 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined,
+                          size: 18, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          catalog.areaNames[entry.key]?.isNotEmpty == true
+                              ? catalog.areaNames[entry.key]!
+                              : (entry.value.first.areaName ?? 'ప్రాంతం'),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 15),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final p in entry.value) _packageChip(p, isDark)
+                    ],
+                  ),
+                ],
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      ],
+    );
+  }
+
+  String _areaName(AdPricingCatalog catalog, String id) {
+    final name = catalog.areaNames[id];
+    if (name != null && name.isNotEmpty) return name;
+    return catalog.localByArea[id]?.first.areaName ?? 'ప్రాంతం';
+  }
+
+  /// One dropdown of every priced area instead of a long list of cards.
+  /// Each entry shows the lowest price so advertisers can compare quickly.
+  Widget _buildAreaDropdown(AdPricingCatalog catalog, bool isDark) {
+    final ids = catalog.localByArea.keys.toList();
+    return DropdownButtonFormField<String>(
+      key: const Key('ad_area_dropdown'),
+      initialValue: _localAreaId,
+      isExpanded: true,
+      menuMaxHeight: 420,
+      borderRadius: BorderRadius.circular(14),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded),
+      decoration: InputDecoration(
+        labelText: 'ప్రాంతాన్ని ఎంచుకోండి',
+        prefixIcon:
+            const Icon(Icons.location_on_outlined, color: AppColors.primary),
+        filled: true,
+        fillColor:
+            isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:
+              BorderSide(color: isDark ? Colors.white12 : Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        ),
+      ),
+      items: [
+        for (final id in ids)
+          DropdownMenuItem<String>(
+            key: Key('ad_area_option_$id'),
+            value: id,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.location_on_outlined,
-                        size: 18, color: AppColors.primary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        catalog.areaNames[entry.key]?.isNotEmpty == true
-                            ? catalog.areaNames[entry.key]!
-                            : (entry.value.first.areaName ?? 'ప్రాంతం'),
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w800, fontSize: 15),
-                      ),
-                    ),
-                  ],
+                Expanded(
+                  child: Text(
+                    _areaName(catalog, id),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final p in entry.value) _packageChip(p, isDark)
-                  ],
+                const SizedBox(width: 8),
+                Text(
+                  _fromPrice(catalog.localByArea[id]!),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
                 ),
               ],
             ),
           ),
       ],
+      onChanged: (id) {
+        if (id == null || id == _localAreaId) return;
+        HapticFeedback.selectionClick();
+        setState(() {
+          _localAreaId = id;
+          // A package from another area no longer applies.
+          if (_selected?.areaId != id) _selected = null;
+          _error = null;
+        });
+      },
     );
+  }
+
+  /// "₹1500" for a single package, "₹1500 నుండి" when there are several.
+  String _fromPrice(List<AdPackage> packages) {
+    double amount(AdPackage p) => double.tryParse(p.price.trim()) ?? 0;
+    final cheapest = packages.reduce((a, b) => amount(a) <= amount(b) ? a : b);
+    return packages.length == 1
+        ? cheapest.priceLabel
+        : '${cheapest.priceLabel} నుండి';
   }
 
   /// No packages to offer (endpoint not live, nothing priced, or offline).
@@ -674,14 +767,17 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   }
 
   InputDecoration _fieldDecoration(bool isDark,
-          {required String label, required String hint, required IconData icon}) =>
+          {required String label,
+          required String hint,
+          required IconData icon}) =>
       InputDecoration(
         labelText: label,
         hintText: hint,
         prefixIcon: Icon(icon),
         filled: true,
-        fillColor:
-            isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
+        fillColor: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.grey.shade100,
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none),
@@ -723,7 +819,6 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     fontSize: 14),
               ),
               const SizedBox(height: 24),
-
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
@@ -736,7 +831,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                       SizedBox(width: 12),
                       Expanded(
                         child: Text('ప్రకటన ప్యాకేజీలను లోడ్ చేస్తోంది...',
-                          style: TextStyle(color: Colors.grey)),
+                            style: TextStyle(color: Colors.grey)),
                       ),
                     ],
                   ),
@@ -785,8 +880,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                           children: [
                             const Text('ఎంచుకున్న ప్యాకేజీ',
                                 style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14)),
+                                    fontWeight: FontWeight.bold, fontSize: 14)),
                             const SizedBox(height: 2),
                             Text(
                               selected == null

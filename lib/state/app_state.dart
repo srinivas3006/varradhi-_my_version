@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +17,7 @@ import '../repositories/ad_repository.dart';
 import '../localization/location_translations.dart';
 import '../core/utils/indian_mobile.dart';
 import '../core/utils/log_safe.dart';
+import '../core/utils/url_normalizer.dart';
 
 /// Simple app-wide state singleton. Scalar fields (onboarding completion,
 /// language, location, coins, login, reporter status) survive app restarts
@@ -286,6 +288,10 @@ class AppState extends ChangeNotifier {
   /// The 10-digit mobile the backend returned when verification succeeded.
   /// Every UGC submit / upload-media call must send exactly this.
   String ugcVerifiedMobile = '';
+
+  /// The account's verified mobile from GET /auth/me/ (only when
+  /// mobile_verified is true) — what the profile shows as "+91 …".
+  String profileVerifiedMobile = '';
 
   /// Set when the backend answers "Daily upload limit reached."; uploads stay
   /// disabled until this moment (local midnight).
@@ -674,8 +680,9 @@ class AppState extends ChangeNotifier {
               me['profileImage'] ??
               (me['profile'] is Map ? me['profile']['profile_image'] : null))
           ?.toString();
-      if (serverImage != null && serverImage.startsWith('http')) {
-        profileImageUrl = serverImage;
+      if (serverImage != null && serverImage.trim().isNotEmpty) {
+        final url = UrlNormalizer.normalize(serverImage);
+        if (url.startsWith('http')) profileImageUrl = url;
       }
 
       final phone = IndianMobile.normalize(
@@ -690,10 +697,19 @@ class AppState extends ChangeNotifier {
       if (me['id'] != null) userId = me['id'].toString();
       // Only UGC-specific fields here: me's own `mobile` is the login phone,
       // which is never the verified UGC mobile.
+      // GET /auth/me/: verified_mobile + mobile_verified (backend contract).
+      // Shown on the profile only when mobile_verified is true.
+      final meMobile = me['mobile_verified'] == true
+          ? IndianMobile.normalize(me['verified_mobile']?.toString())
+          : null;
+      profileVerifiedMobile =
+          (meMobile != null && meMobile.length == 10) ? meMobile : '';
       final ugcProfile = me['ugc_profile'];
-      final serverMobile = ugcProfile is Map
-          ? serverVerifiedMobile(ugcProfile)
-          : IndianMobile.normalize(me['ugc_verified_mobile']?.toString());
+      final serverMobile = profileVerifiedMobile.isNotEmpty
+          ? profileVerifiedMobile
+          : ugcProfile is Map
+              ? serverVerifiedMobile(ugcProfile)
+              : IndianMobile.normalize(me['ugc_verified_mobile']?.toString());
       if (!uploadVerified &&
           serverMobile != null &&
           serverMobile.length == 10) {
@@ -1379,6 +1395,31 @@ class AppState extends ChangeNotifier {
   /// the device — see the report accompanying this change.
   String? profileImageUrl;
 
+  /// The server avatar as an absolute URL, or null when none is set.
+  String? get profilePhotoUrl {
+    final raw = profileImageUrl;
+    if (raw == null || raw.trim().isEmpty) return null;
+    final url = UrlNormalizer.normalize(raw);
+    return url.startsWith('http') ? url : null;
+  }
+
+  /// The image every avatar in the app draws: the reader's fresh local pick
+  /// first (shown while it uploads), otherwise the server photo.
+  ///
+  /// After a successful upload [profileImagePath] is cleared, so screens
+  /// that only looked at the local path fell back to the initial — the
+  /// photo appeared not to have been saved.
+  ImageProvider? get profileAvatar {
+    final path = profileImagePath;
+    if (path != null && path.isNotEmpty) {
+      if (path.startsWith('http')) return CachedNetworkImageProvider(path);
+      final file = File(path);
+      if (file.existsSync()) return FileImage(file);
+    }
+    final url = profilePhotoUrl;
+    return url == null ? null : CachedNetworkImageProvider(url);
+  }
+
   /// Saves the profile, uploading the avatar through the existing
   /// PATCH /api/v1/auth/me/ when [imagePath] is a local file.
   ///
@@ -1413,8 +1454,11 @@ class AppState extends ChangeNotifier {
         imageFile: isLocalFile ? File(imagePath) : null,
       );
 
-      final serverImage =
+      final rawImage =
           (updated['profile_image'] ?? updated['profileImage'])?.toString();
+      final serverImage = rawImage == null || rawImage.trim().isEmpty
+          ? null
+          : UrlNormalizer.normalize(rawImage);
       if (serverImage != null && serverImage.startsWith('http')) {
         profileImageUrl = serverImage;
         // The local copy has served its purpose; the server URL is canonical
@@ -1448,6 +1492,7 @@ class AppState extends ChangeNotifier {
     userId = null;
     userName = 'Guest User';
     userPhone = '';
+    profileVerifiedMobile = '';
     // Bookmarks belong to the account that made them — both the server ones
     // and citizen posts kept on the device. Leaving the ids behind showed the
     // previous account's bookmarks to whoever logged in next; the next
@@ -1538,8 +1583,31 @@ class AppState extends ChangeNotifier {
     }).toList();
   }
 
+  /// The server count last shown for each story, and the one in effect when
+  /// this reader added a comment.
+  final Map<String, int> _commentBaseSeen = {};
+  final Map<String, int> _commentBaseAtAdd = {};
+
+  /// Count to show: the server's, plus this reader's own new comments only
+  /// until the server count includes them. It used to add them on top of a
+  /// server count that already had them — one comment showed as 2.
   int getDisplayCommentCount(String articleId, int baseCount) {
-    return baseCount + (userAddedComments[articleId] ?? 0);
+    final added = userAddedComments[articleId] ?? 0;
+    if (added == 0) {
+      _commentBaseSeen[articleId] = baseCount;
+      return baseCount;
+    }
+    final before =
+        _commentBaseAtAdd[articleId] ?? _commentBaseSeen[articleId] ?? baseCount;
+    final optimistic = before + added;
+    return baseCount > optimistic ? baseCount : optimistic;
+  }
+
+  /// This reader posted a comment (or reply) on [articleId].
+  void recordUserComment(String articleId) {
+    _commentBaseAtAdd.putIfAbsent(
+        articleId, () => _commentBaseSeen[articleId] ?? 0);
+    userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
   }
 
   int getCommentCount(String articleId) {
@@ -1554,14 +1622,14 @@ class AppState extends ChangeNotifier {
     final newComment = Comment(
       id: 'c_${DateTime.now().millisecondsSinceEpoch}',
       username: isLoggedIn ? userName : 'Guest User',
-      avatarUrl: profileImagePath ?? '',
+      avatarUrl: profilePhotoUrl ?? '',
       text: text,
       postedAt: DateTime.now(),
       likes: 0,
     );
 
     articleComments[articleId]!.insert(0, newComment);
-    userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
+    recordUserComment(articleId);
     notifyListeners();
   }
 
@@ -1582,11 +1650,11 @@ class AppState extends ChangeNotifier {
         comment.replies.add(Comment(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           username: userName.isNotEmpty ? userName : 'Guest User',
-          avatarUrl: profileImagePath ?? '',
+          avatarUrl: profilePhotoUrl ?? '',
           text: text,
           postedAt: DateTime.now(),
         ));
-        userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
+        recordUserComment(articleId);
         break;
       }
     }

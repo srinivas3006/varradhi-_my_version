@@ -183,8 +183,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
             ? widget.article.id
             : widget.article.slug;
         if (targetId.isNotEmpty) {
-          AppState.instance.userAddedComments[targetId] =
-              (AppState.instance.userAddedComments[targetId] ?? 0) + 1;
+          AppState.instance.recordUserComment(targetId);
         }
         AppState.instance.setComments(widget.article.id, _comments);
 
@@ -1095,15 +1094,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   backgroundColor: isDark
                       ? AppColors.surfaceElevatedDark
                       : AppColors.primary.withValues(alpha: 0.12),
-                  backgroundImage:
-                      (AppState.instance.profileImagePath != null &&
-                              AppState.instance.profileImagePath!
-                                  .startsWith('http'))
-                          ? NetworkImage(AppState.instance.profileImagePath!)
-                          : null,
-                  child: (AppState.instance.profileImagePath != null &&
-                          AppState.instance.profileImagePath!
-                              .startsWith('http'))
+                  backgroundImage: AppState.instance.profileAvatar,
+                  child: AppState.instance.profileAvatar != null
                       ? null
                       : Icon(Icons.person_rounded,
                           size: 18,

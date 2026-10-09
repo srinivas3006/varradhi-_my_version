@@ -43,6 +43,11 @@ class NewsArticle {
   final bool hasMore;
   final String coverageLevel;
   final String authorName;
+
+  /// Citizen news: the uploader's profile photo (empty when none is sent)
+  /// and their reporter level ("VERIFIED_USER", "TRUSTED_REPORTER"…).
+  final String authorAvatarUrl;
+  final String authorLevel;
   final String language;
   final bool isFeatured;
   final List<MediaItem> mediaItems;
@@ -90,6 +95,8 @@ class NewsArticle {
     this.hasMore = false,
     this.coverageLevel = 'global',
     this.authorName = '',
+    this.authorAvatarUrl = '',
+    this.authorLevel = '',
     this.language = 'te',
     this.isFeatured = false,
     this.mediaItems = const [],
@@ -285,9 +292,15 @@ class NewsArticle {
       authorName: _sanitizeAuthor(
         json['author_name']?.toString() ??
             (json['author'] is Map ? json['author']['name']?.toString() : null) ??
+            // Citizen news: the person who uploaded it.
+            uploaderName(json['uploader']) ??
             json['source_name']?.toString() ??
             json['source']?.toString(),
       ),
+      authorAvatarUrl: uploaderAvatar(json['uploader']),
+      authorLevel: json['uploader'] is Map
+          ? (json['uploader']['trust_level'] ?? '').toString()
+          : '',
       language:
           json['language']?.toString() ?? json['lang']?.toString() ?? 'te',
       isFeatured: json['is_featured'] == true,
@@ -319,11 +332,54 @@ class NewsArticle {
       'varadhi',
       'vaaradhi',
       'null',
+      // Source codes, not people: never shown as a name.
+      'user_upload',
+      'user upload',
+      'ugc',
+      'admin',
+      'editorial',
     };
     if (name.isEmpty || lower.contains('@') || placeholders.contains(lower)) {
       return '';
     }
     return name;
+  }
+
+  /// The uploader of a citizen post, from `uploader: {display_name | name |
+  /// full_name | username}`. When the account has no name and the backend
+  /// sends the email as display_name, only the part before "@" is used —
+  /// an email address is never shown in the app.
+  static String? uploaderName(dynamic uploader) {
+    if (uploader is! Map) return null;
+    for (final k in ['display_name', 'full_name', 'name', 'username']) {
+      final v = uploader[k]?.toString().trim() ?? '';
+      if (v.isEmpty || v.toLowerCase() == 'null') continue;
+      if (v.contains('@')) {
+        final local = v.split('@').first.trim();
+        if (local.isNotEmpty) return local;
+        continue;
+      }
+      return v;
+    }
+    return null;
+  }
+
+  /// The uploader's photo URL if the backend sends one (avatar_url /
+  /// profile_image / photo_url / profile_picture), else ''.
+  static String uploaderAvatar(dynamic uploader) {
+    if (uploader is! Map) return '';
+    for (final k in [
+      'avatar_url',
+      'profile_image',
+      'profile_image_url',
+      'photo_url',
+      'profile_picture',
+      'avatar',
+    ]) {
+      final v = uploader[k]?.toString().trim() ?? '';
+      if (v.startsWith('http')) return v;
+    }
+    return '';
   }
 
   static String _sanitizeAuthor(String? raw) {
@@ -446,6 +502,12 @@ class NewsArticle {
       'id': id,
       'slug': slug,
       'author_name': authorName,
+      if (authorAvatarUrl.isNotEmpty || authorLevel.isNotEmpty)
+        'uploader': {
+          'display_name': authorName,
+          if (authorAvatarUrl.isNotEmpty) 'avatar_url': authorAvatarUrl,
+          if (authorLevel.isNotEmpty) 'trust_level': authorLevel,
+        },
       'title': title,
       'summary': summary,
       'content': body,

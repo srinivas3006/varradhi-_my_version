@@ -308,21 +308,41 @@ class ApiService {
     }
   }
 
-  /// 2. Raise a deletion request: POST /api/v1/auth/account/deletion-request/
+  /// 2. Raise a deletion request.
+  ///
+  /// Backend contract: POST /api/v1/accounts/delete-request/ with
+  /// `{reason, feedback}` (reason as readable text). Until that path is
+  /// deployed it answers 404, so the request then goes to the existing
+  /// POST /api/v1/auth/account/deletion-request/ `{reason, notes, confirm}`.
+  /// A 401 is refreshed once (and logged out on failure) by the ApiClient
+  /// interceptor.
   Future<AccountDeletionRequest> requestAccountDeletion({
     String reason = 'other',
     String? notes,
     bool confirm = true,
   }) async {
+    final feedback = notes?.trim() ?? '';
     try {
-      final response = await _dio.post(
-        '/api/v1/auth/account/deletion-request/',
-        data: {
-          'reason': reason,
-          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-          'confirm': confirm,
-        },
-      );
+      Response<dynamic> response;
+      try {
+        response = await _dio.post(
+          '/api/v1/accounts/delete-request/',
+          data: {
+            'reason': AccountDeletionRequest.getReasonLabel(reason),
+            if (feedback.isNotEmpty) 'feedback': feedback,
+          },
+        );
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 404) rethrow;
+        response = await _dio.post(
+          '/api/v1/auth/account/deletion-request/',
+          data: {
+            'reason': reason,
+            if (feedback.isNotEmpty) 'notes': feedback,
+            'confirm': confirm,
+          },
+        );
+      }
       final data = (response.data['data'] as Map<String, dynamic>?) ??
           (response.data as Map<String, dynamic>);
       return AccountDeletionRequest.fromJson(data);
@@ -1726,6 +1746,10 @@ class ApiService {
                 'share_url',
                 'uploader_name',
                 'author_name',
+                // {id, display_name, trust_level}: the uploader shown as
+                // the post's name (was dropped here, so Spotlight showed
+                // no name).
+                'uploader',
               ])
                 if (map[key] != null) key: map[key],
             },
@@ -2264,13 +2288,25 @@ class ApiService {
   }
 
   // --- CMS ---
-  Future<Map<String, dynamic>?> getCmsPage(String slug) async {
-    try {
-      final response = await _dio.get('/api/v1/cms/$slug/');
-      return response.data['data'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
-    }
+  /// Public CMS page: GET /api/v1/cms/{slug}/ (no login needed).
+  ///
+  /// Throws on failure (DioException carries the status: 404 = page missing
+  /// or inactive, 429 = throttled) so [CmsService] can tell those apart from
+  /// being offline. A reply without a data object is treated as not found.
+  Future<Map<String, dynamic>> fetchCmsPage(String slug) async {
+    final response = await _dio.get('/api/v1/cms/$slug/');
+    final body = response.data;
+    final data = body is Map ? body['data'] : null;
+    if (data is Map<String, dynamic>) return data;
+    throw DioException(
+      requestOptions: response.requestOptions,
+      response: Response(
+        requestOptions: response.requestOptions,
+        statusCode: 404,
+        data: body,
+      ),
+      type: DioExceptionType.badResponse,
+    );
   }
 
   // --- Quotes / Daily Cards ---

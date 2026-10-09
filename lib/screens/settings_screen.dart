@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../services/api_service.dart';
+import '../services/cms_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'account_login_screen.dart';
@@ -323,7 +324,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: Text(tr('about_varadhi'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'about', initialTitle: tr('about_varadhi'))));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: CmsSlugs.about, initialTitle: tr('about_varadhi'))));
                       },
                     ),
                     const Divider(height: 1),
@@ -332,7 +333,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: Text(tr('privacy_policy'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'privacy-policy', initialTitle: tr('privacy_policy'))));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: CmsSlugs.privacy, initialTitle: tr('privacy_policy'))));
                       },
                     ),
                     const Divider(height: 1),
@@ -341,7 +342,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: Text(tr('terms_of_service'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'terms', initialTitle: tr('terms_of_service'))));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: CmsSlugs.terms, initialTitle: tr('terms_of_service'))));
                       },
                     ),
                     const Divider(height: 1),
@@ -350,7 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: Text(tr('contact_us'), style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87)),
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
                       onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: 'contact', initialTitle: tr('contact_us'))));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => CMSPageScreen(slug: CmsSlugs.contact, initialTitle: tr('contact_us'))));
                       },
                     ),
                   ],

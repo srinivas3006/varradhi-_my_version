@@ -196,6 +196,59 @@ void main() {
       expect(sent!['duration_days'], 10);
     });
 
+    testWidgets('several areas → pick one from the dropdown, see its prices',
+        (tester) async {
+      const multi = {
+        'local': [
+          {
+            'area': {'id': 'vik', 'name': 'Vikarabad'},
+            'options': [
+              {'duration_days': 7, 'price': '1500.00', 'currency': 'INR'},
+            ],
+          },
+          {
+            'area': {'id': 'kar', 'name': 'Karimnagar Local Area'},
+            'options': [
+              {'duration_days': 30, 'price': '3000.00', 'currency': 'INR'},
+              {'duration_days': 7, 'price': '1000.00', 'currency': 'INR'},
+            ],
+          },
+        ],
+      };
+      await pumpScreen(tester, options: multi);
+
+      // No long list of cards: only the dropdown until an area is chosen.
+      expect(find.byKey(const Key('ad_area_dropdown')), findsOneWidget);
+      expect(find.byKey(const Key('ad_area_vik')), findsNothing);
+      expect(find.byKey(const Key('ad_area_kar')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('ad_area_dropdown')));
+      await tester.pumpAndSettle();
+      // The menu shows each area with its lowest price.
+      expect(find.text('₹1000 నుండి'), findsWidgets);
+      await tester.tap(find.text('Karimnagar Local Area').last);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('ad_area_kar')), findsOneWidget);
+      expect(find.byKey(const Key('ad_pkg_local_kar_30')), findsOneWidget);
+      expect(find.byKey(const Key('ad_pkg_local_vik_7')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('ad_pkg_local_kar_30')));
+      await tester.pumpAndSettle();
+      expect(find.text('₹3000'), findsWidgets);
+
+      // Switching area drops the package picked for the other one.
+      await tester.tap(find.byKey(const Key('ad_area_dropdown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Vikarabad').last);
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<ElevatedButton>(find.byKey(const Key('ad_book_submit')))
+              .onPressed,
+          isNull);
+    });
+
     testWidgets('main packages come from the backend too', (tester) async {
       await pumpScreen(tester);
       await tester.tap(find.byKey(const Key('ad_type_main')));

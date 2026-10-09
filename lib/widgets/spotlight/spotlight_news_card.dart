@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -34,6 +35,31 @@ class SpotlightNewsCard extends StatefulWidget {
   final double dragDelta;
   final double dragProgress;
   final double matchCutProgress;
+
+  /// Story length on the card: it shows at most this many words;
+  /// a longer story ends in "…" with Read more.
+  static const int storyWordLimit = 60;
+
+  /// Space between the headline and the story (kept tight).
+  static const double headlineGap = 4;
+
+  /// Line height applied to the first and last lines too, with the leading
+  /// split evenly. Ramabhadra and Mandali carry ascents/descents much taller
+  /// than the line, which otherwise show up as a gap around the headline.
+  static const TextHeightBehavior tightLeading = TextHeightBehavior(
+    leadingDistribution: TextLeadingDistribution.even,
+  );
+
+  /// The first [limit] words of [text], keeping its own spacing and
+  /// paragraph breaks; [truncated] when words were left out.
+  @visibleForTesting
+  static ({String text, bool truncated}) wordExcerpt(String text,
+      [int limit = storyWordLimit]) {
+    final words = RegExp(r'\S+').allMatches(text).toList();
+    if (words.length <= limit) return (text: text, truncated: false);
+    final cut = text.substring(0, words[limit - 1].end).trimRight();
+    return (text: '$cut…', truncated: true);
+  }
 
   const SpotlightNewsCard({
     super.key,
@@ -224,7 +250,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     // available, so large-text users are not left with phone-sized copy.
     final requestedScale =
         MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
-    // Way2News-style frame: full width, a little shorter than square
+    // News-card frame: full width, a little shorter than square
     // (width / 1.22), flush against the card's top edge. SpotlightScreen
     // places the card directly below the status bar and paints the black
     // band there itself, so the card owns no status bar space. The square
@@ -650,22 +676,24 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                           article.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          textHeightBehavior: const TextHeightBehavior(
-                            applyHeightToFirstAscent: false,
-                            applyHeightToLastDescent: false,
-                          ),
+                          // Even leading trims the font's own tall
+                          // ascent/descent to the line height, so the
+                          // headline sits tight on the body below it.
+                          // Not applying height to the last
+                          // descent left Ramabhadra's full descent as a gap.
+                          textHeightBehavior: SpotlightNewsCard.tightLeading,
                           style: ArticleTypography.heading(
                             fontSize: 22.0,
                             fontWeight: FontWeight.w700,
                             color: isDark
                                 ? AppColors.readingTitleDark
                                 : const Color(0xFF1E1E1E),
-                            height: 1.45,
+                            height: 1.4,
                             letterSpacing: 0.2,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: SpotlightNewsCard.headlineGap),
 
                       // Body Text with Dynamic Auto-Adjusting & Adaptive "Read More"
                       Expanded(
@@ -678,6 +706,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 : (article.body.trim().isNotEmpty
                                     ? article.body.trim()
                                     : article.summary.trim());
+                            // At most 60 words on the card.
+                            final excerpt =
+                                SpotlightNewsCard.wordExcerpt(toShow);
 
                             if (_isLoadingDetail && toShow.isEmpty) {
                               return const Center(
@@ -722,12 +753,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // show it at a readable size.
                                 // Larger and airier than before (was 14.8pt
                                 // at 1.42) so older readers can read it
-                                // comfortably — Way2News reference.
+                                // comfortably.
                                 const double bodyLineHeight = 1.55;
                                 const double referenceBody = 214.0; // compact
                                 // Mandali sets small for its size, so the
                                 // base is higher than a Latin font would need
-                                // (Way2News-sized Telugu body text).
+                                // (a comfortable Telugu body size).
                                 const double referenceFont = 19.5;
 
                                 final fitted = referenceFont *
@@ -771,10 +802,14 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 // The same span is measured and painted, so
                                 // the paragraph gaps are counted in the fit.
                                 final bodySpan =
-                                    _paragraphSpan(toShow, textStyle);
+                                    _paragraphSpan(excerpt.text, textStyle);
                                 final textPainter = TextPainter(
                                   text: bodySpan,
                                   textDirection: Directionality.of(context),
+                                  // Measured exactly as it is painted.
+                                  textHeightBehavior:
+                                      SpotlightNewsCard.tightLeading,
+                                  textScaler: MediaQuery.textScalerOf(context),
                                 )..layout(maxWidth: constraints.maxWidth);
 
                                 final lines = textPainter.computeLineMetrics();
@@ -797,8 +832,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                     : linesThatFit(constraints.maxHeight)
                                         .clamp(1, totalLines);
 
+                                // Read more: the story is longer than 60
+                                // words, or (very small screens) even the
+                                // 60 words do not all fit.
                                 final bool shouldShowReadMore =
-                                    maxPossibleLines < totalLines;
+                                    excerpt.truncated ||
+                                        maxPossibleLines < totalLines;
 
                                 final int dynamicMaxLines = shouldShowReadMore
                                     ? linesThatFit(constraints.maxHeight -
@@ -818,11 +857,12 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       // between words; start-aligned reads
                                       // evenly.
                                       textAlign: TextAlign.start,
+                                      // Mandali's built-in ascent is far
+                                      // taller than the line; not applying
+                                      // height to the first line kept all of
+                                      // it, a wide gap under the headline.
                                       textHeightBehavior:
-                                          const TextHeightBehavior(
-                                        applyHeightToFirstAscent: false,
-                                        applyHeightToLastDescent: false,
-                                      ),
+                                          SpotlightNewsCard.tightLeading,
                                       style: textStyle,
                                     ),
                                     if (shouldShowReadMore) ...[
@@ -1195,7 +1235,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   /// 1080px-wide screen ≈ 12 logical px).
   static const double _mediaInset = 12.0;
 
-  /// Width / height of the media frame (Way2News reference ≈ 1.22).
+  /// Width / height of the media frame (≈ 1.22).
   static const double _mediaAspect = 1.22;
 
   /// Left/right gutter of the headline and body (spec: ~48px ≈ 18 logical
@@ -1429,6 +1469,19 @@ class _ReporterAttribution extends StatelessWidget {
 
   static const _shadow = [Shadow(color: Color(0x99000000), blurRadius: 4)];
 
+  /// The line under the name: the citizen reporter's level, from the
+  /// uploader's trust_level. Desk stories have none.
+  String get _role {
+    switch (article.authorLevel.toUpperCase()) {
+      case 'TRUSTED_REPORTER':
+        return 'విశ్వసనీయ రిపోర్టర్';
+      case 'VERIFIED_USER':
+      case 'VERIFIED_REPORTER':
+        return 'ధృవీకరించిన రిపోర్టర్';
+    }
+    return article.isUgc ? 'సిటిజన్ రిపోర్టర్' : '';
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = article.byline;
@@ -1440,16 +1493,45 @@ class _ReporterAttribution extends StatelessWidget {
         Expanded(
           child: name.isEmpty
               ? const SizedBox.shrink()
-              : Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    shadows: _shadow,
-                  ),
+              // Round photo, name, and the reporter's level
+              // underneath.
+              : Row(
+                  key: const Key('spotlight_reporter'),
+                  children: [
+                    _ReporterAvatar(name: name, url: article.authorAvatarUrl),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              shadows: _shadow,
+                            ),
+                          ),
+                          if (_role.isNotEmpty)
+                            Text(
+                              _role,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xE6FFFFFF),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                                shadows: _shadow,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
         ),
         if (location.isNotEmpty) ...[
@@ -1480,6 +1562,60 @@ class _ReporterAttribution extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Round reporter photo; the name's first letter on the
+/// brand colour when no photo is sent or it fails to load.
+class _ReporterAvatar extends StatelessWidget {
+  const _ReporterAvatar({required this.name, required this.url});
+
+  final String name;
+  final String url;
+
+  static const double _size = 38;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.trim().isEmpty
+        ? '?'
+        : String.fromCharCodes(name.trim().runes.take(1)).toUpperCase();
+    final letter = Container(
+      key: const Key('spotlight_reporter_initial'),
+      color: AppColors.primary,
+      alignment: Alignment.center,
+      child: Text(
+        initial,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 6),
+        ],
+      ),
+      child: ClipOval(
+        child: url.isEmpty
+            ? letter
+            : CachedNetworkImage(
+                key: const Key('spotlight_reporter_photo'),
+                imageUrl: url,
+                fit: BoxFit.cover,
+                memCacheWidth: 120,
+                placeholder: (_, __) => letter,
+                errorWidget: (_, __, ___) => letter,
+              ),
+      ),
     );
   }
 }

@@ -445,7 +445,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     }
   }
 
-  /// A category narrows the Latest list only; Home's sections stay.
+  /// A category chip shows that category's news only (Home's hero, rails
+  /// and extras step aside); "All" brings them back.
   void _selectCategory(String? slug) {
     setState(() => _selectedCategory = slug);
     unawaited(AnalyticsQueue.instance.track('category_select',
@@ -892,9 +893,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       builder: (context, _) {
         final state = AppState.instance;
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final photo = state.profileImagePath;
-        final hasPhoto =
-            state.isLoggedIn && photo != null && photo.startsWith('http');
+        final photo = state.isLoggedIn ? state.profileAvatar : null;
+        final hasPhoto = photo != null;
         final name = state.userName.trim();
         final initial = state.isLoggedIn &&
                 name.isNotEmpty &&
@@ -908,7 +908,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             key: const Key('home_header_avatar'),
             radius: 16,
             backgroundColor: AppColors.chipBg,
-            backgroundImage: CachedNetworkImageProvider(photo, maxWidth: 128),
+            backgroundImage: photo,
           );
         } else if (initial.isNotEmpty) {
           face = CircleAvatar(
@@ -1527,6 +1527,28 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   /// Header over the paginated latest feed.
+  /// A category with no stories yet.
+  Widget _buildCategoryEmpty() {
+    final telugu = AppState.instance.language == 'Telugu';
+    return Padding(
+      key: const Key('home_category_empty'),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+      child: Column(
+        children: [
+          Icon(Icons.article_outlined, size: 44, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            telugu
+                ? 'ఈ వర్గంలో ప్రస్తుతం వార్తలు లేవు.'
+                : 'No news in this category yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLatestHeader() => _buildSectionTitle(
         AppState.instance.language == 'Telugu' ? 'తాజా వార్తలు' : 'Latest',
       );
@@ -1942,8 +1964,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       ...forYou.map(_storyKey),
       ..._nearYou.map(_storyKey),
     };
-    final recommended =
-        _latest.where((a) => !shownAbove.contains(_storyKey(a))).toList();
+    // With a category chip on, the sections above are hidden, so every
+    // story of that category is listed (none is "already shown above").
+    final recommended = _selectedCategory != null
+        ? _latest
+        : _latest.where((a) => !shownAbove.contains(_storyKey(a))).toList();
     final hasHomeContent = heroItems.isNotEmpty ||
         forYou.isNotEmpty ||
         _nearYou.isNotEmpty ||
@@ -2075,6 +2100,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                               )
                             : <FeedPresentationItem<NewsArticle>>[];
 
+                        // A category chip is on: Home becomes that
+                        // category's news only — the hero, rails and extras
+                        // step aside, so the choice visibly changes the page.
+                        final filtering = _selectedCategory != null;
+
                         return CustomScrollView(
                           // A pull must always reach the refresh, even when
                           // Home is shorter than the screen.
@@ -2094,17 +2124,19 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     RepaintBoundary(
                                       child: _buildCategorySelector(),
                                     ),
-                                    RepaintBoundary(
-                                      child: _buildBreakingNewsSection(
-                                          heroItems),
-                                    ),
+                                    if (!filtering)
+                                      RepaintBoundary(
+                                        child: _buildBreakingNewsSection(
+                                            heroItems),
+                                      ),
                                     // For You — personalized rail.
-                                    if (forYou.isNotEmpty)
+                                    if (!filtering && forYou.isNotEmpty)
                                       RepaintBoundary(
                                         child: _buildForYouRail(forYou),
                                       ),
                                     // Near You — the bootstrap's local
                                     // section; hidden when it is empty.
+                                    if (!filtering)
                                     _buildLocationSection(
                                       title: AppState.instance.language ==
                                               'Telugu'
@@ -2128,17 +2160,32 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                       _buildLatestHeader(),
                                     // No Latest stories yet: the extras show
                                     // here rather than not at all.
-                                    if (presentationItems.isEmpty)
+                                    if (presentationItems.isEmpty &&
+                                        !filtering)
                                       ..._homeExtras(),
+                                    if (filtering &&
+                                        presentationItems.isEmpty &&
+                                        _latestLoaded &&
+                                        !_latestLoading)
+                                      _buildCategoryEmpty(),
                                   ],
                                 ),
                               ),
                             ),
-                            // News first, Way2News-style: the opening Latest
+                            // News first: the opening Latest
                             // stories come straight after the sections, then
                             // the quote / poll / posters / videos, then the
                             // rest of Latest.
-                            if (presentationItems.isNotEmpty) ...[
+                            if (filtering && presentationItems.isNotEmpty)
+                              _buildLatestSliver(
+                                presentationItems,
+                                cardColor: cardColor,
+                                borderColor: borderColor,
+                                padding: const EdgeInsets.only(
+                                    left: 16, right: 16, top: 8, bottom: 120),
+                                showSpinner: _latestHasMore,
+                              )
+                            else if (presentationItems.isNotEmpty) ...[
                               _buildLatestSliver(
                                 presentationItems
                                     .take(_latestLeadCount)

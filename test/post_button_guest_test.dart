@@ -54,7 +54,7 @@ void main() {
     expect(title.left, lessThan(40), reason: 'left-aligned, not centred');
 
     final button = tester.getSize(find.byKey(const Key('post_login_button')));
-    expect(button.height, 52);
+    expect(button.height, 54);
     expect(find.byKey(const Key('post_signup_link')), findsOneWidget);
     expect(find.textContaining('ఖాతాను సృష్టించండి', findRichText: true),
         findsOneWidget);
@@ -78,6 +78,8 @@ void main() {
     final loginButton = find.byKey(const Key('post_login_button'));
     expect(loginButton, findsOneWidget);
 
+    await tester.ensureVisible(loginButton);
+    await tester.pumpAndSettle();
     await tester.tap(loginButton);
     await tester.pumpAndSettle();
 

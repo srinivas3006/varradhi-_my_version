@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../core/navigation/auth_guard.dart';
 import '../state/app_state.dart';
+import '../core/utils/indian_mobile.dart';
 import 'account_login_screen.dart';
 import 'reporter_intro_screen.dart';
 import '../features/admin/presentation/screens/admin_ugc_screen.dart';
@@ -12,6 +13,9 @@ import 'preferences_screen.dart';
 import 'about_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_screen.dart';
+import 'account_deletion_screen.dart';
+import 'cms_page_screen.dart';
+import '../services/cms_service.dart';
 import 'notifications_screen.dart';
 import '../widgets/spotlight/news_language_sheet.dart';
 import 'my_posts_screen.dart';
@@ -307,6 +311,32 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TermsScreen())),
                   ),
+                  _buildListTile(
+                    key: const Key('profile_contact_us'),
+                    isDark: isDark,
+                    icon: Icons.support_agent_rounded,
+                    title: tr('contact_us'),
+                    trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => CMSPageScreen(
+                                slug: CmsSlugs.contact,
+                                initialTitle: tr('contact_us')))),
+                  ),
+                  // Account deletion request (Play policy: an in-app path
+                  // to delete the account). Logged-in readers only.
+                  if (state.isLoggedIn)
+                    _buildListTile(
+                      key: const Key('profile_delete_account'),
+                      isDark: isDark,
+                      icon: Icons.person_remove_outlined,
+                      title: state.language == 'Telugu'
+                          ? 'ఖాతా తొలగింపు అభ్యర్థన'
+                          : 'Request account deletion',
+                      trailing: Icon(Icons.arrow_forward_ios_rounded, color: isDark ? Colors.white38 : Colors.black26, size: 16),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountDeletionScreen())),
+                    ),
                 ]),
 
                 const SizedBox(height: 24),
@@ -506,10 +536,8 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                 child: CircleAvatar(
                   radius: 28,
                   backgroundColor: const Color(0xFFFF3D3D),
-                  backgroundImage: state.profileImagePath != null && state.profileImagePath!.isNotEmpty
-                      ? FileImage(File(state.profileImagePath!))
-                      : null,
-                  child: state.profileImagePath == null || state.profileImagePath!.isEmpty
+                  backgroundImage: state.profileAvatar,
+                  child: state.profileAvatar == null
                       ? Text(
                           state.userName.isNotEmpty ? state.userName[0].toUpperCase() : 'U',
                           style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
@@ -572,11 +600,16 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                     ],
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '+91 ${state.userPhone}',
-                  style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 13),
-                ),
+                // Verified mobile from /auth/me/ — shown only when the
+                // backend says mobile_verified; no bare "+91" otherwise.
+                if (state.profileVerifiedMobile.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '+91 ${IndianMobile.format(state.profileVerifiedMobile)}',
+                    key: const Key('profile_verified_mobile'),
+                    style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 13),
+                  ),
+                ],
               ],
             ),
           ),
@@ -911,7 +944,14 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                         GestureDetector(
                           onTap: () async {
                             final picker = ImagePicker();
-                            final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                            // Phone photos are often 5-10 MB; an avatar never
+                            // needs that, and big uploads fail on slow networks.
+                            final pickedFile = await picker.pickImage(
+                              source: ImageSource.gallery,
+                              maxWidth: 1024,
+                              maxHeight: 1024,
+                              imageQuality: 85,
+                            );
                             if (pickedFile != null) {
                               setModalState(() {
                                 tempImagePath = pickedFile.path;
@@ -924,10 +964,13 @@ class _ProfileTabState extends State<ProfileTab> with SingleTickerProviderStateM
                               CircleAvatar(
                                 radius: 46,
                                 backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+                                // A new pick previews from disk; otherwise the
+                                // current photo (often only on the server).
                                 backgroundImage: tempImagePath != null && tempImagePath!.isNotEmpty
                                     ? FileImage(File(tempImagePath!))
-                                    : null,
-                                child: tempImagePath == null || tempImagePath!.isEmpty
+                                    : state.profileAvatar,
+                                child: (tempImagePath == null || tempImagePath!.isEmpty) &&
+                                        state.profileAvatar == null
                                     ? Icon(Icons.person, size: 40, color: isDark ? Colors.white54 : Colors.black54)
                                     : null,
                               ),

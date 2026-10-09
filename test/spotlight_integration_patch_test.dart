@@ -30,6 +30,10 @@ class _FeedAdapter implements HttpClientAdapter {
           'id': 'article-$district',
           'title': 'Article $district',
           'district': district,
+          // As the backend sends it: local feed = district news, main =
+          // state news.
+          'coverage_level':
+              options.queryParameters['scope'] == 'local' ? 'district' : 'state',
           'published_at': '2026-09-14T12:00:00Z',
           'media_items': [
             {'media_type': 'image', 'url': 'https://example.com/1.jpg'},
@@ -156,7 +160,8 @@ void main() {
     // older stories, so Spotlight never opened on today's news.
     AppState.instance
       ..stateName = 'Telangana'
-      ..district = 'Hyderabad';
+      ..district = 'Hyderabad'
+      ..subdistrict = 'Khairatabad';
     final main = SpotlightController();
     addTearDown(main.dispose);
     await main.loadFeed(refresh: true);
@@ -170,14 +175,31 @@ void main() {
     // Citizen posts and ads keep the reader's location.
     final ads = adapter.requests.lastWhere((r) => r.path.endsWith('/ads/'));
     expect(ads.queryParameters['district'], 'Hyderabad');
+    // Citizen posts too, in main mode: area-level posts are shown only to
+    // readers in that area, so a guest without it missed them while a
+    // logged-in reader (profile location) saw them.
+    final ugc =
+        adapter.requests.lastWhere((r) => r.path.contains('/ugc/feed/'));
+    expect(ugc.queryParameters['scope'], 'main');
+    expect(ugc.queryParameters['state'], 'Telangana');
+    expect(ugc.queryParameters['district'], 'Hyderabad');
 
     final local = SpotlightController(isLocal: true);
     addTearDown(local.dispose);
     await local.loadFeed(refresh: true);
-    final localArticles =
-        adapter.requests.lastWhere((r) => r.path.contains('/articles/feed/'));
-    expect(localArticles.queryParameters['scope'], 'local');
+    final localArticles = adapter.requests.lastWhere((r) =>
+        r.path.contains('/articles/feed/') &&
+        r.queryParameters['scope'] == 'local');
     expect(localArticles.queryParameters['state'], 'Telangana');
     expect(localArticles.queryParameters['district'], 'Hyderabad');
+    // Backend contract: Local takes the full place; the mandal ranks nearby
+    // stories first and never narrows the feed to that mandal.
+    expect(localArticles.queryParameters['subdistrict'], 'Khairatabad');
+    // One request per load — no extra broad-feed call any more.
+    expect(
+        adapter.requests.where((r) =>
+            r.path.contains('/articles/feed/') &&
+            '${r.queryParameters['page_size']}' == '50'),
+        isEmpty);
   });
 }

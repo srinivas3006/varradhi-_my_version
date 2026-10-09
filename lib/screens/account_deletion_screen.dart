@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../localization/app_translations.dart';
 import '../models/account_deletion_request.dart';
 import '../core/errors/app_exception.dart';
@@ -160,8 +159,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
           backgroundColor: Colors.green[800],
           content: Text(
             isTelugu
-                ? 'ఖాతా తొలగింపు అభ్యర్థన విజయవంతంగా సమర్పించబడింది.'
-                : 'Deletion request submitted successfully. Awaiting review.',
+                ? 'ఖాతా తొలగింపు అభ్యర్థన సమర్పించబడింది.'
+                : 'Account deletion request submitted.',
           ),
         ),
       );
@@ -172,9 +171,18 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       // 400 "already pending": the server and this screen simply disagree
       // about what exists. Re-read the status and show the pending card
       // rather than a failure the reader cannot act on.
-      final alreadyPending = e.statusCode == 400 &&
-          e.message.toLowerCase().contains('already pending');
+      final lower = e.message.toLowerCase();
+      final alreadyPending = (e.statusCode == 400 || e.statusCode == 409) &&
+          (lower.contains('already') ||
+              lower.contains('pending') ||
+              lower.contains('duplicate') ||
+              lower.contains('exists'));
       if (alreadyPending) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isTelugu
+              ? 'ఖాతా తొలగింపు అభ్యర్థన ఇప్పటికే సమర్పించబడింది.'
+              : 'Deletion request already submitted.'),
+        ));
         await _fetchDeletionStatus();
         return;
       }
@@ -201,9 +209,12 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         message = e.message;
       }
 
+      // Server or connection trouble: offer a retry (backend contract).
+      final retryable = e.statusCode == null || (e.statusCode ?? 0) >= 500;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: Colors.red[800],
         content: Text(message),
+        action: retryable ? _retryAction(isTelugu) : null,
       ));
     } catch (e) {
       if (!mounted) return;
@@ -211,11 +222,20 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: Colors.red[800],
-          content: Text(e.toString().replaceAll('Exception: ', '')),
+          content: Text(isTelugu
+              ? 'నెట్‌వర్క్ సమస్య. అభ్యర్థన సమర్పించబడలేదు.'
+              : 'Network problem. Your request was not submitted.'),
+          action: _retryAction(isTelugu),
         ),
       );
     }
   }
+
+  SnackBarAction _retryAction(bool isTelugu) => SnackBarAction(
+        label: isTelugu ? 'మళ్లీ ప్రయత్నించు' : 'Retry',
+        textColor: Colors.white,
+        onPressed: _submitDeletionRequest,
+      );
 
   Future<void> _cancelDeletionRequest() async {
     final isTelugu = AppState.instance.language == 'Telugu';
@@ -327,16 +347,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
         ),
         centerTitle: false,
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_browser_rounded),
-            tooltip: 'Web Deletion Portal',
-            onPressed: () => launchUrl(
-              Uri.parse('https://vaaradhinews.com/delete-account'),
-              mode: LaunchMode.externalApplication,
-            ),
-          ),
-        ],
+        // No web link here: in the app the request goes through the API.
+        // The web page is only for the Play Console listing.
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

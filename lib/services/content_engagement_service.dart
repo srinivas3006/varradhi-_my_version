@@ -27,11 +27,26 @@ class EngagementEndpoints {
 }
 
 enum ReportOutcome {
+  /// 201: in the backend moderation queue.
   sent,
+
+  /// 400 "… already reported by this user."
   alreadyReported,
 
-  /// No report endpoint for this story type yet; caller uses the fallback.
-  unsupported,
+  /// 401: the server does not (yet) take reports from guests. The caller
+  /// asks the reader to log in and sends the same report again.
+  loginRequired,
+
+  /// 404: the story was removed or is no longer public.
+  notFound,
+
+  /// 429: too many reports; try again later.
+  throttled,
+
+  /// 400 validation error (bad reason, notes too long).
+  invalid,
+
+  /// Network / 5xx / anything else.
   failed,
 }
 
@@ -40,8 +55,8 @@ enum ReportOutcome {
 ///
 /// Real failures (network, 404 not found, 429 throttled, 5xx) surface so the
 /// UI can roll back. Only a server without the route (405/501, i.e. an older
-/// deployment) makes likes/saves stay on the device and desk reports fall
-/// back to email.
+/// deployment) makes likes/saves stay on the device. Reports never fall back
+/// to email (handover §17.1): they go to the backend moderation queue.
 class ContentEngagementService {
   ContentEngagementService._({Dio? dio}) : _dioOverride = dio;
   static final ContentEngagementService instance = ContentEngagementService._();
@@ -57,7 +72,6 @@ class ContentEngagementService {
   final Set<String> _unsupported = {};
 
   static const _kUgcReaction = 'ugc_reaction';
-  static const _kArticleReport = 'article_report';
 
   /// Only "route/method not available" counts as unsupported. The endpoints
   /// are live (handover §17), so a 404 means the *item* is missing or not
@@ -131,7 +145,7 @@ class ContentEngagementService {
         '-> want bookmarked=$nowBookmarked');
 
     if (!AppState.instance.isLoggedIn) {
-      // Guests bookmark too, like Way2News: the story is kept on the phone
+      // Guests bookmark too: the story is kept on the phone
       // and copied to the account when they log in (syncGuestBookmarks).
       // The server has no guest bookmarks, so nothing is sent now.
       if (nowBookmarked) {
@@ -200,8 +214,8 @@ class ContentEngagementService {
   /// article is added with the safe POST /bookmarks/, and a citizen post is
   /// toggled only when the account does not have it yet. A story that fails
   /// stays on the phone for the next attempt.
-  Future<void> syncGuestBookmarks() =>
-      _guestSync ??= _syncGuestBookmarks().whenComplete(() => _guestSync = null);
+  Future<void> syncGuestBookmarks() => _guestSync ??=
+      _syncGuestBookmarks().whenComplete(() => _guestSync = null);
 
   Future<void> _syncGuestBookmarks() async {
     final guest = AppState.instance.deviceSavedStories;
@@ -257,14 +271,20 @@ class ContentEngagementService {
 
   // --- Report -------------------------------------------------------------
 
+  /// Sends a report for any story. No login is required on the app side:
+  /// a logged-in reader's token goes with it, a guest is identified by the
+  /// X-Device-ID header every request carries. If the server still demands
+  /// login it answers 401 → [ReportOutcome.loginRequired].
+  ///
+  /// [notes] is capped at the backend's 1000-character limit.
   Future<ReportOutcome> report(NewsArticle story,
       {required String reason, String? notes}) async {
     final id = _idOf(story);
     if (id.isEmpty) return ReportOutcome.failed;
-
-    if (!story.isUgc && _unsupported.contains(_kArticleReport)) {
-      return ReportOutcome.unsupported;
+    if (notes != null && notes.length > maxReportNotes) {
+      notes = notes.substring(0, maxReportNotes);
     }
+
     try {
       if (story.isUgc) {
         // Backend accepts any reason string up to 100 chars (§12), so the
@@ -286,14 +306,24 @@ class ContentEngagementService {
       if (message.contains('already reported')) {
         return ReportOutcome.alreadyReported;
       }
-      if (!story.isUgc && _isUnsupported(e)) {
-        _unsupported.add(_kArticleReport);
-        return ReportOutcome.unsupported;
+      final status = e is DioException ? e.response?.statusCode : null;
+      switch (status) {
+        case 401:
+          return ReportOutcome.loginRequired;
+        case 404:
+          return ReportOutcome.notFound;
+        case 429:
+          return ReportOutcome.throttled;
+        case 400:
+          return ReportOutcome.invalid;
       }
-      debugPrint('[Engagement] report failed: $e');
+      debugPrint('[Engagement] report failed: ${e.runtimeType} $status');
       return ReportOutcome.failed;
     }
   }
+
+  /// Backend limit on report notes.
+  static const int maxReportNotes = 1000;
 
   static String _message(Object e) {
     if (e is DioException) {

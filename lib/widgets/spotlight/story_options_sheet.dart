@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/news_article.dart';
 import '../../core/navigation/auth_guard.dart';
 import '../../services/content_engagement_service.dart';
 import '../../state/app_state.dart';
-import '../../utils/share_service.dart';
+import 'report_story_sheet.dart';
 
 enum StoryOption { report, bookmark }
-
-/// Newsroom inbox that receives reports on desk stories, which have no
-/// report endpoint yet.
-const String kNewsroomReportInbox = 'vaaradhinewsapp@gmail.com';
 
 /// "More" (⋮) sheet for a Spotlight story: close button, disclaimer, and the
 /// Report Story / Bookmark actions.
@@ -133,8 +129,7 @@ class _Disclaimer extends StatelessWidget {
         ? [
             const TextSpan(text: 'ఈ కథనం '),
             TextSpan(text: 'వారధి న్యూస్ నెట్‌వర్క్', style: bold),
-            const TextSpan(
-                text: ' పాత్రికేయ కాపీరైట్ కాదు మరియు '),
+            const TextSpan(text: ' పాత్రికేయ కాపీరైట్ కాదు మరియు '),
             TextSpan(text: 'వారధి', style: bold),
             const TextSpan(text: ' అభిప్రాయాలను ప్రతిబింబించదు'),
           ]
@@ -207,128 +202,100 @@ class _OptionTile extends StatelessWidget {
   }
 }
 
-/// Why the reader is reporting the story. Returns the backend reason code.
-class StoryReportReasonSheet {
-  static Future<String?> show(BuildContext context) {
-    final telugu = AppState.instance.language == 'Telugu';
-    final reasons = <(String, String)>[
-      ('misinformation',
-          telugu ? 'తప్పుడు లేదా తప్పుదారి పట్టించే సమాచారం' : 'False or misleading'),
-      ('inappropriate', telugu ? 'అనుచిత కంటెంట్' : 'Inappropriate content'),
-      ('spam', telugu ? 'స్పామ్ లేదా ప్రచారం' : 'Spam or promotion'),
-      ('copyright', telugu ? 'కాపీరైట్ ఉల్లంఘన' : 'Copyright issue'),
-      ('other', telugu ? 'ఇతర కారణం' : 'Something else'),
-    ];
-    return showModalBottomSheet<String>(
-      context: context,
-      useRootNavigator: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                telugu ? 'ఎందుకు నివేదిస్తున్నారు?' : 'Why are you reporting this?',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              for (final r in reasons)
-                ListTile(
-                  minTileHeight: 48,
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.flag_outlined),
-                  title: Text(r.$2),
-                  onTap: () => Navigator.pop(sheetContext, r.$1),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Story actions shared by Spotlight and the detail screen, so every story —
 /// desk article or citizen post — is handled the same way.
 class StoryActions {
   StoryActions._();
 
-  /// Report Story, identical for every story: sign in, pick a reason, sent
-  /// in-app through [ContentEngagementService].
-  ///
-  /// Only if the backend has no report endpoint for desk articles yet does
-  /// it fall back to a pre-filled email to the newsroom, so no story is ever
-  /// without a working report path.
-  static Future<void> report(BuildContext context, NewsArticle article) async {
-    // Reports are tied to an account (abuse control; the UGC endpoint
-    // requires auth).
-    if (!await ensureAuth(context)) return;
-    if (!context.mounted) return;
+  @visibleForTesting
+  static const String reportedKey = 'reported_story_ids';
 
-    final reason = await StoryReportReasonSheet.show(context);
-    if (!context.mounted || reason == null) return;
+  /// Report Story, identical for every story and open to everyone — no
+  /// login first. The reader picks what is wrong, optionally explains, and
+  /// the report goes straight to the backend moderation queue
+  /// (POST /articles/{id}/report/ or /ugc/report/).
+  ///
+  /// Should the server still require an account for this (401), the reader
+  /// is asked to log in once and the same report is then sent automatically —
+  /// nothing has to be picked or typed again.
+  static Future<void> report(BuildContext context, NewsArticle article,
+      {ContentEngagementService? service}) async {
+    final engagement = service ?? ContentEngagementService.instance;
     final telugu = AppState.instance.language == 'Telugu';
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final storyId = article.id.isNotEmpty ? article.id : article.slug;
 
     void toast(String te, String en) => messenger?.showSnackBar(SnackBar(
           content: Text(telugu ? te : en),
           behavior: SnackBarBehavior.floating,
         ));
 
-    final outcome = await ContentEngagementService.instance
-        .report(article, reason: reason);
+    // This device already reported it: say so instead of a second report.
+    if (await _wasReported(storyId)) {
+      toast('మీరు ఇప్పటికే ఈ స్టోరీని నివేదించారు.',
+          'You have already reported this story.');
+      return;
+    }
+    if (!context.mounted) return;
+
+    Future<ReportOutcome> send(ReportKind kind, String details) => engagement
+        .report(article, reason: kind.code, notes: kind.notesWith(details));
+
+    final result = await ReportStorySheet.show(context, onSubmit: send);
+    if (result == null) return;
+
+    var outcome = result.outcome;
+    if (outcome == ReportOutcome.loginRequired) {
+      if (!context.mounted) return;
+      toast('నివేదిక పంపడానికి ఒకసారి లాగిన్ అవ్వండి.',
+          'Please log in once to send your report.');
+      if (!await ensureAuth(context)) return;
+      outcome = await send(result.kind, result.details);
+    }
+
     switch (outcome) {
       case ReportOutcome.sent:
-        toast('నివేదిక సమీక్షకు పంపబడింది. ధన్యవాదాలు.',
+        await _markReported(storyId);
+        toast('ధన్యవాదాలు! మీ నివేదిక సమీక్షకు పంపబడింది.',
             'Thanks — your report was sent for review.');
-        return;
       case ReportOutcome.alreadyReported:
+        await _markReported(storyId);
         toast('మీరు ఇప్పటికే ఈ స్టోరీని నివేదించారు.',
             'You have already reported this story.');
-        return;
+      case ReportOutcome.notFound:
+        toast('ఈ స్టోరీ ఇప్పుడు అందుబాటులో లేదు.',
+            'This story is no longer available.');
+      case ReportOutcome.throttled:
+        toast('చాలా నివేదికలు పంపారు. కొద్దిసేపు ఆగి మళ్లీ ప్రయత్నించండి.',
+            'Too many reports. Please try again in a moment.');
+      case ReportOutcome.loginRequired:
+      case ReportOutcome.invalid:
       case ReportOutcome.failed:
         toast('నివేదిక పంపలేకపోయాము. మళ్లీ ప్రయత్నించండి.',
             'Could not send the report. Please try again.');
-        return;
-      case ReportOutcome.unsupported:
-        final ok = await _emailReport(article, reason);
-        if (!ok) {
-          toast('నివేదిక పంపలేకపోయాము. మళ్లీ ప్రయత్నించండి.',
-              'Could not send the report. Please try again.');
-        }
-        return;
     }
   }
 
-  static Future<bool> _emailReport(NewsArticle article, String reason) async {
-    final link = ShareService.buildWebArticleUrl(article);
-    final uri = Uri(
-      scheme: 'mailto',
-      path: kNewsroomReportInbox,
-      query: _encodeQuery({
-        'subject': 'Report Story: ${article.title}',
-        'body': 'Reason: $reason\n'
-            'Story: $link\n'
-            'ID: ${article.id.isNotEmpty ? article.id : article.slug}\n\n'
-            'Details (optional):\n',
-      }),
-    );
+  static Future<bool> _wasReported(String id) async {
+    if (id.isEmpty) return false;
     try {
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      debugPrint('StoryActions: report email failed: $e');
+      final prefs = await SharedPreferences.getInstance();
+      return (prefs.getStringList(reportedKey) ?? const []).contains(id);
+    } catch (_) {
       return false;
     }
   }
 
-  /// mailto needs %20 rather than '+' for spaces, which Uri's
-  /// queryParameters would produce.
-  static String _encodeQuery(Map<String, String> params) => params.entries
-      .map((e) =>
-          '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
-      .join('&');
+  static Future<void> _markReported(String id) async {
+    if (id.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = prefs.getStringList(reportedKey) ?? <String>[];
+      if (ids.contains(id)) return;
+      ids.add(id);
+      // Bounded: the newest 500 are plenty to stop accidental repeats.
+      await prefs.setStringList(
+          reportedKey, ids.length > 500 ? ids.sublist(ids.length - 500) : ids);
+    } catch (_) {}
+  }
 }

@@ -219,6 +219,9 @@ class SpotlightController extends ChangeNotifier {
               state: articleState,
               district: articleDistrict,
               city: articleCity,
+              // Local: the full place. The backend returns the district's
+              // news (district + village/mandal) and uses mandal/village only
+              // to rank nearby stories first. Main sends none of them.
               subdistrict: subdistrict,
               village: village,
               pageSize: 25,
@@ -241,10 +244,15 @@ class SpotlightController extends ChangeNotifier {
               .getUgcFeed(
                   cursor: refresh ? null : _ugcCursor,
                   scope: scope,
-                  state: isLocal ? selectedState : null,
-                  district: isLocal ? district : null,
-                  subdistrict: isLocal ? subdistrict : null,
-                  village: isLocal ? village : null)
+                  // The reader's place in both modes. Citizen posts approved
+                  // at village / mandal / district level are shown by the
+                  // backend only to readers in that area: without it a guest
+                  // missed them, while a logged-in reader got them through
+                  // the saved profile location — different news per login.
+                  state: selectedState,
+                  district: district,
+                  subdistrict: subdistrict,
+                  village: village)
               .catchError((Object e) =>
                   ApiResponse<List<NewsArticle>>.error(message: e.toString()))
           : Future.value(
@@ -304,7 +312,14 @@ class SpotlightController extends ChangeNotifier {
       }
       _articleHasMore = feedState.hasMore;
       final seen = <String>{};
-      final stories = [...feedState.items, ..._ugcItems]
+      // Main: global and state news only. Local: district, mandal and
+      // village news of the reader's own district.
+      final stories = [
+        ...feedState.items,
+        ..._ugcItems,
+      ]
+          .where((item) =>
+              belongsToTab(item, local: isLocal, district: district))
           .where((item) => seen.add('${item.contentKind}:${item.id}'))
           .toList()
         ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
@@ -362,6 +377,18 @@ class SpotlightController extends ChangeNotifier {
       if (stories.isNotEmpty) {
         NotificationService.instance.requestPermissionAfterArticlesLoaded();
       }
+      // A page whose stories all belong to the other tab adds nothing
+      // visible; fetch on (a few pages at most) so the feed never stalls.
+      final grew = stories.length > _visibleStoryCount;
+      _visibleStoryCount = stories.length;
+      if ((refresh ? stories.length < 3 : !grew) &&
+          hasMore &&
+          _emptyPageStreak < 3) {
+        _emptyPageStreak++;
+        _autoLoadMore = true;
+      } else {
+        _emptyPageStreak = 0;
+      }
     } catch (e) {
       if (gen != _requestGeneration) return;
       debugPrint('[SpotlightController] feed load error: $e');
@@ -383,7 +410,46 @@ class SpotlightController extends ChangeNotifier {
         completer.complete();
       }
       if (!_disposed) notifyListeners();
+      if (_autoLoadMore && !_disposed && gen == _requestGeneration) {
+        _autoLoadMore = false;
+        unawaited(loadFeed());
+      }
     }
+  }
+
+  int _visibleStoryCount = 0;
+  int _emptyPageStreak = 0;
+  bool _autoLoadMore = false;
+
+  static const _mainLevels = {
+    'global',
+    'national',
+    'international',
+    'country',
+    'state',
+    '',
+  };
+  static const _localLevels = {
+    'district',
+    'local',
+    'mandal',
+    'subdistrict',
+    'village',
+    'city',
+  };
+
+  /// Main shows global and state news; Local shows district, mandal and
+  /// village news of the reader's district. Uses the story's
+  /// coverage_level (citizen posts get it from their place fields).
+  @visibleForTesting
+  static bool belongsToTab(NewsArticle a,
+      {required bool local, required String district}) {
+    final level = a.coverageLevel.trim().toLowerCase();
+    if (!local) return _mainLevels.contains(level);
+    if (!_localLevels.contains(level)) return false;
+    final mine = district.trim().toLowerCase();
+    final theirs = (a.district ?? '').trim().toLowerCase();
+    return mine.isEmpty || theirs.isEmpty || theirs == mine;
   }
 
   /// Placement is computed from parent content, never from elapsed swipe time.

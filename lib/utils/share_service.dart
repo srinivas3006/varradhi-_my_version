@@ -6,12 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/article_typography.dart';
+
 import '../widgets/sharing/news_share_card.dart';
 import '../widgets/watermark/watermark_banner.dart';
 import '../core/utils/url_normalizer.dart';
@@ -64,6 +66,15 @@ class ShareService {
   /// Pre-fetches the image bytes into memory so `Image.memory` paints synchronously
   /// during off-screen screenshot capture.
   static Future<Uint8List?> _fetchImageBytes(String url) async {
+    // The photo is usually already on screen, so it is in the image cache:
+    // read it from there instead of downloading it again.
+    try {
+      final cached = await DefaultCacheManager().getFileFromCache(url);
+      if (cached != null) {
+        final bytes = await cached.file.readAsBytes();
+        if (bytes.isNotEmpty) return bytes;
+      }
+    } catch (_) {}
     try {
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 8);
@@ -110,7 +121,7 @@ class ShareService {
   /// [fallback] supplies extra image candidates — the detail screen passes
   /// the feed article it opened from, whose image Spotlight already shows.
   static Future<void> shareArticle(NewsArticle article,
-      {NewsArticle? fallback}) async {
+      {NewsArticle? fallback, VoidCallback? onReady}) async {
     if (_isSharing) {
       debugPrint('ShareService: share already in progress, ignoring duplicate tap');
       return;
@@ -120,6 +131,9 @@ class ShareService {
     try {
       final file = await generateArticleImage(article, fallback: fallback);
       final shareText = buildShareText(article);
+      // Image ready: the caller can drop its "preparing" message as the
+      // share sheet opens.
+      onReady?.call();
 
       if (file != null) {
         await Share.shareXFiles(
@@ -151,40 +165,33 @@ class ShareService {
     return _imageCandidates(article).isNotEmpty;
   }
 
-  /// Generates the branded composite article image:
-  /// - High-resolution news photo
-  /// - Downscaled at decode time if > 3MB (OOM prevention on low-end devices)
-  /// - Proportional scaling constrained to max 1440px width
-  /// - Full-width Vaaradhi sticker at the bottom: the red strip begins
-  ///   exactly at the photo's lower edge so it hides none of the photo, and
-  ///   the logo circle overlaps the photo like a sticker
-  /// - Painted over white, since JPEG has no alpha and the sticker's
-  ///   transparent corners would otherwise encode as black
-  /// - High quality filtering and anti-aliasing
-  /// - Encoded to JPEG with quality 88 and JpegChroma.yuv420 for optimal file size and fast sharing
+  /// The article image for Share and Download ([NewsShareCard]: Share is the
+  /// 1600 × 1200 landscape card, Download a 1080 px portrait one): photo with the
+  /// "VAARADHI" watermark, black logo strip, category | date, headline.
+  /// [forDownload] adds the start of the story under the headline.
+  /// JPEG, quality 88.
   static Future<File?> generateArticleImage(NewsArticle article,
-      {NewsArticle? fallback}) async {
+      {NewsArticle? fallback, bool forDownload = false}) async {
+    // Sharing the same story again reuses the card already made.
+    final cacheKey = _cardCacheKey(article, forDownload);
+    final ready = _madeCards[cacheKey];
+    if (ready != null && await ready.exists()) return ready;
     try {
       final candidates = <String>{
         ..._imageCandidates(article),
         if (fallback != null) ..._imageCandidates(fallback),
       };
 
-      // 1. First candidate that downloads AND decodes wins. Decoded at card
-      // width (memory-safe on low-end phones); its shape sets the photo box.
+      // 1. First candidate that downloads AND decodes wins (checked at card
+      // width, memory-safe on low-end phones). None → branded placeholder.
       Uint8List? photo;
-      double photoRatio = 9 / 16;
       for (final url in candidates) {
         final bytes = await _fetchImageBytes(url);
         if (bytes == null || bytes.isEmpty) continue;
         try {
           final codec = await ui.instantiateImageCodec(bytes,
               targetWidth: NewsShareCard.width.toInt());
-          final frame = (await codec.getNextFrame()).image;
-          // Landscape photos keep their shape; tall ones are cropped to a
-          // square so the headline and summary stay in view.
-          photoRatio = (frame.height / frame.width).clamp(0.5, 1.0);
-          frame.dispose();
+          (await codec.getNextFrame()).image.dispose();
           photo = bytes;
           break;
         } catch (e) {
@@ -192,29 +199,61 @@ class ShareService {
         }
       }
 
-      // 2. The Way2News-style card: photo, headline, summary, brand strip.
+      // 2. One design for both: photo + watermark, black logo strip,
+      // category | date, headline. Download also carries the start of the
+      // story under the headline.
       final source = (fallback?.summary.trim().isNotEmpty ?? false) &&
               article.summary.trim().isEmpty
           ? fallback!
           : article;
-      final card = await _captureNewsCard(NewsShareCard(
+      // Download is a tall portrait card with large story text; Share stays
+      // the 4:3 landscape card.
+      final cardWidget = NewsShareCard(
         headline: article.title.trim(),
-        summary: shareSummary(source),
         meta: shareMeta(article),
         photo: photo,
-        photoHeightRatio: photoRatio,
-      ));
+        summary: forDownload ? shareSummary(source) : '',
+        portrait: forDownload,
+      );
+      final card = await _captureNewsCard(cardWidget,
+          width: cardWidget.cardWidth);
       if (card == null) return _buildWatermarkOnlyFile(article);
 
       final dir = await getTemporaryDirectory();
       final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final file = File('${dir.path}/vaaradhi_$safeId.jpg');
+      final file = File(
+          '${dir.path}/vaaradhi_$safeId${forDownload ? '_dl' : ''}.jpg');
       await file.writeAsBytes(card);
+      _madeCards[cacheKey] = file;
       return file;
     } catch (e) {
       debugPrint('[ShareService] Error generating article image: $e');
       return null;
     }
+  }
+
+  /// Cards already made this session, by story + version + what is printed
+  /// on them (an edited headline or summary makes a new card).
+  static final Map<String, File> _madeCards = {};
+
+  static String _cardCacheKey(NewsArticle a, bool forDownload) => [
+        a.id.isNotEmpty ? a.id : a.slug,
+        forDownload ? 'dl' : 'sh',
+        a.title.hashCode,
+        a.summary.hashCode,
+        a.category,
+        a.imageUrl,
+      ].join('|');
+
+  @visibleForTesting
+  static void clearMadeCards() => _madeCards.clear();
+
+  /// Top-level-style worker for [compute]: PNG bytes → JPEG bytes.
+  static Uint8List _pngToJpg(Uint8List png) {
+    final decoded = img.decodePng(png);
+    if (decoded == null) return Uint8List(0);
+    return Uint8List.fromList(
+        img.encodeJpg(decoded, quality: 88, chroma: img.JpegChroma.yuv420));
   }
 
   /// The story text for the card: the summary, else the start of the body
@@ -247,13 +286,16 @@ class ShareService {
 
   /// Renders [card] off-screen (pixel ratio 1 → exactly 1080px wide) and
   /// returns it as JPEG bytes, or null if it could not be drawn.
-  static Future<Uint8List?> _captureNewsCard(NewsShareCard card) async {
+  static Future<Uint8List?> _captureNewsCard(Widget card,
+      {required double width}) async {
     try {
       // The Telugu fonts must be loaded before the frame is drawn, or the
       // capture would use a fallback font.
       await GoogleFonts.pendingFonts([
-        ArticleTypography.heading(fontSize: 56, color: Colors.black),
+        ArticleTypography.heading(fontSize: 54, color: Colors.black),
+        ArticleTypography.body(fontSize: 36, color: Colors.black),
         ArticleTypography.body(fontSize: 40, color: Colors.black),
+        watermarkStyle,
       ]).timeout(const Duration(seconds: 8), onTimeout: () => const []);
       final png = await _screenshotController.captureFromLongWidget(
         MediaQuery(
@@ -262,13 +304,13 @@ class ShareService {
         ),
         pixelRatio: 1,
         delay: const Duration(milliseconds: 150),
-        constraints: const BoxConstraints(
-            minWidth: NewsShareCard.width, maxWidth: NewsShareCard.width),
+        constraints: BoxConstraints(
+            minWidth: width, maxWidth: width),
       );
-      final decoded = img.decodePng(png);
-      if (decoded == null) return null;
-      return Uint8List.fromList(img.encodeJpg(decoded,
-          quality: 88, chroma: img.JpegChroma.yuv420));
+      // PNG → JPEG is the slowest step for a 1600 px card: done on a
+      // background isolate so the screen never freezes while it runs.
+      final jpg = await compute(_pngToJpg, png);
+      return jpg.isEmpty ? null : jpg;
     } catch (e) {
       debugPrint('[ShareService] news card capture failed: $e');
       return null;
@@ -391,6 +433,13 @@ class ShareService {
       // else gets no file (sharing still sends the text-only news card).
       canGeneratePoster(article) ? generateArticleImage(article) : null;
 
+  /// The Download card for [article] (story text + red banner), or null when
+  /// Download is not offered for it.
+  static Future<File?> buildDownloadFile(NewsArticle article) async =>
+      canGeneratePoster(article)
+          ? generateArticleImage(article, forDownload: true)
+          : null;
+
   /// Outcome of a download, so the UI can say what actually happened rather
   /// than guessing.
   static const int downloadSaved = 0;
@@ -451,7 +500,7 @@ class ShareService {
     if (_isSharing) return downloadFailed;
     _isSharing = true;
     try {
-      final file = await buildPosterFile(article);
+      final file = await buildDownloadFile(article);
       if (file == null) return downloadFailed;
       return await saveFileToGallery(file.path);
     } finally {

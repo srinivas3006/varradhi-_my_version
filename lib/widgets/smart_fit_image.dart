@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// A news photo that fills its frame edge to edge, Way2News style — no
+/// A news photo that fills its frame edge to edge — no
 /// blurred bands, no letterboxing, never stretched (aspect is kept; only
 /// the overflow is trimmed).
 ///

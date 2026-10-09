@@ -11,6 +11,7 @@ import '../models/ugc_draft.dart';
 import '../core/utils/indian_mobile.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
+import '../widgets/auth/auth_ui.dart';
 import '../widgets/ugc_location_sheet.dart';
 import '../repositories/ugc_draft_repository.dart';
 import 'account_signup_screen.dart';
@@ -368,81 +369,90 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             : null,
       );
 
-  /// A guest on the Post tab. Laid out like the login screen it leads to —
-  /// top bar, left-aligned icon tile, title, note, full-width button, and the
-  /// same "new here?" link — so the two read as one flow.
+  /// A guest on the Post tab. Same look as the login screen it leads to —
+  /// red brand header, a card lifted over it, a full-width login button and
+  /// the "new here?" sign-up action — so the two read as one flow.
   Widget _buildLoginRequired() {
     final telugu = AppState.instance.language == 'Telugu';
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: authBackground(context),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: Text(telugu ? 'పోస్ట్' : 'Post'),
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         // As the Post tab there is nothing to go back to; pushed as a
         // route, the usual back arrow shows.
         automaticallyImplyLeading: _isSecondaryRoute,
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          key: const Key('post_login_required'),
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.edit_note_rounded,
-                    color: AppColors.primary, size: 28),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                telugu
-                    ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి'
-                    : 'Log in to post news',
-                style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: Theme.of(context).textTheme.bodyLarge?.color),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                telugu
-                    ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
-                    : 'Share what is happening in your village and mandal.',
-                style:
-                    const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  key: const Key('post_login_button'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                    elevation: 0,
+      body: SingleChildScrollView(
+        key: const Key('post_login_required'),
+        child: Column(
+          children: [
+            AuthBrandHeader(
+              icon: Icons.edit_note_rounded,
+              topPadding: 60,
+              title: telugu ? 'మీరే రిపోర్టర్' : 'Be the reporter',
+              subtitle: telugu
+                  ? 'మీ ప్రాంత వార్తను వారధిలో పంచుకోండి'
+                  : 'Share your local news on Vaaradhi',
+            ),
+            AuthCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AuthCardHeading(
+                    title: telugu
+                        ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి'
+                        : 'Log in to post news',
+                    note: telugu
+                        ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
+                        : 'Share what is happening in your village and mandal.',
                   ),
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    requireAuth(context, () {
-                      if (mounted) setState(() {});
-                    });
-                  },
-                  child: Text(telugu ? 'లాగిన్' : 'Log in',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700)),
-                ),
+                  const SizedBox(height: 20),
+                  AuthInfoLine(
+                    icon: Icons.location_on_outlined,
+                    text: telugu
+                        ? 'మీ గ్రామం, మండలం వార్తలు నేరుగా పంపండి'
+                        : 'Send news from your village and mandal',
+                  ),
+                  AuthInfoLine(
+                    icon: Icons.photo_library_outlined,
+                    text: telugu
+                        ? 'ఫోటోలు, వీడియోలు జోడించండి'
+                        : 'Add photos and videos',
+                  ),
+                  AuthInfoLine(
+                    icon: Icons.verified_outlined,
+                    text: telugu
+                        ? 'పరిశీలన తర్వాత వారధిలో ప్రచురించబడుతుంది'
+                        : 'Published on Vaaradhi after review',
+                  ),
+                  const SizedBox(height: 12),
+                  AuthPrimaryButton(
+                    key: const Key('post_login_button'),
+                    label: telugu ? 'లాగిన్' : 'Log in',
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      requireAuth(context, () {
+                        if (mounted) setState(() {});
+                      });
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton(
-                  key: const Key('post_signup_link'),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -22),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                child: AuthSecondaryAction(
+                  buttonKey: const Key('post_signup_link'),
+                  prompt: telugu ? 'కొత్త వారా?' : 'New here?',
+                  label: telugu ? 'ఖాతాను సృష్టించండి' : 'Create an account',
+                  icon: Icons.person_add_alt_1_rounded,
                   onPressed: () async {
                     await Navigator.push<bool>(
                       context,
@@ -451,26 +461,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     );
                     if (mounted) setState(() {});
                   },
-                  child: Text.rich(
-                    TextSpan(
-                      text: telugu ? 'కొత్త వారా? ' : 'New here? ',
-                      style: const TextStyle(color: AppColors.textMuted),
-                      children: [
-                        TextSpan(
-                          text: telugu
-                              ? 'ఖాతాను సృష్టించండి'
-                              : 'Create an account',
-                          style: const TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

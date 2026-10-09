@@ -431,4 +431,53 @@ void main() {
     app.notifyListeners();
     await tester.pumpAndSettle(const Duration(seconds: 1));
   });
+
+  testWidgets('a category chip shows only that category\'s news',
+      (tester) async {
+    final api = _Api((o) {
+      switch (o.path) {
+        case '/api/v1/categories/':
+          return (200, {
+            'data': [
+              {
+                'id': 'c1',
+                'slug': 'sports',
+                'name': 'Sports',
+                'name_te': 'క్రీడలు',
+                'order': 1
+              },
+            ],
+          });
+        case '/api/v1/feed/home/':
+          return (200, _home([for (var i = 1; i < 10; i++) 'p$i'], ['l1']));
+        case '/api/v1/feed/':
+          final sports = o.queryParameters['category'] == 'sports';
+          return (200, {
+            'data': sports
+                ? [_item('s1'), _item('s2')]
+                : [_item('a1'), _item('a2')],
+            'meta': {'next': null},
+          });
+        default:
+          return (200, {'data': [], 'meta': {}, 'errors': null});
+      }
+    });
+    ApiClient.instance.dio.httpClientAdapter = api;
+
+    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+    expect(find.byKey(const PageStorageKey('home_for_you_rail')),
+        findsOneWidget);
+
+    await tester.tap(find.text('క్రీడలు').first);
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+
+    final latest = api.requests.lastWhere((r) => r.path == '/api/v1/feed/');
+    expect(latest.queryParameters['category'], 'sports');
+    // Only the category's stories: the rails and hero step aside.
+    expect(find.byKey(const PageStorageKey('home_for_you_rail')),
+        findsNothing);
+    expect(find.text('T s1'), findsWidgets);
+    expect(find.text('T a1'), findsNothing);
+  });
 }

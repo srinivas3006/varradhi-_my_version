@@ -80,7 +80,9 @@ void main() {
     });
 
     test('a citizen post sends the reason as-is (any string ≤100)', () async {
-      final a = _Adapter({'POST /api/v1/ugc/report/': (201, {'data': {}})});
+      final a = _Adapter({
+        'POST /api/v1/ugc/report/': (201, {'data': {}})
+      });
       final out =
           await _service(a).report(_story(ugc: true), reason: 'copyright');
       expect(out, ReportOutcome.sent);
@@ -93,8 +95,10 @@ void main() {
     test('"Article already reported by this user." is its own outcome',
         () async {
       final a = _Adapter({
-        'POST /api/v1/articles/art-1/report/':
-            (400, _error(400, 'Article already reported by this user.')),
+        'POST /api/v1/articles/art-1/report/': (
+          400,
+          _error(400, 'Article already reported by this user.')
+        ),
       });
       expect(await _service(a).report(_story(ugc: false), reason: 'spam'),
           ReportOutcome.alreadyReported);
@@ -102,47 +106,81 @@ void main() {
 
     test('"Submission already reported by this user." too', () async {
       final a = _Adapter({
-        'POST /api/v1/ugc/report/':
-            (400, _error(400, 'Submission already reported by this user.')),
+        'POST /api/v1/ugc/report/': (
+          400,
+          _error(400, 'Submission already reported by this user.')
+        ),
       });
       expect(await _service(a).report(_story(ugc: true), reason: 'spam'),
           ReportOutcome.alreadyReported);
     });
 
-    test('404 "Article not found." is a failure, never the email fallback',
+    test('404 "Article not found." → notFound, never an email fallback',
         () async {
       final a = _Adapter({
-        'POST /api/v1/articles/art-1/report/':
-            (404, _error(404, 'Article not found.')),
+        'POST /api/v1/articles/art-1/report/': (
+          404,
+          _error(404, 'Article not found.')
+        ),
       });
+      expect(await _service(a).report(_story(ugc: false), reason: 'spam'),
+          ReportOutcome.notFound);
+    });
+
+    test('401 from a guest → loginRequired (the app then asks to log in)',
+        () async {
+      AppState.instance.isLoggedIn = false;
+      final a = _Adapter({
+        'POST /api/v1/articles/art-1/report/': (
+          401,
+          _error(401, 'Authentication credentials were not provided.')
+        ),
+      });
+      expect(await _service(a).report(_story(ugc: false), reason: 'other'),
+          ReportOutcome.loginRequired);
+    });
+
+    test('429 → throttled; 400 validation → invalid; 5xx → failed', () async {
+      Future<ReportOutcome> with_(int code) => _service(_Adapter({
+            'POST /api/v1/articles/art-1/report/': (code, _error(code, 'x')),
+          })).report(_story(ugc: false), reason: 'other');
+      expect(await with_(429), ReportOutcome.throttled);
+      expect(await with_(400), ReportOutcome.invalid);
+      expect(await with_(500), ReportOutcome.failed);
+    });
+
+    test('a server without the route (405) is a failure, not an email',
+        () async {
+      final a = _Adapter({});
       expect(await _service(a).report(_story(ugc: false), reason: 'spam'),
           ReportOutcome.failed);
     });
 
-    test('only a server without the route (405) falls back, asked once',
-        () async {
-      final a = _Adapter({});
-      final s = _service(a);
-      expect(await s.report(_story(ugc: false), reason: 'spam'),
-          ReportOutcome.unsupported);
-      expect(await s.report(_story(ugc: false), reason: 'spam'),
-          ReportOutcome.unsupported);
-      expect(a.calls, hasLength(1));
+    test('notes are capped at the backend 1000-character limit', () async {
+      final a = _Adapter({
+        'POST /api/v1/articles/art-1/report/': (201, {'data': {}}),
+      });
+      await _service(a)
+          .report(_story(ugc: false), reason: 'other', notes: 'x' * 1500);
+      expect(((a.bodies.single as Map)['notes'] as String).length, 1000);
     });
   });
 
   group('like / dislike on citizen posts (§17.2)', () {
     test('PUT returns the server counts', () async {
       final a = _Adapter({
-        'PUT /api/v1/ugc/sub-1/reaction/': (200, {
-          'data': {
-            'submission_id': 'sub-1',
-            'reaction_type': 'like',
-            'my_reaction': 'like',
-            'like_count': 12,
-            'dislike_count': 1,
+        'PUT /api/v1/ugc/sub-1/reaction/': (
+          200,
+          {
+            'data': {
+              'submission_id': 'sub-1',
+              'reaction_type': 'like',
+              'my_reaction': 'like',
+              'like_count': 12,
+              'dislike_count': 1,
+            }
           }
-        }),
+        ),
       });
       final res = await _service(a).react(_story(ugc: true), 'like');
       expect(res['like_count'], 12);
@@ -152,9 +190,12 @@ void main() {
 
     test('"none" removes the reaction with DELETE', () async {
       final a = _Adapter({
-        'DELETE /api/v1/ugc/sub-1/reaction/': (200, {
-          'data': {'my_reaction': null, 'like_count': 11, 'dislike_count': 1}
-        }),
+        'DELETE /api/v1/ugc/sub-1/reaction/': (
+          200,
+          {
+            'data': {'my_reaction': null, 'like_count': 11, 'dislike_count': 1}
+          }
+        ),
       });
       final res = await _service(a).react(_story(ugc: true), 'none');
       expect(a.calls.single, 'DELETE /api/v1/ugc/sub-1/reaction/');
@@ -163,8 +204,10 @@ void main() {
 
     test('404 "Submission not found." throws so the UI rolls back', () async {
       final a = _Adapter({
-        'PUT /api/v1/ugc/sub-1/reaction/':
-            (404, _error(404, 'Submission not found.')),
+        'PUT /api/v1/ugc/sub-1/reaction/': (
+          404,
+          _error(404, 'Submission not found.')
+        ),
       });
       expect(() => _service(a).react(_story(ugc: true), 'like'),
           throwsA(isA<DioException>()));
@@ -182,11 +225,15 @@ void main() {
   group('bookmark citizen posts (handover §4)', () {
     test('server {bookmarked: true} is the final state', () async {
       final a = _Adapter({
-        'POST /api/v1/ugc/sub-1/bookmark/toggle/':
-            (201, {'data': {'bookmarked': true}}),
+        'POST /api/v1/ugc/sub-1/bookmark/toggle/': (
+          201,
+          {
+            'data': {'bookmarked': true}
+          }
+        ),
       });
-      final saved =
-          await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true);
+      final saved = await _service(a)
+          .setBookmarked(_story(ugc: true), nowBookmarked: true);
       expect(saved, isTrue);
       expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse,
           reason: 'the combined saved list includes citizen posts now');
@@ -194,12 +241,16 @@ void main() {
 
     test('the toggle can disagree with the guess — server wins', () async {
       final a = _Adapter({
-        'POST /api/v1/ugc/sub-1/bookmark/toggle/':
-            (200, {'data': {'bookmarked': false}}),
+        'POST /api/v1/ugc/sub-1/bookmark/toggle/': (
+          200,
+          {
+            'data': {'bookmarked': false}
+          }
+        ),
       });
       await AppState.instance.saveStoryOnDevice(_story(ugc: true));
-      final saved =
-          await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true);
+      final saved = await _service(a)
+          .setBookmarked(_story(ugc: true), nowBookmarked: true);
       expect(saved, isFalse);
       expect(AppState.instance.isSavedOnDevice('sub-1'), isFalse,
           reason: 'a copy left by an older version is cleaned up');
@@ -207,19 +258,27 @@ void main() {
 
     test('404 is a failure (null), nothing saved', () async {
       final a = _Adapter({
-        'POST /api/v1/ugc/sub-1/bookmark/toggle/':
-            (404, _error(404, 'Submission not found.')),
+        'POST /api/v1/ugc/sub-1/bookmark/toggle/': (
+          404,
+          _error(404, 'Submission not found.')
+        ),
       });
-      expect(await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true),
+      expect(
+          await _service(a)
+              .setBookmarked(_story(ugc: true), nowBookmarked: true),
           isNull);
     });
 
     test('a failed request is sent once, never retried', () async {
       final a = _Adapter({
-        'POST /api/v1/ugc/sub-1/bookmark/toggle/':
-            (500, _error(500, 'Server error.')),
+        'POST /api/v1/ugc/sub-1/bookmark/toggle/': (
+          500,
+          _error(500, 'Server error.')
+        ),
       });
-      expect(await _service(a).setBookmarked(_story(ugc: true), nowBookmarked: true),
+      expect(
+          await _service(a)
+              .setBookmarked(_story(ugc: true), nowBookmarked: true),
           isNull);
       expect(a.calls, ['POST /api/v1/ugc/sub-1/bookmark/toggle/']);
     });
