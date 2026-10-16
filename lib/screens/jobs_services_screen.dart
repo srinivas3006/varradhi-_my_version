@@ -76,7 +76,8 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
 
   Widget _buildJobsList() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
     }
     if (_jobs.isEmpty) {
       return const Center(
@@ -85,7 +86,8 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.work_outline_rounded, size: 48, color: AppColors.textMuted),
+              Icon(Icons.work_outline_rounded,
+                  size: 48, color: AppColors.textMuted),
               SizedBox(height: 12),
               Text(
                 'ప్రస్తుతానికి ఉద్యోగ ప్రకటనలు లేవు',
@@ -112,7 +114,9 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark ? Colors.white10 : Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white10
+                : Colors.white,
             borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
@@ -128,7 +132,8 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: AppColors.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -145,24 +150,35 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
                   const Spacer(),
                   Text(
                     'ఖాళీలు: ${job.vacancies}',
-                    style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
+                    style: const TextStyle(
+                        fontSize: 11.5, color: AppColors.textMuted),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
-              Text(job.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+              Text(job.title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 14.5)),
               const SizedBox(height: 4),
-              Text(job.organization, style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted)),
+              Text(job.organization,
+                  style: const TextStyle(
+                      fontSize: 12.5, color: AppColors.textMuted)),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.location_on, size: 14, color: AppColors.textMuted),
+                  const Icon(Icons.location_on,
+                      size: 14, color: AppColors.textMuted),
                   const SizedBox(width: 4),
-                  Text(job.location, style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+                  Text(job.location,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.textMuted)),
                   const Spacer(),
                   Text(
                     'చివరి తేదీ: ${job.lastDate}',
-                    style: const TextStyle(fontSize: 11.5, color: Color(0xFFE8412B), fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFFE8412B),
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -181,7 +197,8 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.handyman_outlined, size: 48, color: AppColors.textMuted),
+              Icon(Icons.handyman_outlined,
+                  size: 48, color: AppColors.textMuted),
               SizedBox(height: 12),
               Text(
                 'ప్రస్తుతానికి సేవల జాబితా అందుబాటులో లేదు',
@@ -208,7 +225,9 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark ? Colors.white10 : Colors.white,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white10
+                : Colors.white,
             borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
@@ -227,24 +246,31 @@ class _JobsServicesScreenState extends State<JobsServicesScreen>
                   color: AppColors.chipBg,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.handyman_outlined, color: AppColors.textMuted),
+                child: const Icon(Icons.handyman_outlined,
+                    color: AppColors.textMuted),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(service['name']!, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(service['name']!,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 14)),
                     const SizedBox(height: 3),
-                    Text('${service['category']} · ${service['area']}', style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+                    Text('${service['category']} · ${service['area']}',
+                        style: const TextStyle(
+                            fontSize: 11.5, color: AppColors.textMuted)),
                   ],
                 ),
               ),
               Row(
                 children: [
-                  const Icon(Icons.star_rounded, color: Color(0xFFE8A312), size: 18),
+                  const Icon(Icons.star_rounded,
+                      color: Color(0xFFE8A312), size: 18),
                   const SizedBox(width: 2),
-                  Text(service['rating']!, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(service['rating']!,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
                 ],
               ),
             ],

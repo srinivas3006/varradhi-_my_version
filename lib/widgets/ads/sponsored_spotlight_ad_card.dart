@@ -218,39 +218,39 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
                         ),
                       )
                     : CachedNetworkImage(
-                          width: double.infinity,
-                          height: double.infinity,
-                          imageUrl: widget.ad.imageUrl,
-                          // Contain, not cover. A full-screen creative is a
-                          // poster: its call to action — a phone number, a
-                          // WhatsApp button — sits near the edge, and cover
-                          // crops whatever does not match the device ratio, so
-                          // the one part of the ad that has to survive is the
-                          // first thing lost. The blurred backdrop behind fills
-                          // the letterbox so it still reads as full-bleed.
-                          fit: BoxFit.contain,
-                          placeholder: (context, url) => const Center(
-                            child: CircularProgressIndicator(
-                                color: Colors.white70),
-                          ),
-                          errorWidget: (context, url, error) => Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.campaign_rounded,
-                                  size: 64, color: Colors.white54),
-                              const SizedBox(height: 12),
-                              Text(
-                                widget.ad.title,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
+                        width: double.infinity,
+                        height: double.infinity,
+                        imageUrl: widget.ad.imageUrl,
+                        // Contain, not cover. A full-screen creative is a
+                        // poster: its call to action — a phone number, a
+                        // WhatsApp button — sits near the edge, and cover
+                        // crops whatever does not match the device ratio, so
+                        // the one part of the ad that has to survive is the
+                        // first thing lost. The blurred backdrop behind fills
+                        // the letterbox so it still reads as full-bleed.
+                        fit: BoxFit.contain,
+                        placeholder: (context, url) => const Center(
+                          child:
+                              CircularProgressIndicator(color: Colors.white70),
                         ),
+                        errorWidget: (context, url, error) => Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.campaign_rounded,
+                                size: 64, color: Colors.white54),
+                            const SizedBox(height: 12),
+                            Text(
+                              widget.ad.title,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
             ),
 
@@ -356,7 +356,6 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
                 ),
               ),
             ),
-
           ],
         ),
       ),

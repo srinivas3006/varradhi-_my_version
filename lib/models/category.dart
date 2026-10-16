@@ -73,14 +73,18 @@ class Category {
         final trans = json['translations'] as Map;
         final te = trans['te'] ?? trans['telugu'];
         if (te is Map) {
-          nameTe = (te['name'] ?? te['title'] ?? te['display_name'])?.toString().trim();
+          nameTe = (te['name'] ?? te['title'] ?? te['display_name'])
+              ?.toString()
+              .trim();
         } else if (te is String && te.trim().isNotEmpty) {
           nameTe = te.trim();
         }
       }
     }
 
-    final rawName = (json['name'] ?? json['display_name'] ?? json['title'])?.toString() ?? '';
+    final rawName =
+        (json['name'] ?? json['display_name'] ?? json['title'])?.toString() ??
+            '';
     final displayName = json['display_name']?.toString();
 
     return Category(

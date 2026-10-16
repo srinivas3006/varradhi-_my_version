@@ -1237,12 +1237,10 @@ class _LocalNewsTabState extends State<LocalNewsTab> {
                           fontWeight: FontWeight.w800,
                           height: 1.3,
                           letterSpacing: 0.0,
-                          color:
-                              Theme.of(context).textTheme.bodyLarge?.color ??
-                                  (Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? AppColors.readingTitleDark
-                                      : AppColors.readingTitleLight),
+                          color: Theme.of(context).textTheme.bodyLarge?.color ??
+                              (Theme.of(context).brightness == Brightness.dark
+                                  ? AppColors.readingTitleDark
+                                  : AppColors.readingTitleLight),
                         ),
                       ),
                       const SizedBox(height: 6),

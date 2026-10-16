@@ -95,6 +95,24 @@ class NotificationDeepLinkResolver {
       }
     }
 
+    // Legacy custom schemes with the id as the host: "ugc://<id>",
+    // "poster://<id>", "poll://<id>", "video://<id>" (notification handover).
+    // The id is taken as sent — `host` above is lowercased.
+    if (const {'ugc', 'poster', 'poll', 'video'}.contains(scheme)) {
+      final id = uri.host.isNotEmpty
+          ? uri.host
+          : (segments.isNotEmpty ? segments[0] : '');
+      if (id.isNotEmpty) {
+        return _resolveSegments(
+          type: scheme,
+          segments: [id],
+          notificationId: notificationId,
+          originalPayload: originalPayload,
+          rawUri: trimmed,
+        );
+      }
+    }
+
     // 3. Handle scheme: "screen://"
     if (scheme == 'screen') {
       final screen =
@@ -161,7 +179,8 @@ class NotificationDeepLinkResolver {
 
     final notificationId =
         data['notification_id']?.toString() ?? data['id']?.toString();
-    final deepLink = data['deep_link']?.toString() ?? data['click_action']?.toString();
+    final deepLink =
+        data['deep_link']?.toString() ?? data['click_action']?.toString();
 
     // 1. content_type with content_slug or content_id (schema v2). These
     // name the content directly, so they win over the deep_link string.
@@ -212,9 +231,13 @@ class NotificationDeepLinkResolver {
     String? contentType,
     String? notificationId,
   ) {
-    final contentSlug = data['content_slug']?.toString() ?? data['slug']?.toString();
-    final contentId = data['content_id']?.toString() ?? data['article_id']?.toString() ?? data['id']?.toString();
-    final categorySlug = data['category_slug']?.toString() ?? data['category']?.toString();
+    final contentSlug =
+        data['content_slug']?.toString() ?? data['slug']?.toString();
+    final contentId = data['content_id']?.toString() ??
+        data['article_id']?.toString() ??
+        data['id']?.toString();
+    final categorySlug =
+        data['category_slug']?.toString() ?? data['category']?.toString();
 
     // Category target. A category field on a typed payload (an article or
     // poster tagged with its section) is metadata, not the destination.
@@ -240,7 +263,9 @@ class NotificationDeepLinkResolver {
         contentType == 'breaking' ||
         // 'ugc', 'video' and 'quote' are deliberately NOT here — each has its
         // own branch below, and listing them here shadowed those.
-        (contentSlug != null && contentSlug.isNotEmpty && contentType == null)) {
+        (contentSlug != null &&
+            contentSlug.isNotEmpty &&
+            contentType == null)) {
       // Slug only. The detail API is /api/v1/articles/{slug}/ — an id there
       // is always a 404. With no slug, deep_link (which carries it) or the
       // inbox is the fallback.

@@ -501,101 +501,101 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.campaign_rounded,
-                    size: 64, color: AppColors.primary),
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                'రిపోర్టర్‌గా చేరండి',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'మీ చుట్టూ జరుగుతున్న స్థానిక వార్తలు, సంఘటనలు మరియు విశేషాలను అందించి సమాజానికి తోడ్పడండి.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 15, color: AppColors.textMuted, height: 1.5),
-              ),
-              const SizedBox(height: 32),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color:
-                      isDark ? AppColors.cardDarkSlate : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                      color: isDark ? Colors.white24 : Colors.black12),
-                ),
-                child: Column(
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.monetization_on_rounded,
-                            color: Colors.amber, size: 24),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'ఆమోదించబడిన ప్రతి వార్తకు పాయింట్లు సంపాదించండి. వాటిని నగదుగా విత్‌డ్రా చేసుకోండి!',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Divider(color: isDark ? Colors.white12 : Colors.black12),
-                    const SizedBox(height: 16),
-                    const Row(
-                      children: [
-                        Icon(Icons.dashboard_customize_rounded,
-                            color: AppColors.primary, size: 24),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'మీ వార్తల స్థితిని రిపోర్టర్ డ్యాష్‌బోర్డ్‌లో ట్రాక్ చేయండి.',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 48),
-              SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                  onPressed: () {
-                    AppState.instance.registerAsReporter();
-                    setState(() {});
-                  },
-                  child: const Text('రిపోర్టింగ్‌ను ప్రారంభించండి',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: const Icon(Icons.campaign_rounded,
+                      size: 64, color: AppColors.primary),
                 ),
-              ),
-              const SizedBox(height: 24),
-            ],
-          ),
+                const SizedBox(height: 32),
+                const Text(
+                  'రిపోర్టర్‌గా చేరండి',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'మీ చుట్టూ జరుగుతున్న స్థానిక వార్తలు, సంఘటనలు మరియు విశేషాలను అందించి సమాజానికి తోడ్పడండి.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 15, color: AppColors.textMuted, height: 1.5),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color:
+                        isDark ? AppColors.cardDarkSlate : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: isDark ? Colors.white24 : Colors.black12),
+                  ),
+                  child: Column(
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.monetization_on_rounded,
+                              color: Colors.amber, size: 24),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'ఆమోదించబడిన ప్రతి వార్తకు పాయింట్లు సంపాదించండి. వాటిని నగదుగా విత్‌డ్రా చేసుకోండి!',
+                              style: TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 16),
+                      const Row(
+                        children: [
+                          Icon(Icons.dashboard_customize_rounded,
+                              color: AppColors.primary, size: 24),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'మీ వార్తల స్థితిని రిపోర్టర్ డ్యాష్‌బోర్డ్‌లో ట్రాక్ చేయండి.',
+                              style: TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed: () {
+                      AppState.instance.registerAsReporter();
+                      setState(() {});
+                    },
+                    child: const Text('రిపోర్టింగ్‌ను ప్రారంభించండి',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
           ),
         ),
       ),
@@ -675,7 +675,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-
               // Missing Local Files Warning
               if (_controller.missingFilesWarning.isNotEmpty) ...[
                 Container(
@@ -847,8 +846,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 const SizedBox(height: 12),
                 Text(
                   'క్రమం మార్చడానికి ఫోటోను పట్టుకొని లాగండి · మొదటిది కవర్',
-                  style: TextStyle(
-                      fontSize: 11, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 6),
                 SizedBox(
@@ -870,39 +868,39 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         index: index,
                         enabled: !_controller.isSubmittingOrUploading,
                         child: Stack(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                File(_controller.selectedImagePaths[index]),
-                                width: 64,
-                                height: 64,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 2,
-                            right: 12,
-                            child: GestureDetector(
-                              onTap: _controller.isSubmittingOrUploading
-                                  ? null
-                                  : () => _controller.removeImageAt(index),
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black87,
-                                  shape: BoxShape.circle,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(_controller.selectedImagePaths[index]),
+                                  width: 64,
+                                  height: 64,
+                                  fit: BoxFit.cover,
                                 ),
-                                child: const Icon(Icons.close,
-                                    color: Colors.white, size: 12),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
+                            Positioned(
+                              top: 2,
+                              right: 12,
+                              child: GestureDetector(
+                                onTap: _controller.isSubmittingOrUploading
+                                    ? null
+                                    : () => _controller.removeImageAt(index),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black87,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white, size: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   ),
@@ -973,58 +971,58 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: SizedBox(
                               width: 18,
                               height: 18,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2)),
+                              child: CircularProgressIndicator(strokeWidth: 2)),
                         ),
                       )
                     : TextButton.icon(
                         key: const Key('ugc_categories_retry'),
                         onPressed: _controller.loadCategories,
                         icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('వర్గాలు లోడ్ కాలేదు — మళ్లీ ప్రయత్నించండి'),
+                        label: const Text(
+                            'వర్గాలు లోడ్ కాలేదు — మళ్లీ ప్రయత్నించండి'),
                       )
               else
-              Wrap(
-                spacing: 8,
-                runSpacing: 10,
-                children: _controller.categories.map((cat) {
-                  final selected = cat.slug == _controller.category;
-                  return GestureDetector(
-                    key: Key('ugc_category_${cat.slug}'),
-                    onTap: _controller.isSubmittingOrUploading
-                        ? null
-                        : () => _controller.setCategory(cat.slug),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? AppColors.primary
-                            : Theme.of(context).cardColor,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: selected
-                                ? AppColors.primary
-                                : (isDark
-                                    ? Colors.white24
-                                    : const Color(0xFFE7E9EE))),
-                      ),
-                      child: Text(
-                        cat.name.isNotEmpty ? cat.name : cat.slug,
-                        style: TextStyle(
-                          fontSize: 11.5,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 10,
+                  children: _controller.categories.map((cat) {
+                    final selected = cat.slug == _controller.category;
+                    return GestureDetector(
+                      key: Key('ugc_category_${cat.slug}'),
+                      onTap: _controller.isSubmittingOrUploading
+                          ? null
+                          : () => _controller.setCategory(cat.slug),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
                           color: selected
-                              ? Colors.white
-                              : (isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF5C6273)),
-                          fontWeight: FontWeight.w600,
+                              ? AppColors.primary
+                              : Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: selected
+                                  ? AppColors.primary
+                                  : (isDark
+                                      ? Colors.white24
+                                      : const Color(0xFFE7E9EE))),
+                        ),
+                        child: Text(
+                          cat.name.isNotEmpty ? cat.name : cat.slug,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: selected
+                                ? Colors.white
+                                : (isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF5C6273)),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                }).toList(),
-              ),
+                    );
+                  }).toList(),
+                ),
 
               const SizedBox(height: 20),
               const Text('వివరణ',

@@ -91,4 +91,9 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Video download: stamps the Vaaradhi logo on the video (VideoWatermarker).
+    // Same Media3 version video_player_android uses.
+    implementation("androidx.media3:media3-transformer:1.9.2")
+    implementation("androidx.media3:media3-effect:1.9.2")
+    implementation("androidx.media3:media3-common:1.9.2")
 }

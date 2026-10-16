@@ -83,7 +83,8 @@ class LocalListingAdWidget extends StatelessWidget {
                       ),
                       errorWidget: (_, __, ___) => Container(
                         color: isDark ? Colors.white10 : AppColors.chipBg,
-                        child: const Icon(Icons.storefront_rounded, color: AppColors.textMuted),
+                        child: const Icon(Icons.storefront_rounded,
+                            color: AppColors.textMuted),
                       ),
                     ),
                   ),
@@ -99,12 +100,15 @@ class LocalListingAdWidget extends StatelessWidget {
                       Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                              color: const Color(0xFF10B981)
+                                  .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                                color: const Color(0xFF10B981)
+                                    .withValues(alpha: 0.3),
                               ),
                             ),
                             child: const Text(
@@ -131,7 +135,9 @@ class LocalListingAdWidget extends StatelessWidget {
 
                       // Business Name / Title
                       Text(
-                        ad.title.isNotEmpty ? ad.title : 'Local Store & Services',
+                        ad.title.isNotEmpty
+                            ? ad.title
+                            : 'Local Store & Services',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -146,11 +152,13 @@ class LocalListingAdWidget extends StatelessWidget {
                       Row(
                         children: [
                           if (ad.area != null && ad.area!.isNotEmpty) ...[
-                            const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
+                            const Icon(Icons.location_on_outlined,
+                                size: 12, color: AppColors.textMuted),
                             const SizedBox(width: 2),
                             Text(
                               ad.area!,
-                              style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.textMuted),
                             ),
                             const Spacer(),
                           ] else
@@ -158,7 +166,8 @@ class LocalListingAdWidget extends StatelessWidget {
 
                           // Action button
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: AppColors.primary,
                               borderRadius: BorderRadius.circular(8),
@@ -175,7 +184,8 @@ class LocalListingAdWidget extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(width: 3),
-                                Icon(Icons.arrow_forward_rounded, size: 10, color: Colors.white),
+                                Icon(Icons.arrow_forward_rounded,
+                                    size: 10, color: Colors.white),
                               ],
                             ),
                           ),

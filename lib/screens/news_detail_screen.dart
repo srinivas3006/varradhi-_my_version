@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
@@ -15,8 +16,11 @@ import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
 import 'comments_screen.dart';
 import '../widgets/spotlight/story_options_sheet.dart';
+import '../widgets/spotlight/spotlight_news_card.dart'
+    show ReporterAttribution, VaaradhiLogoBadge, VaaradhiVerticalWatermark;
 import '../services/content_engagement_service.dart';
 import '../services/api_service.dart';
+import '../services/content_analytics.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
@@ -36,6 +40,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
   bool get _isUgc => article.isUgc;
 
+  /// The whole story is already on screen: the body, or for a citizen post
+  /// its description (the feed carries a post's full text). Then a detail
+  /// request that fails changes nothing the reader can see, so no error.
+  bool get _hasFullText =>
+      article.body.trim().isNotEmpty ||
+      (_isUgc && article.summary.trim().isNotEmpty);
+
   Future<void> _fetchFullArticleDetail() async {
     if (_isUgc) {
       await _fetchUgcDetail();
@@ -44,9 +55,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     // Slug only: the detail API is /api/v1/articles/{slug}/, and an id there
     // is always a 404. Without a slug the feed copy already on screen stands.
-    final slugToFetch = (widget.slug?.isNotEmpty ?? false)
-        ? widget.slug!
-        : widget.article.slug;
+    final slugToFetch =
+        (widget.slug?.isNotEmpty ?? false) ? widget.slug! : widget.article.slug;
     if (slugToFetch.isEmpty) {
       debugPrint('Detail: no slug for article ${widget.article.id}; '
           'showing feed copy');
@@ -69,6 +79,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       if (mounted) {
         setState(() {
           article = fullArticle;
+          _reading.updateStory(fullArticle);
           _isLoadingDetail = false;
         });
       }
@@ -99,9 +110,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       if (!mounted) return;
       setState(() {
         // Keep whatever the detail payload leaves blank from the feed copy.
-        article = full.title.isEmpty && article.title.isNotEmpty
-            ? article
-            : full;
+        article =
+            full.title.isEmpty && article.title.isNotEmpty ? article : full;
         _isLoadingDetail = false;
       });
     } catch (e) {
@@ -156,7 +166,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         }
       } else if (nextReaction == 'dislike') {
         article.isDisliked = true;
-        article.dislikes = isCurrentlyDisliked ? prevDislikes : prevDislikes + 1;
+        article.dislikes =
+            isCurrentlyDisliked ? prevDislikes : prevDislikes + 1;
         if (isCurrentlyLiked) {
           article.isLiked = false;
           article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
@@ -182,7 +193,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           if (l != null) {
             article.likes = (l as num).toInt();
           }
-          final d = res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
+          final d =
+              res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
           if (d != null) {
             article.dislikes = (d as num).toInt();
           }
@@ -207,7 +219,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       _isTogglingReaction = false;
     }
   }
-
 
   String _formatCount(int count) {
     if (count <= 0) return '';
@@ -299,8 +310,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   Future<void> _showMoreSheet() async {
     HapticFeedback.selectionClick();
     final isSaved = AppState.instance.isStoryBookmarked(article);
-    final choice =
-        await StoryOptionsSheet.show(context, isBookmarked: isSaved);
+    final choice = await StoryOptionsSheet.show(context, isBookmarked: isSaved);
     if (!mounted || choice == null) return;
     switch (choice) {
       case StoryOption.bookmark:
@@ -350,11 +360,32 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (AppState.instance.isLiked(targetId)) {
       article.isLiked = true;
     }
+    _reading = ReadingTracker(article,
+        isOnTop: () => mounted && (ModalRoute.of(context)?.isCurrent ?? true));
+    // article_open once the screen is actually on screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reading.opened();
+    });
     _fetchFullArticleDetail();
+  }
+
+  /// Analytics: open, scroll milestones, read completion, reading time.
+  late final ReadingTracker _reading;
+
+  /// How far down the story the reader has scrolled, as a percentage of
+  /// everything there is to read (100 when it all fits on screen).
+  bool _onScrollMetrics(ScrollMetrics m) {
+    if (m.axis != Axis.vertical) return false;
+    final total = m.maxScrollExtent + m.viewportDimension;
+    if (total <= 0) return false;
+    final seen = (m.pixels.clamp(0.0, m.maxScrollExtent) + m.viewportDimension);
+    _reading.scrolledTo((seen * 100 / total).round());
+    return false;
   }
 
   @override
   void dispose() {
+    _reading.closed();
     AppTtsService.instance.stop();
     super.dispose();
   }
@@ -405,16 +436,27 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                 removeTop: true,
                 child: Stack(
                   children: [
-                    CustomScrollView(
-                      slivers: [
-                        SliverToBoxAdapter(child: _buildHero(heroHeight)),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                          sliver: SliverToBoxAdapter(
-                            child: _buildStory(isDark),
+                    Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: (_) => _reading.activity(),
+                      child: NotificationListener<ScrollMetricsNotification>(
+                        onNotification: (n) => _onScrollMetrics(n.metrics),
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: (n) => _onScrollMetrics(n.metrics),
+                          child: CustomScrollView(
+                            slivers: [
+                              SliverToBoxAdapter(child: _buildHero(heroHeight)),
+                              SliverPadding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                                sliver: SliverToBoxAdapter(
+                                  child: _buildStory(isDark),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
                     // Floating header controls, always reachable.
                     Positioned(
@@ -471,8 +513,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.45),
           shape: BoxShape.circle,
-          border: Border.all(
-              color: Colors.white.withValues(alpha: 0.2), width: 1),
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
         ),
         child: Icon(icon, color: Colors.white, size: iconSize),
       ),
@@ -480,7 +522,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   }
 
   /// The photo, edge to edge, with a light top shade so the floating
-  /// buttons stay legible over bright images.
+  /// buttons stay legible over bright images — and, as on the Spotlight
+  /// card, the "VAARADHI" watermark and the uploader along the bottom.
   Widget _buildHero(double height) {
     final imageCount = article.imageUrls?.length ?? 0;
     return SizedBox(
@@ -512,13 +555,51 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               ),
             ),
           ),
+          // Bottom scrim so the uploader's name stays legible on any photo.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 96,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Color(0xE6000000),
+                      Color(0x80000000),
+                      Color(0x00000000),
+                    ],
+                    stops: [0.0, 0.45, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const VaaradhiVerticalWatermark(),
+          // Logo badge on the right edge, below the back / ⋮ buttons.
+          const Positioned(
+              top: 64, right: 0, child: VaaradhiLogoBadge(inCorner: false)),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 10,
+            child: IgnorePointer(
+              child: ReporterAttribution(
+                key: const Key('detail_reporter_attribution'),
+                article: article,
+              ),
+            ),
+          ),
           if (imageCount > 1)
             Positioned(
               right: 12,
-              bottom: 12,
+              // Above the uploader row.
+              bottom: 62,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(12),
@@ -586,13 +667,60 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             fontSize: 25.0,
             fontWeight: FontWeight.w700,
             height: 1.4,
-            color: isDark ? AppColors.readingTitleDark : const Color(0xFF1A1A1A),
+            color:
+                isDark ? AppColors.readingTitleDark : const Color(0xFF1A1A1A),
           ),
         ),
 
-        if (article.byline.isNotEmpty) ...[
+        // Source always, author/uploader when known (Play News policy:
+        // every story names who published it).
+        const SizedBox(height: 6),
+        Text(
+          article.attributionLine(
+              telugu: AppState.instance.language == 'Telugu'),
+          key: const Key('article_source'),
+          style: metaStyle,
+        ),
+        // The exact publish date and time, always (Play News policy).
+        const SizedBox(height: 2),
+        Text(
+          publishedLine(article.publishedAt,
+              telugu: AppState.instance.language == 'Telugu'),
+          key: const Key('article_published'),
+          style: metaStyle,
+        ),
+        // A story from another outlet links to the original.
+        if (article.isExternal) ...[
           const SizedBox(height: 6),
-          Text(article.byline, style: metaStyle),
+          InkWell(
+            key: const Key('article_original_source'),
+            onTap: () async {
+              final uri = Uri.tryParse(article.sourceUrl);
+              if (uri == null) return;
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.open_in_new_rounded,
+                    size: 15, color: AppColors.primary),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    AppState.instance.language == 'Telugu'
+                        ? 'అసలు వార్త: ${article.externalSourceName}'
+                        : 'Original story: ${article.externalSourceName}',
+                    style: metaStyle.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
 
         const SizedBox(height: 16),
@@ -605,12 +733,12 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         const SizedBox(height: 18),
 
         // Article Content Body
-        if (_isLoadingDetail && article.body.isEmpty)
+        if (_isLoadingDetail && !_hasFullText)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 36.0),
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (_detailError != null && article.body.isEmpty)
+        else if (_detailError != null && !_hasFullText)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16.0),
             child: Column(
@@ -635,7 +763,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                       article.summary,
                       style: ArticleTypography.body(
                         fontSize: AppState.instance.readingFontSize > 0
-                            ? (AppState.instance.readingFontSize * (21.0 / 19.0))
+                            ? (AppState.instance.readingFontSize *
+                                (21.0 / 19.0))
                             : 21.0,
                         height: 1.65,
                         letterSpacing: 0.2,
@@ -781,8 +910,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             (article.id.isNotEmpty && AppState.instance.isLiked(article.id));
         final isDisliked = article.isDisliked ||
             AppState.instance.isDisliked(targetId) ||
-            (article.id.isNotEmpty &&
-                AppState.instance.isDisliked(article.id));
+            (article.id.isNotEmpty && AppState.instance.isDisliked(article.id));
         final commentCount = AppState.instance
             .getDisplayCommentCount(article.id, article.comments);
 
@@ -829,7 +957,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                   ),
                   _barAction(
                     icon: Icons.chat_bubble_outline_rounded,
-                    label: countOr(commentCount, telugu ? 'కామెంట్' : 'Comment'),
+                    label:
+                        countOr(commentCount, telugu ? 'కామెంట్' : 'Comment'),
                     color: inactiveColor,
                     onTap: _openComments,
                   ),
@@ -957,4 +1086,46 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       ],
     );
   }
+}
+
+/// "ప్రచురణ: 12 అక్టోబర్ 2026, 3:55 PM" — the story's exact publish date and
+/// time in the reader's time zone (Play News policy: show when it was
+/// published, not only "2 hours ago").
+@visibleForTesting
+String publishedLine(DateTime published, {required bool telugu}) {
+  const te = [
+    'జనవరి',
+    'ఫిబ్రవరి',
+    'మార్చి',
+    'ఏప్రిల్',
+    'మే',
+    'జూన్',
+    'జూలై',
+    'ఆగస్టు',
+    'సెప్టెంబర్',
+    'అక్టోబర్',
+    'నవంబర్',
+    'డిసెంబర్'
+  ];
+  const en = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  final d = published.toLocal();
+  final h12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final mm = d.minute.toString().padLeft(2, '0');
+  final ampm = d.hour < 12 ? 'AM' : 'PM';
+  final month = (telugu ? te : en)[d.month - 1];
+  final date = '${d.day} $month ${d.year}, $h12:$mm $ampm';
+  return telugu ? 'ప్రచురణ: $date' : 'Published: $date';
 }

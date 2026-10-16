@@ -8,6 +8,7 @@ import '../models/spotlight_item.dart';
 import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../models/poll.dart';
+import '../services/poll_exposure.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
@@ -190,11 +191,17 @@ class SpotlightController extends ChangeNotifier {
       final app = AppState.instance;
       // Same rule as Home: the news language only, null = all languages.
       final lang = app.contentLanguage;
-      final selectedState = app.stateName;
-      final district = app.district;
-      final city = app.city;
-      final subdistrict = isLocal ? app.subdistrict : '';
-      final village = isLocal ? app.village : '';
+      // Backend contract (Oct 2026): after a place is chosen every feed call
+      // carries it — state, district, subdistrict and village. Main shows
+      // global news plus that state's and place's news; Local stays strict.
+      // With no place chosen, main sends none (broad feed) rather than the
+      // placeholder state.
+      final place = app.feedPlace;
+      final selectedState = isLocal ? app.stateName : place.state;
+      final district = isLocal ? app.district : place.district;
+      final city = isLocal || app.hasValidLocation ? app.city : '';
+      final subdistrict = isLocal ? app.subdistrict : place.subdistrict;
+      final village = isLocal ? app.village : place.village;
       final scope = isLocal ? 'local' : 'main';
       final currentArticles = _state.feed
           .map((item) => item.article)
@@ -277,7 +284,9 @@ class SpotlightController extends ChangeNotifier {
             ? ApiService.instance.getPolls()
             : Future.value(List<Poll>.from(_pollsPool)),
       ]);
-      if (_disposed || gen != _requestGeneration || seq != _paginationSequence) {
+      if (_disposed ||
+          gen != _requestGeneration ||
+          seq != _paginationSequence) {
         return;
       }
       final feedState = results[0] as FeedState<NewsArticle>;
@@ -318,8 +327,8 @@ class SpotlightController extends ChangeNotifier {
         ...feedState.items,
         ..._ugcItems,
       ]
-          .where((item) =>
-              belongsToTab(item, local: isLocal, district: district))
+          .where(
+              (item) => belongsToTab(item, local: isLocal, district: district))
           .where((item) => seen.add('${item.contentKind}:${item.id}'))
           .toList()
         ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
@@ -331,6 +340,11 @@ class SpotlightController extends ChangeNotifier {
               SpotlightItem.posterPages(Map<String, dynamic>.from(json)))
           .where((item) => posterIds.add(item.id))
           .toList();
+      // Each poll appears once in the feed, and only while the reader has
+      // not voted on it or seen it [PollExposure.maxViews] times. Cycling the
+      // same poll every 8 stories showed one poll over and over.
+      await PollExposure.instance.ready();
+      final polls = PollExposure.instance.eligible(_pollsPool);
       final content = <SpotlightItem>[];
       var posterIndex = 0;
       var pollIndex = 0;
@@ -341,8 +355,8 @@ class SpotlightController extends ChangeNotifier {
         if (position % 5 == 0 && posterIndex < posters.length) {
           content.add(posters[posterIndex++]);
         }
-        if (position % 8 == 0 && _pollsPool.isNotEmpty) {
-          content.add(SpotlightItem.poll(_pollsPool[pollIndex++ % _pollsPool.length]));
+        if (position % 8 == 0 && pollIndex < polls.length) {
+          content.add(SpotlightItem.poll(polls[pollIndex++]));
         }
       }
       content.addAll(posters.skip(posterIndex));
@@ -350,6 +364,8 @@ class SpotlightController extends ChangeNotifier {
         contentItems: content,
         eligibleAds: _adsPool,
         allowTimed: true,
+        // Each ad at most twice, at least 6 stories apart.
+        policy: AdFrequencyPolicy.spotlight,
         contentKey: (item) => '${item.type.name}:${item.id}',
       );
       final updatedFeed = run

@@ -195,7 +195,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
         : await MediaValidator.validateImagesBatch(paths);
     if (!mounted) return;
     if (!validation.isValid) {
-      _toast(validation.errorMessage ?? _t('మీడియా చెల్లదు.', 'Invalid media.'));
+      _toast(
+          validation.errorMessage ?? _t('మీడియా చెల్లదు.', 'Invalid media.'));
       return;
     }
 
@@ -345,7 +346,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
               Wrap(spacing: 8, runSpacing: 6, children: [
                 _chip(label, color),
                 if (s.uploadStatus.isNotEmpty)
-                  _chip(_uploadLabel(s.uploadStatus),
+                  _chip(
+                      _uploadLabel(s.uploadStatus),
                       s.uploadStatus == 'FAILED'
                           ? AppColors.primary
                           : AppColors.textMuted),
@@ -414,7 +416,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
       SubmissionStatus.waitMedia => (
           Icons.hourglass_top_rounded,
           _pollCount >= _maxPolls
-              ? _t('ఇంకా ప్రాసెస్ అవుతోంది. రిఫ్రెష్ చేయడానికి క్రిందికి లాగండి.',
+              ? _t(
+                  'ఇంకా ప్రాసెస్ అవుతోంది. రిఫ్రెష్ చేయడానికి క్రిందికి లాగండి.',
                   'Still processing. Pull down to refresh.')
               : _t('మీడియా ప్రాసెస్ అవుతోంది…', 'Processing your media…'),
           null,
@@ -424,7 +427,11 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
           _t('ఎడిటర్ సమీక్ష కోసం వేచి ఉంది.', 'Waiting for editor review.'),
           null,
         ),
-      _ => (Icons.info_outline_rounded, _t('చర్య అవసరం లేదు.', 'Nothing to do right now.'), null),
+      _ => (
+          Icons.info_outline_rounded,
+          _t('చర్య అవసరం లేదు.', 'Nothing to do right now.'),
+          null
+        ),
     };
 
     return Container(
@@ -470,8 +477,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(_t('ఎడిటర్ గమనిక', 'Editor note'),
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w800)),
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text(note, style: const TextStyle(fontSize: 13.5, height: 1.4)),
           ],
@@ -479,9 +486,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
       );
 
   Widget _timelineRow(TimelineEntry e) {
-    final when = e.at == null
-        ? ''
-        : DateFormat('d MMM, h:mm a').format(e.at!.toLocal());
+    final when =
+        e.at == null ? '' : DateFormat('d MMM, h:mm a').format(e.at!.toLocal());
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -507,8 +513,7 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
             ),
           ),
           Text(when,
-              style:
-                  const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
         ],
       ),
     );

@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/navigation/auth_guard.dart';
-import '../core/navigation/app_navigator.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../core/navigation/notification_navigation_gate.dart';
 import '../features/admin/data/repositories/admin_ugc_repository.dart';
@@ -34,6 +33,8 @@ import '../features/reels/reel_model.dart';
 import '../features/reels/reels_screen.dart';
 import '../screens/ugc_feed_screen.dart';
 import '../state/app_state.dart';
+import 'analytics_queue.dart';
+import '../models/app_notification.dart';
 import '../theme/app_theme.dart';
 import 'api_service.dart';
 
@@ -54,6 +55,7 @@ class NotificationService {
   bool _initialized = false;
   bool _permissionRequested = false;
   GlobalKey<NavigatorState>? _navigatorKey;
+  GlobalKey<ScaffoldMessengerState>? _messengerKey;
 
   // Deduplication cache for foreground notifications
   final Set<String> _seenNotificationIds = {};
@@ -106,6 +108,28 @@ class NotificationService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(_channel);
+
+    // A notification the app showed itself (it arrived while the app was
+    // open) and was tapped after the app had been closed: the app starts
+    // fresh, and onDidReceiveNotificationResponse never fires. Without this
+    // the tap landed on Home instead of the story.
+    try {
+      final launch =
+          await _localNotifications.getNotificationAppLaunchDetails();
+      final payload = launch?.notificationResponse?.payload;
+      if ((launch?.didNotificationLaunchApp ?? false) &&
+          payload != null &&
+          payload.isNotEmpty) {
+        final data = jsonDecode(payload);
+        if (data is Map) {
+          debugPrint('[Notifications] app launched from a local notification');
+          NotificationNavigationGate.instance
+              .setPendingTarget(targetForTap(Map<String, dynamic>.from(data)));
+        }
+      }
+    } catch (e) {
+      debugPrint('[Notifications] could not read launch details: $e');
+    }
   }
 
   /// Shows a foreground message in the tray.
@@ -115,6 +139,12 @@ class NotificationService {
   /// foreground sees nothing at all.
   /// Adds a tray-opened push to the in-app inbox, already read (the reader
   /// just tapped it). Works without login.
+  /// The push's picture: FCM's notification image, else one in `data`.
+  static String? _pushImage(RemoteMessage message) =>
+      message.notification?.android?.imageUrl ??
+      message.notification?.apple?.imageUrl ??
+      AppNotification.imageFrom(Map<String, dynamic>.from(message.data));
+
   Future<void> _recordInInbox(RemoteMessage message) async {
     final data = Map<String, dynamic>.from(message.data);
     await AppState.instance.recordPushNotification(
@@ -122,9 +152,10 @@ class NotificationService {
       title: message.notification?.title ?? data['title']?.toString(),
       body: message.notification?.body ?? data['body']?.toString(),
       messageId: message.messageId,
+      imageUrl: _pushImage(message),
     );
-    final id = data['notification_id']?.toString() ??
-        'push_${message.messageId}';
+    final id =
+        data['notification_id']?.toString() ?? 'push_${message.messageId}';
     AppState.instance.markNotificationRead(id);
   }
 
@@ -161,6 +192,7 @@ class NotificationService {
     if (kIsWeb || _initialized) return;
     _initialized = true;
     _navigatorKey = navigatorKey;
+    _messengerKey = messengerKey;
 
     try {
       // Each platform call is bounded separately so one slow step cannot eat
@@ -266,9 +298,11 @@ class NotificationService {
           title: title,
           body: body,
           messageId: message.messageId,
+          imageUrl: _pushImage(message),
         ));
 
-        final pushTarget = NotificationDeepLinkResolver.resolveFromPayload(data);
+        final pushTarget =
+            NotificationDeepLinkResolver.resolveFromPayload(data);
         if (pushTarget.type == NotificationTargetType.ugc) {
           unawaited(AppState.instance.refreshReporterDashboard());
         }
@@ -418,6 +452,12 @@ class NotificationService {
     Map<String, dynamic> data, {
     BuildContext? context,
   }) async {
+    // Firebase and the local-notification callback can both deliver the
+    // same tap: one notification is handled once.
+    if (!shouldHandle(data)) {
+      debugPrint('[NotificationService] duplicate tap ignored');
+      return;
+    }
     final target = targetForTap(data);
 
     if (!NotificationNavigationGate.instance.isNavigationReady) {
@@ -428,15 +468,35 @@ class NotificationService {
     await navigateToTarget(target, context: context);
   }
 
-  /// Where a tapped notification goes: its content, or the notification
-  /// inbox when neither the content fields nor deep_link address anything.
+  String? _lastHandledId;
+  DateTime? _lastHandledAt;
+
+  /// False for the same notification_id again within 10 seconds.
+  @visibleForTesting
+  bool shouldHandle(Map<String, dynamic> data, {DateTime? now}) {
+    final id = (data['notification_id'] ?? '').toString();
+    final t = now ?? DateTime.now();
+    if (id.isNotEmpty &&
+        id == _lastHandledId &&
+        _lastHandledAt != null &&
+        t.difference(_lastHandledAt!) < const Duration(seconds: 10)) {
+      return false;
+    }
+    _lastHandledId = id;
+    _lastHandledAt = t;
+    return true;
+  }
+
+  /// Where a tapped notification goes: its content, or Home when neither
+  /// the content fields nor deep_link address anything (notification
+  /// handover: "invalid destination: open Home").
   @visibleForTesting
   static NotificationTarget targetForTap(Map<String, dynamic> data) {
     final target = NotificationDeepLinkResolver.resolveFromPayload(data);
     if (target.type != NotificationTargetType.unknown) return target;
-    debugPrint('[NotificationService] Unroutable payload, opening inbox: $data');
+    debugPrint('[NotificationService] Unroutable payload, opening Home: $data');
     return NotificationTarget.screen(
-      screenName: 'notifications',
+      screenName: 'home',
       notificationId: data['notification_id']?.toString(),
       originalPayload: data,
     );
@@ -444,7 +504,29 @@ class NotificationService {
 
   /// Tells the reader why a deep-linked item did not open. A 404 means the
   /// content was removed; anything else is most likely the connection.
-  void _showLoadFailure(BuildContext context, Object error) {
+  /// A link that opened the app points at nothing we can show (unknown
+  /// path, bad id). The reader stays on Home with a short note rather than
+  /// wondering why nothing happened. Waits briefly on a cold start so the
+  /// first screen is up before the note appears.
+  Future<void> showContentUnavailable({
+    Duration delay = const Duration(milliseconds: 1200),
+  }) async {
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    final messenger = _messengerKey?.currentState;
+    if (messenger == null) return;
+    final telugu = AppState.instance.language == 'Telugu';
+    messenger
+      ..removeCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content:
+            Text(telugu ? 'ఈ కంటెంట్ అందుబాటులో లేదు' : 'Content unavailable'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ));
+  }
+
+  void _showLoadFailure(BuildContext context, Object error,
+      {VoidCallback? retry}) {
     if (!context.mounted) return;
     final telugu = AppState.instance.language == 'Telugu';
     final gone = error is DioException && error.response?.statusCode == 404;
@@ -461,7 +543,14 @@ class NotificationService {
         SnackBar(
           content: Text(message),
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
+          // Offline / server trouble: the tap is not lost — Retry.
+          duration: Duration(seconds: gone || retry == null ? 3 : 8),
+          action: gone || retry == null
+              ? null
+              : SnackBarAction(
+                  label: telugu ? 'మళ్లీ' : 'Retry',
+                  onPressed: retry,
+                ),
         ),
       );
   }
@@ -516,13 +605,36 @@ class NotificationService {
     _loadingOverlay = null;
   }
 
-  /// Navigates to a typed [NotificationTarget] using [AppNavigator.pushSafe]
+  /// Opens a notification's screen and returns at once.
+  ///
+  /// Not AppNavigator.pushSafe: that drops any push within 375 ms of the
+  /// previous one, and a notification opened at launch lands right after
+  /// Splash → Home (and Spotlight), so the story was silently dropped. And
+  /// not awaited: a push completes only when its screen is closed, and the
+  /// dispatch lock was held all that time, so every later notification tap
+  /// was refused while the reader stayed on the first story. Duplicate taps
+  /// are already caught by [NotificationNavigationGate.acquireDispatchLock].
+  /// Set by [_openRoute]: the notification's screen opened.
+  bool _routeOpened = false;
+
+  void _openRoute(BuildContext context, Route<Object?> route) {
+    if (!context.mounted) return;
+    unawaited(Navigator.of(context).push(route));
+    _routeOpened = true;
+  }
+
+  /// Navigates to a typed [NotificationTarget] using [_openRoute]
   /// to ensure STEP 5 navigation stack safety, debounce protection, and auth challenge preservation.
   Future<void> navigateToTarget(
     NotificationTarget target, {
     BuildContext? context,
   }) async {
-    final navContext = context ?? _navigatorKey?.currentContext;
+    // The caller's context (Home) when it is still mounted, else the app's
+    // root navigator: Home can be rebuilt (login, logout), and a tap held
+    // for its old context was never opened.
+    final navContext = (context != null && context.mounted)
+        ? context
+        : _navigatorKey?.currentContext;
     if (navContext == null || !navContext.mounted) {
       NotificationNavigationGate.instance.setPendingTarget(target);
       return;
@@ -533,6 +645,7 @@ class NotificationService {
       return;
     }
 
+    _routeOpened = false;
     try {
       // Mark as read asynchronously on backend if notification ID is available
       if (target.notificationId != null && target.notificationId!.isNotEmpty) {
@@ -545,8 +658,7 @@ class NotificationService {
 
       // Handle authentication gate for protected targets
       if (target.requiresAuth && !AppState.instance.isLoggedIn) {
-        final loginSuccess = await AppNavigator.pushSafe<bool>(
-          navContext,
+        final loginSuccess = await Navigator.of(navContext).push<bool>(
           MaterialPageRoute(builder: (_) => const AccountLoginScreen()),
         );
 
@@ -571,7 +683,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                await AppNavigator.pushSafe(
+                _openRoute(
                   navContext,
                   MaterialPageRoute(
                     builder: (_) =>
@@ -583,7 +695,10 @@ class NotificationService {
               _dismissLoadingIndicator();
               debugPrint(
                   '[NotificationService] Article load error for slug "$slug": $e');
-              if (navContext.mounted) _showLoadFailure(navContext, e);
+              if (navContext.mounted) {
+                _showLoadFailure(navContext, e,
+                    retry: () => navigateToTarget(target));
+              }
             }
           }
           break;
@@ -596,7 +711,7 @@ class NotificationService {
             final categoryName = categorySlug.length > 1
                 ? '${categorySlug[0].toUpperCase()}${categorySlug.substring(1)}'
                 : categorySlug.toUpperCase();
-            await AppNavigator.pushSafe(
+            _openRoute(
               navContext,
               MaterialPageRoute(
                 builder: (_) => CategoryScreen(
@@ -623,7 +738,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                await AppNavigator.pushSafe(
+                _openRoute(
                   navContext,
                   MaterialPageRoute(
                       builder: (_) => PosterDetailScreen(poster: poster)),
@@ -633,7 +748,10 @@ class NotificationService {
               _dismissLoadingIndicator();
               debugPrint(
                   '[NotificationService] Poster load error for "$posterId": $e');
-              if (navContext.mounted) _showLoadFailure(navContext, e);
+              if (navContext.mounted) {
+                _showLoadFailure(navContext, e,
+                    retry: () => navigateToTarget(target));
+              }
             }
           }
           break;
@@ -650,7 +768,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                await AppNavigator.pushSafe(
+                _openRoute(
                   navContext,
                   MaterialPageRoute(
                       builder: (_) => PollDetailScreen(poll: poll)),
@@ -660,7 +778,10 @@ class NotificationService {
               _dismissLoadingIndicator();
               debugPrint(
                   '[NotificationService] Poll load error for "$pollId": $e');
-              if (navContext.mounted) _showLoadFailure(navContext, e);
+              if (navContext.mounted) {
+                _showLoadFailure(navContext, e,
+                    retry: () => navigateToTarget(target));
+              }
             }
           }
           break;
@@ -672,14 +793,14 @@ class NotificationService {
         case NotificationTargetType.ugc:
           unawaited(AppState.instance.refreshReporterDashboard());
           if (target.screenName == 'dashboard') {
-            AppNavigator.pushSafe(
+            _openRoute(
               navContext,
               MaterialPageRoute(builder: (_) => const MyPostsScreen()),
             );
           } else if (target.screenName == 'submit') {
             requireAuth(
               navContext,
-              () => AppNavigator.pushSafe(
+              () => _openRoute(
                 navContext,
                 MaterialPageRoute(builder: (_) => const CreatePostScreen()),
               ),
@@ -687,7 +808,7 @@ class NotificationService {
           } else if (target.identifier != null &&
               target.identifier!.isNotEmpty) {
             final article = _ugcArticleFromTarget(target);
-            AppNavigator.pushSafe(
+            _openRoute(
               navContext,
               MaterialPageRoute(
                 builder: (_) => article != null
@@ -696,7 +817,7 @@ class NotificationService {
               ),
             );
           } else {
-            AppNavigator.pushSafe(
+            _openRoute(
               navContext,
               MaterialPageRoute(builder: (_) => const UgcFeedScreen()),
             );
@@ -734,7 +855,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                await AppNavigator.pushSafe(
+                _openRoute(
                   navContext,
                   MaterialPageRoute(
                     builder: (_) => AdminUgcDetailScreen(initial: submission),
@@ -761,7 +882,7 @@ class NotificationService {
             break;
           }
 
-          await AppNavigator.pushSafe(
+          _openRoute(
             navContext,
             MaterialPageRoute(
               builder: (_) =>
@@ -773,19 +894,19 @@ class NotificationService {
         case NotificationTargetType.screen:
           switch (target.screenName?.toLowerCase()) {
             case 'bookmarks':
-              AppNavigator.pushSafe(
+              _openRoute(
                 navContext,
                 MaterialPageRoute(builder: (_) => const BookmarksScreen()),
               );
               break;
             case 'notifications':
-              AppNavigator.pushSafe(
+              _openRoute(
                 navContext,
                 MaterialPageRoute(builder: (_) => const NotificationsScreen()),
               );
               break;
             case 'settings':
-              AppNavigator.pushSafe(
+              _openRoute(
                 navContext,
                 MaterialPageRoute(
                     builder: (_) => const NotificationSettingsScreen()),
@@ -794,6 +915,7 @@ class NotificationService {
             case 'home':
               // Quotes and other feed-only content: back to the Home feed.
               Navigator.of(navContext).popUntil((route) => route.isFirst);
+              _routeOpened = true;
               break;
             default:
               debugPrint(
@@ -805,6 +927,16 @@ class NotificationService {
           debugPrint(
               '[NotificationService] Unknown notification target: $target');
           break;
+      }
+      // Analytics: the tapped notification's screen really opened.
+      if (_routeOpened) {
+        final id = (target.originalPayload?['notification_id'] ??
+                target.notificationId ??
+                '')
+            .toString();
+        if (id.isNotEmpty) {
+          unawaited(AnalyticsQueue.instance.notificationOpened(id));
+        }
       }
     } catch (e) {
       _dismissLoadingIndicator();
@@ -833,8 +965,8 @@ class NotificationService {
         final page = await load().timeout(const Duration(seconds: 8));
         if (page.hasErrors) throw Exception(page.errorMessage);
         final seen = videos.map((v) => v.id).toSet();
-        videos.addAll((page.data ?? const <VideoItem>[])
-            .where((v) => seen.add(v.id)));
+        videos.addAll(
+            (page.data ?? const <VideoItem>[]).where((v) => seen.add(v.id)));
         if (videos.any((v) => v.id == videoId)) break;
       } catch (e) {
         lastError = e;
@@ -844,7 +976,8 @@ class NotificationService {
     if (!navContext.mounted) return;
 
     if (videos.isEmpty) {
-      _showLoadFailure(navContext, lastError ?? Exception('no videos'));
+      _showLoadFailure(navContext, lastError ?? Exception('no videos'),
+          retry: () => _openVideo(navContext, videoId));
       return;
     }
 
@@ -867,7 +1000,7 @@ class NotificationService {
     }
     // The same full-screen Reels as the bottom bar, with the notification's
     // video first (it may be a regular video, not in the Shorts feed).
-    await AppNavigator.pushSafe(
+    _openRoute(
       navContext,
       ReelsScreen.route(
         initialReel: index < 0 ? null : Reel.fromVideo(videos[index]),

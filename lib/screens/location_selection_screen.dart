@@ -240,8 +240,9 @@ class _LocationSelectionScreenState extends State<_LocationSelectionScreen> {
                 onChanged: provider.onQueryChanged,
                 style: GoogleFonts.notoSansTelugu(
                   fontSize: 14.5,
-                  color:
-                      isDark ? AppColors.textLight : AppColors.readingTitleLight,
+                  color: isDark
+                      ? AppColors.textLight
+                      : AppColors.readingTitleLight,
                 ),
                 decoration: InputDecoration(
                   hintText: 'గ్రామం లేదా మండలం పేరుతో వెతకండి...',
@@ -404,9 +405,8 @@ class _SearchResults extends StatelessWidget {
             ].where((value) => value.isNotEmpty).join(' • '),
             style: TextStyle(
               fontSize: 12.5,
-              color: isDark
-                  ? AppColors.readingMetaDark
-                  : const Color(0xFF6B7280),
+              color:
+                  isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280),
             ),
           ),
           trailing: const Icon(Icons.chevron_right_rounded,

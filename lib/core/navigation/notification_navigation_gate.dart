@@ -9,7 +9,8 @@ import '../../models/notification_target.dart';
 /// it exactly once when the navigation tree is fully established.
 class NotificationNavigationGate {
   NotificationNavigationGate._();
-  static final NotificationNavigationGate instance = NotificationNavigationGate._();
+  static final NotificationNavigationGate instance =
+      NotificationNavigationGate._();
 
   NotificationTarget? _pendingTarget;
   bool _isNavigationReady = false;
@@ -46,7 +47,10 @@ class NotificationNavigationGate {
 
     final context = _readyContext;
     final dispatch = _dispatcher;
-    if (_isNavigationReady && dispatch != null && context != null && context.mounted) {
+    // Dispatched even when Home's saved context is gone (Home rebuilt after
+    // login / logout): the dispatcher falls back to the app's root
+    // navigator. Holding it instead waited for a "ready" that never came.
+    if (_isNavigationReady && dispatch != null && context != null) {
       debugPrint('[NotificationGate] navigation already ready, '
           'dispatching ${target.type.name} immediately');
       _pendingTarget = null;
@@ -75,17 +79,20 @@ class NotificationNavigationGate {
   /// of an in-flight or recently dispatched target within the deduplication window.
   bool acquireDispatchLock(NotificationTarget target) {
     if (_isDispatching) {
-      debugPrint('[NotificationNavigationGate] Target rejected: already dispatching');
+      debugPrint(
+          '[NotificationNavigationGate] Target rejected: already dispatching');
       return false;
     }
 
-    final key = '${target.type.name}:${target.identifier ?? target.screenName ?? ''}';
+    final key =
+        '${target.type.name}:${target.identifier ?? target.screenName ?? ''}';
     final now = DateTime.now();
 
     if (_lastDispatchedKey == key &&
         _lastDispatchedTime != null &&
         now.difference(_lastDispatchedTime!) < _dedupWindow) {
-      debugPrint('[NotificationNavigationGate] Duplicate target suppressed: $key');
+      debugPrint(
+          '[NotificationNavigationGate] Duplicate target suppressed: $key');
       return false;
     }
 
@@ -104,7 +111,8 @@ class NotificationNavigationGate {
   /// Dispatches any pending target exactly once.
   void onNavigationReady(
     BuildContext context,
-    Future<void> Function(NotificationTarget target, BuildContext context) onDispatch,
+    Future<void> Function(NotificationTarget target, BuildContext context)
+        onDispatch,
   ) {
     _isNavigationReady = true;
     _readyContext = context;

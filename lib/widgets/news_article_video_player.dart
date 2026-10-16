@@ -1,3 +1,4 @@
+import '../services/content_analytics.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -45,6 +46,7 @@ class NewsArticleVideoPlayer extends StatefulWidget {
 class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
     with WidgetsBindingObserver {
   bool _isPlaying = false;
+  VideoWatchTracker? _watch;
   MediaSource? _mediaSource;
   VideoPlaybackController? _playbackController;
 
@@ -150,6 +152,10 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
     final ctrl =
         VideoPlaybackController.fromSource(_mediaSource!, autoPlay: true);
     _playbackController = ctrl;
+    // Analytics: video_start / video_progress / video_complete.
+    _watch?.dispose();
+    _watch = VideoWatchTracker(widget.article, ctrl,
+        source: _mediaSource!.isYouTube ? 'youtube' : 's3');
 
     try {
       await ctrl.initialize();
@@ -165,6 +171,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
   }
 
   void _stopPlayback() {
+    _watch?.dispose();
+    _watch = null;
     final controller = _playbackController;
     _playbackController = null;
     _isPlaying = false;
@@ -201,6 +209,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
 
   @override
   void dispose() {
+    _watch?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     SpotlightMediaCoordinator.instance
         .removeListener(_onMediaCoordinatorChanged);
@@ -218,6 +227,7 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
         builder: (_) => VideoPlayerScreen(
           videoUrl: (widget.media?.url ?? widget.article.videoUrl),
           title: widget.article.title,
+          story: widget.article,
         ),
       ),
     );
@@ -256,8 +266,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
                     colors: [Colors.black87, Colors.transparent],
                   ),
                 ),
-                child: const WatermarkBanner(
-                    height: 20, padding: EdgeInsets.zero),
+                child:
+                    const WatermarkBanner(height: 20, padding: EdgeInsets.zero),
               ),
             ),
 
@@ -331,7 +341,8 @@ class _NewsArticleVideoPlayerState extends State<NewsArticleVideoPlayer>
             CachedNetworkImage(
               imageUrl: previewUrl,
               fit: widget.fit,
-              placeholder: (context, url) => const ColoredBox(color: Colors.black),
+              placeholder: (context, url) =>
+                  const ColoredBox(color: Colors.black),
               errorWidget: (context, url, error) => Container(
                 color: AppColors.chipBg,
                 child: const Icon(Icons.image_not_supported_outlined,

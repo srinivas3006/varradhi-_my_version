@@ -3,15 +3,12 @@ import 'package:flutter/services.dart';
 import '../core/navigation/app_navigator.dart';
 import '../core/navigation/notification_navigation_gate.dart';
 import '../widgets/bottom_nav_bar.dart';
-import '../widgets/ads/bottom_sticky_ad_banner.dart';
-import '../models/ad_banner.dart';
-import '../core/ads/home_ads.dart';
+import '../widgets/ads/paced_ads_overlay.dart';
 import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
 import '../features/reels/reels_screen.dart';
 import 'spotlight_screen.dart';
 import '../services/notification_service.dart';
-import '../services/ad_manager.dart';
 import '../state/app_state.dart';
 
 /// The navigation hub. Home, Post and Profile are tabs; Main News and Local
@@ -39,31 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   late int _navIndex;
   late final Set<int> _activatedIndices;
   DateTime? _lastBackPressTime;
-  AdBanner? _homeBottomAd;
-  bool _stickyDismissed = false;
   Key _postScreenKey = UniqueKey();
-
-  /// The bottom sticky banner is picked from the one `/ads/` response Home
-  /// already loaded (HomeAds), never from a request of its own. A location
-  /// or language change reloads that response, and this follows it.
-  void _onHomeAds() {
-    if (!mounted || _stickyDismissed) return;
-    final ad = AdManager.instance
-        .selectAd(HomeAds.bottomSticky(HomeAds.current.value));
-    if (ad?.id != _homeBottomAd?.id) setState(() => _homeBottomAd = ad);
-  }
-
-  @override
-  void dispose() {
-    HomeAds.current.removeListener(_onHomeAds);
-    super.dispose();
-  }
 
   @override
   void initState() {
     super.initState();
-    HomeAds.current.addListener(_onHomeAds);
-    _onHomeAds();
     _navIndex = widget.initialTabIndex;
     _activatedIndices = {widget.initialTabIndex};
     final hadPendingNotification =
@@ -129,8 +106,8 @@ class _HomeScreenState extends State<HomeScreen> {
     AppNavigator.pushSafe(
       context,
       MaterialPageRoute(
-        settings: RouteSettings(
-            name: isLocal ? '/spotlight/local' : '/spotlight'),
+        settings:
+            RouteSettings(name: isLocal ? '/spotlight/local' : '/spotlight'),
         builder: (_) => SpotlightScreen(isLocal: isLocal),
       ),
     );
@@ -175,24 +152,15 @@ class _HomeScreenState extends State<HomeScreen> {
               index: _navIndex,
               children: tabs,
             ),
-            if (_navIndex == 0 && _homeBottomAd != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: MediaQuery.of(context).padding.bottom + 65,
-                child: BottomStickyAdBanner(
-                    key: ValueKey('home_bottom_${_homeBottomAd!.id}'),
-                    ad: _homeBottomAd!,
-                    placementZone: 'feed',
-                    onDismiss: () {
-                      if (mounted) {
-                        setState(() {
-                          _stickyDismissed = true;
-                          _homeBottomAd = null;
-                        });
-                      }
-                    },
-                  ),
+            // Banner and floating 3D ad come and go with active use
+            // (AdPacer) instead of staying over the feed all the time.
+            if (_navIndex == 0)
+              Positioned.fill(
+                child: PacedAdsOverlay(
+                  bottomInset: MediaQuery.of(context).padding.bottom + 65,
+                  // The 3D ad is the app-wide corner ad (main.dart).
+                  showFloating: false,
+                ),
               ),
           ],
         ),

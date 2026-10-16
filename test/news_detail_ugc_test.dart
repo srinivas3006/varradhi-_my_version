@@ -52,4 +52,42 @@ void main() {
     expect(find.byKey(const Key('story_option_report')), findsOneWidget);
     expect(find.byKey(const Key('story_option_bookmark')), findsOneWidget);
   });
+
+  testWidgets(
+      'photo carries the VAARADHI watermark and the uploader, '
+      'as on Spotlight', (tester) async {
+    final story = NewsArticle(
+      id: 'ugc-9',
+      title: 'Water recharge works',
+      slug: 'ugc-9',
+      summary: 's',
+      body: 'b',
+      imageUrl: '',
+      source: 'Reporter',
+      category: 'General',
+      publishedAt: DateTime(2026, 1, 1),
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      readTimeMinutes: 1,
+      viewCount: 0,
+      district: 'Vikarabad',
+      authorName: 'Ramesh Kumar',
+      contentKind: 'ugc',
+    );
+    await tester
+        .pumpWidget(MaterialApp(home: NewsDetailScreen(article: story)));
+    await tester.pump();
+
+    expect(
+        find.byKey(const Key('vaaradhi_vertical_watermark')), findsOneWidget);
+    expect(
+        find.byKey(const Key('detail_reporter_attribution')), findsOneWidget);
+    expect(find.text('Ramesh Kumar'), findsOneWidget);
+    expect(find.text('Vikarabad'), findsOneWidget);
+
+    // Let the screen's timers run out.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(minutes: 1));
+  });
 }

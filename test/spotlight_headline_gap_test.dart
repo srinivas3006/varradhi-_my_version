@@ -25,18 +25,27 @@ void main() {
         .readAsStringSync();
 
     test('headline, story and the fit measurement all use it', () {
-      // Headline, story text, and the TextPainter that measures the story
-      // (so Read more still lands on its own line).
+      // Headline, story text, the TextPainter that measures the story (so
+      // Read more still lands on its own line) and the one that fits its
+      // size to the room.
       expect(
           RegExp(r'textHeightBehavior:\s*SpotlightNewsCard\.tightLeading')
               .allMatches(src)
               .length,
-          3);
+          4);
       expect(src, isNot(contains('applyHeightToFirstAscent: false')));
     });
 
     test('measured with the same text scale it is painted at', () {
-      expect(src, contains('textScaler: MediaQuery.textScalerOf(context)'));
+      // Card text is fixed-size on every phone: the measuring TextPainter
+      // and the painted headline and story all use no scaling.
+      expect(
+          RegExp(r'textScaler:\s*TextScaler\.noScaling').allMatches(src).length,
+          greaterThanOrEqualTo(3));
+      expect(
+          RegExp(r'textScaler:\s*MediaQuery\.textScalerOf\(context\)')
+              .hasMatch(src),
+          isFalse);
     });
   });
 }

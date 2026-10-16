@@ -43,12 +43,14 @@ void main() {
     );
   });
 
-  test('buildShareText includes title, playstore app link, and web article link', () {
+  test('buildShareText: the title and exactly one link — the story', () {
     final article = _article(id: 'news-1', slug: 'telangana-news');
     final text = ShareService.buildShareText(article);
 
     expect(text, contains('News'));
-    expect(text, contains(ShareService.appDownloadUrl));
-    expect(text, contains('https://vaaradhinews.com/article/telangana-news'));
+    expect(text, contains('https://vaaradhinews.com/article/telangana-news/'));
+    // That one link opens the app when installed, the Play Store otherwise.
+    expect(text, isNot(contains('play.google.com')));
+    expect(RegExp(r'https?://').allMatches(text).length, 1);
   });
 }

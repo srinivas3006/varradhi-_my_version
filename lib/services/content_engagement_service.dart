@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../models/news_article.dart';
 import '../state/app_state.dart';
+import 'analytics_queue.dart';
 import 'api_service.dart';
 import 'dio_client.dart';
 
@@ -101,7 +104,10 @@ class ContentEngagementService {
   Future<Map<String, dynamic>> react(NewsArticle story, String reaction) async {
     final id = _idOf(story);
     if (!story.isUgc) {
-      return ApiService.instance.postArticleReaction(id, reaction);
+      final counts =
+          await ApiService.instance.postArticleReaction(id, reaction);
+      _trackReaction(story, reaction);
+      return counts;
     }
     if (_unsupported.contains(_kUgcReaction)) return const {};
     try {
@@ -109,6 +115,7 @@ class ContentEngagementService {
       final r = reaction == 'none'
           ? await _dio.delete(path)
           : await _dio.put(path, data: {'reaction_type': reaction});
+      _trackReaction(story, reaction);
       return _data(r);
     } catch (e) {
       if (_isUnsupported(e)) {
@@ -117,6 +124,20 @@ class ContentEngagementService {
       }
       rethrow;
     }
+  }
+
+  /// Analytics, after the server accepted the reaction.
+  static void _trackReaction(NewsArticle story, String reaction) {
+    unawaited(AnalyticsQueue.instance.trackContent('reaction', story,
+        metadata: reaction == 'none'
+            ? const {'action': 'removed'}
+            : {'reaction': reaction, 'action': 'set'}));
+  }
+
+  /// Analytics, after the bookmark change went through.
+  static void _trackBookmark(NewsArticle story, bool bookmarked) {
+    unawaited(AnalyticsQueue.instance.trackContent('bookmark', story,
+        metadata: {'action': bookmarked ? 'added' : 'removed'}));
   }
 
   // --- Bookmark -----------------------------------------------------------
@@ -156,6 +177,7 @@ class ContentEngagementService {
       }
       debugPrint('[Bookmark] guest: $id kept on the phone '
           'bookmarked=$nowBookmarked');
+      _trackBookmark(story, nowBookmarked);
       return nowBookmarked;
     }
 
@@ -165,6 +187,7 @@ class ContentEngagementService {
           : await _setArticle(id, nowBookmarked);
       debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
           'now bookmarked=$bookmarked');
+      _trackBookmark(story, bookmarked);
       return bookmarked;
     } catch (e) {
       debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '

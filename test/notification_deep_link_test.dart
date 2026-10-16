@@ -349,13 +349,13 @@ void main() {
       expect(target.screenName, 'home');
     });
 
-    test('an unroutable tap opens the notification inbox', () {
+    test('an unroutable tap opens Home (notification handover)', () {
       final target = NotificationService.targetForTap({
         'notification_id': 'n-9',
         'title': 'Hello',
       });
       expect(target.type, NotificationTargetType.screen);
-      expect(target.screenName, 'notifications');
+      expect(target.screenName, 'home');
     });
 
     test('Nested JSON string payload is safely unwrapped', () {

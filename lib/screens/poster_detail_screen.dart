@@ -102,7 +102,8 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                           fit: BoxFit.cover,
                           alignment: Alignment.topCenter,
                           placeholder: (_, __) => const Center(
-                            child: CircularProgressIndicator(color: AppColors.primary),
+                            child: CircularProgressIndicator(
+                                color: AppColors.primary),
                           ),
                           errorWidget: (_, __, ___) => const Icon(
                             Icons.broken_image_rounded,
@@ -151,7 +152,9 @@ class _PosterDetailScreenState extends State<PosterDetailScreen> {
                               width: i == _currentIndex ? 18 : 6,
                               height: 6,
                               decoration: BoxDecoration(
-                                color: i == _currentIndex ? AppColors.primary : Colors.white24,
+                                color: i == _currentIndex
+                                    ? AppColors.primary
+                                    : Colors.white24,
                                 borderRadius: BorderRadius.circular(3),
                               ),
                             ),

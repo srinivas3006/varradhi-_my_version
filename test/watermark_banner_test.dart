@@ -47,7 +47,7 @@ void main() {
           .readAsStringSync();
       final media = src.indexOf('height: mediaHeight');
       final title = src.indexOf('article.title');
-      for (final mark in ["'VAARADHI'"]) {
+      for (final mark in ['const VaaradhiVerticalWatermark()']) {
         final at = src.indexOf(mark);
         expect(at, greaterThan(media), reason: '$mark after the media slot');
         expect(at, lessThan(title), reason: '$mark before the headline');
@@ -56,10 +56,11 @@ void main() {
 
     test('not on the article detail screen', () {
       // The masthead belongs on shared and downloaded images, not on the
-      // reading screen.
+      // reading screen — the detail photo gets Spotlight's faint wordmark.
       final src =
           File('lib/screens/news_detail_screen.dart').readAsStringSync();
       expect(src, isNot(contains('WatermarkBanner(')));
+      expect(src, contains('const VaaradhiVerticalWatermark()'));
     });
   });
 
@@ -86,10 +87,15 @@ void main() {
       });
     }
 
-    test('the spotlight card has one wordmark, no logo, no band', () {
+    test('the spotlight card has one wordmark, one logo badge, no band', () {
       final card = code(bannerSurfaces[0]);
       expect("'VAARADHI'".allMatches(card).length, 1);
-      expect(card, isNot(contains('logo.png')));
+      // Two logos: the round source badge for desk stories (Play News
+      // policy: name the publisher) and the Way2News-style corner badge
+      // that brands screenshots.
+      expect('logo.png'.allMatches(card).length, 2);
+      expect(card, contains('spotlight_source_logo'));
+      expect('child: VaaradhiLogoBadge()'.allMatches(card).length, 1);
       expect(card, isNot(contains('WatermarkBanner(')));
     });
 

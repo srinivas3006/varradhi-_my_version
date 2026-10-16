@@ -22,8 +22,8 @@ class _Api implements HttpClientAdapter {
   final Map<String, Completer<void>> gates = {};
 
   @override
-  Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? _,
-      Future<void>? __) async {
+  Future<ResponseBody> fetch(
+      RequestOptions o, Stream<Uint8List>? _, Future<void>? __) async {
     requests.add(o);
     final gate = gates[o.path];
     if (gate != null) await gate.future;
@@ -42,8 +42,7 @@ class _Api implements HttpClientAdapter {
 Dio _dio(_Api a) =>
     Dio(BaseOptions(baseUrl: 'https://api.test'))..httpClientAdapter = a;
 
-Map<String, dynamic> _item(String id, {String type = 'article'}) =>
-    {
+Map<String, dynamic> _item(String id, {String type = 'article'}) => {
       'id': id,
       'type': type,
       'title': 'T $id',
@@ -69,10 +68,17 @@ Map<String, dynamic> _home(List<String> personalized, List<String> local) => {
     case '/api/v1/feed/home/':
       return (200, _home(['p1', 'p2'], ['l1']));
     case '/api/v1/feed/':
-      return (200, {
-        'data': [_item('a1'), _item('u1', type: 'ugc'), _item('v1', type: 'live')],
-        'meta': {'next': null},
-      });
+      return (
+        200,
+        {
+          'data': [
+            _item('a1'),
+            _item('u1', type: 'ugc'),
+            _item('v1', type: 'live')
+          ],
+          'meta': {'next': null},
+        }
+      );
     default:
       return (200, {'data': [], 'meta': {}, 'errors': null});
   }
@@ -81,7 +87,10 @@ Map<String, dynamic> _home(List<String> personalized, List<String> local) => {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  tearDown(() => AppState.instance.hasValidLocation = false);
   setUp(() {
+    // A reader who has chosen a place: feeds carry it (backend contract).
+    AppState.instance.hasValidLocation = true;
     SharedPreferences.setMockInitialValues({});
     HomeFeedRepository.instance.resetForTesting();
     AdRepository.instance.clearCache();
@@ -130,7 +139,8 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
       await tester.pumpAndSettle(const Duration(seconds: 1));
 
-      final home = api.requests.firstWhere((r) => r.path == '/api/v1/feed/home/');
+      final home =
+          api.requests.firstWhere((r) => r.path == '/api/v1/feed/home/');
       expect(home.queryParameters.containsKey('scope'), isFalse);
       expect(home.queryParameters['mode'], 'normal');
       expect(home.queryParameters['limit'], '10');
@@ -153,8 +163,8 @@ void main() {
     expect(count('/api/v1/feed/home/'), 1);
 
     // The spinner starts below the floating header, not behind it.
-    final indicator = tester
-        .widget<RefreshIndicator>(find.byKey(const Key('home_refresh')));
+    final indicator =
+        tester.widget<RefreshIndicator>(find.byKey(const Key('home_refresh')));
     expect(indicator.edgeOffset, greaterThanOrEqualTo(68));
 
     await tester.fling(
@@ -174,36 +184,39 @@ void main() {
       (tester) async {
     final api = _Api((o) {
       if (o.path == '/api/v1/feed/home/') {
-        return (200, {
-          'data': {
-            'sections': [
-              {
-                'key': 'personalized',
-                'items': [
-                  {
-                    'id': 'b1',
-                    'type': 'article',
-                    'title': 'Breaking with photo',
-                    'published_at': DateTime.now().toIso8601String(),
-                    'metadata': {'slug': 's-b1', 'is_breaking': true},
-                    // The picture is only here, not in image_url.
-                    'media_items': [
-                      {
-                        'media_type': 'image',
-                        'url': 'https://cdn.test/b1.jpg',
-                        'thumbnail_url': 'https://cdn.test/b1-thumb.jpg',
-                      },
-                    ],
-                  },
-                  // Enough stories that some stay in For You after the
-                  // hero takes its five.
-                  for (var i = 2; i < 10; i++) _item('p$i'),
-                ],
-              },
-              {'key': 'local', 'items': []},
-            ],
-          },
-        });
+        return (
+          200,
+          {
+            'data': {
+              'sections': [
+                {
+                  'key': 'personalized',
+                  'items': [
+                    {
+                      'id': 'b1',
+                      'type': 'article',
+                      'title': 'Breaking with photo',
+                      'published_at': DateTime.now().toIso8601String(),
+                      'metadata': {'slug': 's-b1', 'is_breaking': true},
+                      // The picture is only here, not in image_url.
+                      'media_items': [
+                        {
+                          'media_type': 'image',
+                          'url': 'https://cdn.test/b1.jpg',
+                          'thumbnail_url': 'https://cdn.test/b1-thumb.jpg',
+                        },
+                      ],
+                    },
+                    // Enough stories that some stay in For You after the
+                    // hero takes its five.
+                    for (var i = 2; i < 10; i++) _item('p$i'),
+                  ],
+                },
+                {'key': 'local', 'items': []},
+              ],
+            },
+          }
+        );
       }
       return _everything(o);
     });
@@ -242,26 +255,32 @@ void main() {
       switch (o.path) {
         case '/api/v1/feed/':
           // Out of date order, as the server sends it.
-          return (200, {
-            'data': [
-              dated('d9', 9),
-              dated('d12', 12),
-              dated('today', 0),
-              dated('d2', 2),
-              dated('d5', 5),
-              dated('d7', 7),
-              dated('d10', 10),
-            ],
-            'meta': {'next': null},
-          });
+          return (
+            200,
+            {
+              'data': [
+                dated('d9', 9),
+                dated('d12', 12),
+                dated('today', 0),
+                dated('d2', 2),
+                dated('d5', 5),
+                dated('d7', 7),
+                dated('d10', 10),
+              ],
+              'meta': {'next': null},
+            }
+          );
         case '/api/v1/feed/home/':
           return (200, _home(const [], const []));
         case '/api/v1/polls/':
-          return (200, {
-            'data': [
-              {'id': 'poll1', 'question': 'Q?', 'options': []}
-            ],
-          });
+          return (
+            200,
+            {
+              'data': [
+                {'id': 'poll1', 'question': 'Q?', 'options': []}
+              ],
+            }
+          );
         default:
           return (200, {'data': [], 'meta': {}, 'errors': null});
       }
@@ -309,10 +328,13 @@ void main() {
     test('the next page is meta.next exactly — never a built page=2', () async {
       const next =
           'https://api.vaaradhinews.com/api/v1/feed/?cursor=abc&include=all&scope=main';
-      final api = _Api((o) => (200, {
-            'data': [_item('a2')],
-            'meta': {'next': null},
-          }));
+      final api = _Api((o) => (
+            200,
+            {
+              'data': [_item('a2')],
+              'meta': {'next': null},
+            }
+          ));
       final repo = HomeFeedRepository.forTesting(_dio(api));
       final first = LatestPage.parse({
         'data': [_item('a1')],
@@ -327,8 +349,8 @@ void main() {
           subdistrict: '',
           village: '');
       expect(api.requests.single.uri.toString(), next);
-      expect(api.requests.single.uri.queryParameters.containsKey('page'),
-          isFalse);
+      expect(
+          api.requests.single.uri.queryParameters.containsKey('page'), isFalse);
     });
   });
 
@@ -375,7 +397,11 @@ void main() {
       final ok = HomeFeedRepository.forTesting(
           _dio(_Api((o) => (200, _home(['saved'], const [])))));
       await ok.fetch(
-          viewer: 'guest', state: 'T', district: '', subdistrict: '', village: '');
+          viewer: 'guest',
+          state: 'T',
+          district: '',
+          subdistrict: '',
+          village: '');
 
       final throttled = HomeFeedRepository.forTesting(
           _dio(_Api((o) => (429, {'detail': 'Throttled.'}))));
@@ -390,7 +416,11 @@ void main() {
           isNull);
       expect(throttled.lastFailureStatus, 429);
       final kept = await throttled.cached(
-          viewer: 'guest', state: 'T', district: '', subdistrict: '', village: '');
+          viewer: 'guest',
+          state: 'T',
+          district: '',
+          subdistrict: '',
+          village: '');
       expect(kept!.personalized.single.id, 'saved');
     });
   });
@@ -437,27 +467,34 @@ void main() {
     final api = _Api((o) {
       switch (o.path) {
         case '/api/v1/categories/':
-          return (200, {
-            'data': [
-              {
-                'id': 'c1',
-                'slug': 'sports',
-                'name': 'Sports',
-                'name_te': 'క్రీడలు',
-                'order': 1
-              },
-            ],
-          });
+          return (
+            200,
+            {
+              'data': [
+                {
+                  'id': 'c1',
+                  'slug': 'sports',
+                  'name': 'Sports',
+                  'name_te': 'క్రీడలు',
+                  'order': 1
+                },
+              ],
+            }
+          );
         case '/api/v1/feed/home/':
           return (200, _home([for (var i = 1; i < 10; i++) 'p$i'], ['l1']));
+        // /feed/ filters by `category` (backend fix, Oct 2026).
         case '/api/v1/feed/':
           final sports = o.queryParameters['category'] == 'sports';
-          return (200, {
-            'data': sports
-                ? [_item('s1'), _item('s2')]
-                : [_item('a1'), _item('a2')],
-            'meta': {'next': null},
-          });
+          return (
+            200,
+            {
+              'data': sports
+                  ? [_item('s1'), _item('s2')]
+                  : [_item('a1'), _item('a2')],
+              'meta': {'next': null},
+            }
+          );
         default:
           return (200, {'data': [], 'meta': {}, 'errors': null});
       }
@@ -466,18 +503,78 @@ void main() {
 
     await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
     await tester.pumpAndSettle(const Duration(seconds: 1));
-    expect(find.byKey(const PageStorageKey('home_for_you_rail')),
-        findsOneWidget);
+    expect(
+        find.byKey(const PageStorageKey('home_for_you_rail')), findsOneWidget);
 
     await tester.tap(find.text('క్రీడలు').first);
     await tester.pumpAndSettle(const Duration(seconds: 1));
 
-    final latest = api.requests.lastWhere((r) => r.path == '/api/v1/feed/');
+    final latest =
+        api.requests.lastWhere((r) => r.path == '/api/v1/feed/');
     expect(latest.queryParameters['category'], 'sports');
     // Only the category's stories: the rails and hero step aside.
-    expect(find.byKey(const PageStorageKey('home_for_you_rail')),
-        findsNothing);
+    expect(find.byKey(const PageStorageKey('home_for_you_rail')), findsNothing);
     expect(find.text('T s1'), findsWidgets);
     expect(find.text('T a1'), findsNothing);
+  });
+
+  testWidgets('a failed category load shows Retry, never the old news',
+      (tester) async {
+    final api = _Api((o) {
+      switch (o.path) {
+        case '/api/v1/categories/':
+          return (
+            200,
+            {
+              'data': [
+                {
+                  'id': 'c1',
+                  'slug': 'sports',
+                  'name': 'Sports',
+                  'name_te': 'క్రీడలు',
+                  'order': 1
+                },
+              ],
+            }
+          );
+        case '/api/v1/feed/home/':
+          return (200, _home([for (var i = 1; i < 10; i++) 'p$i'], ['l1']));
+        // The category request fails; "All" works.
+        case '/api/v1/feed/':
+          if (o.queryParameters['category'] != null) {
+            return (
+              503,
+              {
+                'errors': {'message': 'down'}
+              }
+            );
+          }
+          return (
+            200,
+            {
+              'data': [_item('a1'), _item('a2')],
+              'meta': {'next': null},
+            }
+          );
+        default:
+          return (200, {'data': [], 'meta': {}, 'errors': null});
+      }
+    });
+    ApiClient.instance.dio.httpClientAdapter = api;
+    // Tall enough that the Latest list is built on screen.
+    tester.view.physicalSize = const Size(1080, 12000);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+    expect(find.text('T a1'), findsWidgets);
+
+    await tester.tap(find.text('క్రీడలు').first);
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+
+    expect(find.text('T a1'), findsNothing,
+        reason: 'the "All" news must not stay under the Sports chip');
+    expect(find.byKey(const Key('home_category_retry')), findsOneWidget);
   });
 }

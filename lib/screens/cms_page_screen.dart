@@ -7,6 +7,7 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/auth/auth_ui.dart' show AuthPrimaryButton, authMuted;
 import '../widgets/branded_page.dart';
+import '../widgets/cms_contact_actions.dart';
 
 /// A backend-managed page (About, Privacy, Terms, Contact …).
 ///
@@ -133,6 +134,10 @@ class _CMSPageScreenState extends State<CMSPageScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_status == CmsStatus.cached && !_loading) _buildOfflineNote(),
+        // Contact Us: the email / phone / website the page itself lists, as
+        // tap buttons above the text (Play News policy: clearly visible).
+        if (widget.slug == CmsSlugs.contact)
+          CmsContactActions(html: page.content),
         SectionCard(
           key: const Key('cms_content'),
           child: _CmsHtml(html: _withoutRepeatedTitle(page)),

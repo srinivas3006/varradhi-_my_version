@@ -155,7 +155,10 @@ void main() {
 
   late ContractMockHttpClientAdapter mockAdapter;
 
+  tearDown(() => AppState.instance.hasValidLocation = false);
   setUp(() {
+    // A reader who has chosen a place: feeds carry it (backend contract).
+    AppState.instance.hasValidLocation = true;
     SharedPreferences.setMockInitialValues({});
     VisibilityDetectorController.instance.updateInterval = Duration.zero;
     mockAdapter = ContractMockHttpClientAdapter();

@@ -33,3 +33,4 @@ class AppConfig {
   static const Duration receiveTimeout = Duration(seconds: 10);
   static const int maxRetries = 2;
 }
+

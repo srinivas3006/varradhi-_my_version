@@ -53,7 +53,8 @@ class _LiveCricketScreenState extends State<LiveCricketScreen> {
         children: [
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary))
                 : _matches.isEmpty
                     ? const Center(
                         child: Padding(
@@ -61,17 +62,20 @@ class _LiveCricketScreenState extends State<LiveCricketScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.sports_cricket_rounded, size: 48, color: AppColors.textMuted),
+                              Icon(Icons.sports_cricket_rounded,
+                                  size: 48, color: AppColors.textMuted),
                               SizedBox(height: 12),
                               Text(
                                 'ప్రస్తుతానికి ప్రత్యక్ష మ్యాచ్‌లు లేవు',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                               SizedBox(height: 6),
                               Text(
                                 'మ్యాచ్‌లు ప్రారంభమైనప్పుడు లైవ్ స్కోర్‌లు మరియు తాజా వివరాలు ఇక్కడ కనిపిస్తాయి.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                style: TextStyle(
+                                    color: AppColors.textMuted, fontSize: 13),
                               ),
                             ],
                           ),
@@ -126,7 +130,10 @@ class _MatchCard extends StatelessWidget {
             children: [
               Text(
                 match.series,
-                style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               Container(
@@ -137,7 +144,11 @@ class _MatchCard extends StatelessWidget {
                 ),
                 child: Text(
                   match.status.toUpperCase(),
-                  style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.w800, letterSpacing: 0.5),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: statusColor,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5),
                 ),
               ),
             ],
@@ -146,16 +157,24 @@ class _MatchCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(match.team1, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-              Text(match.score1, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(match.team1,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(match.score1,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 15)),
             ],
           ),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(match.team2, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-              Text(match.score2, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(match.team2,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(match.score2,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 15)),
             ],
           ),
         ],

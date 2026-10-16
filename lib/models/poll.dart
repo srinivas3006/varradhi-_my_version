@@ -67,7 +67,8 @@ class Poll {
     this.isExpired = false,
     this.endsAt,
     this.createdAt,
-  }) : totalVotes = totalVotes ?? votes.fold<int>(0, (int sum, int v) => sum + v);
+  }) : totalVotes =
+            totalVotes ?? votes.fold<int>(0, (int sum, int v) => sum + v);
 
   double percentFor(int index) {
     if (optionItems.isNotEmpty && index < optionItems.length) {
@@ -99,12 +100,24 @@ class Poll {
       final optB = json['option_b']?.toString() ?? 'B';
       final voteA = _toInt(json['vote_a_count'], 0);
       final voteB = _toInt(json['vote_b_count'], 0);
-      final percA = _toDouble(json['percentages'] is Map ? json['percentages']['a'] : null, 0.0);
-      final percB = _toDouble(json['percentages'] is Map ? json['percentages']['b'] : null, 0.0);
+      final percA = _toDouble(
+          json['percentages'] is Map ? json['percentages']['a'] : null, 0.0);
+      final percB = _toDouble(
+          json['percentages'] is Map ? json['percentages']['b'] : null, 0.0);
 
       optionItems = [
-        PollOption(id: 'a', label: optA, sortOrder: 0, voteCount: voteA, percentage: percA),
-        PollOption(id: 'b', label: optB, sortOrder: 1, voteCount: voteB, percentage: percB),
+        PollOption(
+            id: 'a',
+            label: optA,
+            sortOrder: 0,
+            voteCount: voteA,
+            percentage: percA),
+        PollOption(
+            id: 'b',
+            label: optB,
+            sortOrder: 1,
+            voteCount: voteB,
+            percentage: percB),
       ];
       options = [optA, optB];
       votes = [voteA, voteB];
@@ -129,7 +142,8 @@ class Poll {
       }
     }
 
-    final total = _toInt(json['total_votes'], votes.fold<int>(0, (int sum, int v) => sum + v));
+    final total = _toInt(
+        json['total_votes'], votes.fold<int>(0, (int sum, int v) => sum + v));
 
     return Poll(
       id: json['id']?.toString() ?? '',
@@ -139,7 +153,9 @@ class Poll {
       optionItems: optionItems,
       selectedOption: selectedIdx,
       selectedOptionId: selectedOptId ??
-          (selectedIdx != null && selectedIdx < optionItems.length ? optionItems[selectedIdx].id : null),
+          (selectedIdx != null && selectedIdx < optionItems.length
+              ? optionItems[selectedIdx].id
+              : null),
       totalVotes: total,
       isActive: json['is_active'] != false,
       isExpired: json['is_expired'] == true,

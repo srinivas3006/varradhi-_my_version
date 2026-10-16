@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,10 +7,11 @@ import '../services/api_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
-/// Ad booking. Everything offered comes from the backend: the areas
-/// (GET /ads/areas/) and every bookable package with its price
-/// (GET /ads/pricing/options/). The app has no durations of its own — an
-/// area or ad type without a priced package is simply not offered.
+/// Ad booking (POST /api/v1/ads/bookings/). Everything offered comes from
+/// GET /api/v1/ads/pricing/options/: the coverage scopes (global / state /
+/// local), each scope's areas, every duration with its price, and the ad
+/// formats. Nothing is hard-coded — a scope, area or format the backend does
+/// not price is simply not offered.
 class AdBookingScreen extends StatefulWidget {
   /// For tests; the screen loads from [ApiService] otherwise.
   final Future<List<dynamic>> Function()? areasLoader;
@@ -39,23 +41,21 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   late final _phoneController =
       TextEditingController(text: AppState.instance.userPhone);
 
-  String _adType = 'local'; // 'local' or 'main'
+  String _scope = AdScope.local;
+  String? _format;
+  String? _areaId;
+
+  /// The duration/price the advertiser picked, as the backend sent it.
+  AdPackage? _selected;
 
   bool _loading = true;
   bool _loadFailed = false;
   bool _isSubmitting = false;
-  String? _error;
+  AdBookingError? _error;
 
   AdPricingCatalog? _catalog;
 
-  /// The package the advertiser picked — area, duration and price, all as
-  /// the backend sent them.
-  AdPackage? _selected;
-
-  /// The local area chosen in the dropdown; its packages show below it.
-  String? _localAreaId;
-
-  // Populated after successful booking submission
+  // Populated after a successful booking.
   Map<String, dynamic>? _bookingSuccessData;
 
   @override
@@ -73,11 +73,13 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     super.dispose();
   }
 
-  Future<void> _loadCatalog() async {
+  /// Loads the options. On a reload ([keepChoices]) the picks that still
+  /// exist are kept; the form fields are never touched.
+  Future<void> _loadCatalog({bool keepChoices = false}) async {
     setState(() {
       _loading = true;
       _loadFailed = false;
-      _error = null;
+      if (!keepChoices) _error = null;
     });
     try {
       final results = await Future.wait<dynamic>([
@@ -91,15 +93,26 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
       setState(() {
         _catalog = catalog;
         _loading = false;
-        // Open on a type that actually has packages.
-        if (catalog.localByArea.isEmpty && catalog.main.isNotEmpty) {
-          _adType = 'main';
+        // Open on a scope that actually has packages.
+        if (!catalog.offers(_scope)) {
+          _scope = AdScope.all
+              .firstWhere(catalog.offers, orElse: () => AdScope.local);
         }
-        _selected = null;
+        if (_format != null &&
+            !catalog.formats.any((f) => f.value == _format)) {
+          _format = null;
+        }
+        _format ??=
+            catalog.formats.length == 1 ? catalog.formats.first.value : null;
+        final areas = catalog.areasFor(_scope);
+        if (_areaId != null && !areas.containsKey(_areaId)) _areaId = null;
         // Nothing to choose between when only one area is priced.
-        _localAreaId = catalog.localByArea.length == 1
-            ? catalog.localByArea.keys.first
-            : null;
+        _areaId ??= areas.length == 1 ? areas.keys.first : null;
+        final sel = _selected;
+        final still = sel == null
+            ? null
+            : _packagesFor(catalog).where(sel.sameAs).firstOrNull;
+        _selected = keepChoices ? still : null;
       });
     } catch (_) {
       if (!mounted) return;
@@ -110,10 +123,20 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     }
   }
 
-  void _selectType(String type) {
-    if (_adType == type) return;
+  /// The duration/price options for the current scope and area.
+  List<AdPackage> _packagesFor(AdPricingCatalog c) {
+    if (_scope == AdScope.global) return c.global;
+    final id = _areaId;
+    return id == null ? const [] : (c.areasFor(_scope)[id] ?? const []);
+  }
+
+  void _selectScope(String scope) {
+    if (_scope == scope) return;
+    HapticFeedback.selectionClick();
+    final areas = _catalog?.areasFor(scope) ?? const {};
     setState(() {
-      _adType = type;
+      _scope = scope;
+      _areaId = areas.length == 1 ? areas.keys.first : null;
       _selected = null;
       _error = null;
     });
@@ -122,133 +145,154 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   void _selectPackage(AdPackage p) {
     HapticFeedback.selectionClick();
     setState(() {
-      _adType = p.adType;
       _selected = p;
       _error = null;
     });
   }
 
+  String? _fieldError(String field) => _error?.fields[field];
+
   Future<void> _submitBooking() async {
     if (_isSubmitting) return;
     final pkg = _selected;
-    if (pkg == null) {
-      setState(() => _error = 'దయచేసి ఒక ప్యాకేజీని ఎంచుకోండి.');
+    final catalog = _catalog;
+    final needsFormat = catalog != null && catalog.formats.isNotEmpty;
+    final missing = <String, String>{
+      if (needsFormat && _format == null)
+        'ad_format': 'ప్రకటన రకాన్ని ఎంచుకోండి.',
+      if (_scope != AdScope.global && _areaId == null)
+        'area_id': 'ప్రాంతాన్ని ఎంచుకోండి.',
+      if (pkg == null) 'duration_days': 'కాలపరిమితి & ధరను ఎంచుకోండి.',
+    };
+    final formOk = _formKey.currentState!.validate();
+    if (missing.isNotEmpty) {
+      setState(() => _error =
+          AdBookingError(fields: missing, message: missing.values.join('\n')));
       return;
     }
-    if (!_formKey.currentState!.validate()) return;
+    if (!formOk) return;
 
     setState(() {
       _isSubmitting = true;
       _error = null;
     });
 
-    try {
-      final payload = {
-        'advertiser_name': _nameController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'business_name': _businessController.text.trim(),
-        'ad_type': pkg.adType,
-        'duration_days': pkg.durationDays,
-        // Backend contract: the package's area for local, null for main.
-        'area_id': pkg.adType == 'local' ? pkg.areaId : null,
-        if (_messageController.text.trim().isNotEmpty)
-          'message': _messageController.text.trim(),
-      };
+    final payload = <String, dynamic>{
+      'advertiser_name': _nameController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'business_name': _businessController.text.trim(),
+      'scope': _scope,
+      if (_format != null) 'ad_format': _format,
+      // Never sent for global.
+      if (_scope != AdScope.global) 'area_id': pkg!.areaId,
+      'duration_days': pkg!.durationDays,
+      if (_messageController.text.trim().isNotEmpty)
+        'message': _messageController.text.trim(),
+    };
 
+    try {
       final responseData = await (widget.submitter ??
           ApiService.instance.submitAdBooking)(payload);
-
-      if (mounted) {
-        HapticFeedback.heavyImpact();
-        setState(() {
-          _bookingSuccessData = responseData;
-          _isSubmitting = false;
-        });
-      }
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _bookingSuccessData = responseData;
+        _isSubmitting = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error =
-              'బుకింగ్ అభ్యర్థన సమర్పించడంలో విఫలమైంది. దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్లీ ప్రయత్నించండి.';
-          _isSubmitting = false;
-        });
+      if (!mounted) return;
+      final error = e is DioException
+          ? AdBookingError.from(
+              e.type == DioExceptionType.badResponse
+                  ? e.response?.statusCode
+                  : null,
+              e.response?.data)
+          : const AdBookingError(
+              message: 'బుకింగ్ సమర్పించలేకపోయాం. మళ్లీ ప్రయత్నించండి.',
+              retryable: true);
+      // Everything typed stays in the form.
+      setState(() {
+        _error = error;
+        _isSubmitting = false;
+      });
+      if (error.refreshOptions) {
+        await _loadCatalog(keepChoices: true);
+        if (mounted) setState(() => _error = error);
       }
     }
   }
 
-  Future<void> _launchWhatsApp(String? rawUrl) async {
+  Future<void> _launchWhatsApp(String rawUrl) async {
     HapticFeedback.lightImpact();
-    if (rawUrl != null && rawUrl.isNotEmpty) {
-      final uri = Uri.tryParse(rawUrl);
-      if (uri != null && await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
-
-    // Production-safe fallback
-    const String phone = "916281732036";
-    final pkg = _selected;
-    final String text = Uri.encodeComponent(
-      "Hello, I want to advertise on Vaaradhi"
-      "${_businessController.text.trim().isNotEmpty ? " for '${_businessController.text.trim()}'" : ''}. "
-      "${_bookingSuccessData?['id'] != null ? 'Ref: ${_bookingSuccessData!['id']}. ' : ''}"
-      "${pkg != null ? 'Ad Type: ${pkg.adType}${pkg.areaName != null ? ' (${pkg.areaName})' : ''}, Duration: ${pkg.durationDays} days, Price: ${pkg.priceLabel}.' : ''}",
-    );
-    final Uri waUri = Uri.parse("https://wa.me/$phone?text=$text");
-    if (await canLaunchUrl(waUri)) {
-      await launchUrl(waUri, mode: LaunchMode.externalApplication);
-    } else {
-      final Uri fallbackUri =
-          Uri.parse("https://api.whatsapp.com/send?phone=$phone&text=$text");
-      if (await canLaunchUrl(fallbackUri)) {
-        await launchUrl(fallbackUri, mode: LaunchMode.inAppBrowserView);
-      }
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
     }
   }
 
-  // --- Step 1: Main vs Local ------------------------------------------------
+  // --- Labels ---------------------------------------------------------------
 
-  Widget _buildAdTypeSelector(bool isDark) {
-    final catalog = _catalog;
-    final mainCount = catalog?.main.length ?? 0;
-    final localCount = catalog?.localByArea.length ?? 0;
+  static String scopeTitle(String scope) => switch (scope) {
+        AdScope.global => 'అన్ని ప్రాంతాలు',
+        AdScope.state => 'రాష్ట్రం',
+        _ => 'స్థానికం',
+      };
+
+  static String scopeSubtitle(String scope) => switch (scope) {
+        AdScope.global => 'యాప్ అంతటా',
+        AdScope.state => 'ఒక రాష్ట్రమంతా',
+        _ => 'జిల్లా / మండలం / గ్రామం',
+      };
+
+  static IconData scopeIcon(String scope) => switch (scope) {
+        AdScope.global => Icons.public_rounded,
+        AdScope.state => Icons.map_outlined,
+        _ => Icons.location_city_rounded,
+      };
+
+  String _formatLabel(String? value) {
+    if (value == null) return '-';
+    return _catalog?.formats
+            .where((f) => f.value == value)
+            .map((f) => f.label)
+            .firstOrNull ??
+        value;
+  }
+
+  String _areaName(AdPricingCatalog catalog, String id) {
+    final name = catalog.areaNames[id];
+    if (name != null && name.isNotEmpty) return name;
+    return catalog.areasFor(_scope)[id]?.first.areaName ?? 'ప్రాంతం';
+  }
+
+  // --- Step 1: scope ----------------------------------------------------------
+
+  Widget _buildScopeSelector(AdPricingCatalog catalog, bool isDark) {
     return Row(
       children: [
-        Expanded(
-          child: _typeCard(
-            key: const Key('ad_type_main'),
-            isDark: isDark,
-            selected: _adType == 'main',
-            enabled: mainCount > 0,
-            icon: Icons.public_rounded,
-            title: 'రాష్ట్రవ్యాప్తంగా',
-            subtitle: mainCount > 0
-                ? '$mainCount ప్యాకేజీలు'
-                : 'ప్రస్తుతం అందుబాటులో లేదు',
-            onTap: () => _selectType('main'),
+        for (final s in AdScope.all) ...[
+          if (s != AdScope.global) const SizedBox(width: 8),
+          Expanded(
+            child: _scopeCard(
+              key: Key('ad_scope_$s'),
+              isDark: isDark,
+              selected: _scope == s,
+              enabled: catalog.offers(s),
+              icon: scopeIcon(s),
+              title: scopeTitle(s),
+              subtitle: catalog.offers(s)
+                  ? scopeSubtitle(s)
+                  : 'ప్రస్తుతం అందుబాటులో లేదు',
+              onTap: () => _selectScope(s),
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _typeCard(
-            key: const Key('ad_type_local'),
-            isDark: isDark,
-            selected: _adType == 'local',
-            enabled: localCount > 0,
-            icon: Icons.location_city_rounded,
-            title: 'స్థానిక ప్రాంతం',
-            subtitle: localCount > 0
-                ? '$localCount ప్రాంతాలు'
-                : 'ప్రస్తుతం అందుబాటులో లేదు',
-            onTap: () => _selectType('local'),
-          ),
-        ),
+        ],
       ],
     );
   }
 
-  Widget _typeCard({
+  Widget _scopeCard({
     required Key key,
     required bool isDark,
     required bool selected,
@@ -266,7 +310,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         onTap: enabled ? onTap : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
           decoration: BoxDecoration(
             color: active
                 ? AppColors.primary.withValues(alpha: 0.12)
@@ -293,20 +337,24 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         color: AppColors.primary, size: 18),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text(
                 title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
-                  fontSize: 15,
+                  fontSize: 14,
                   color: active ? AppColors.primary : null,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 subtitle,
+                maxLines: 2,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
+                  height: 1.3,
                   color: isDark ? Colors.white60 : Colors.black54,
                 ),
               ),
@@ -317,13 +365,135 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     );
   }
 
-  // --- Step 2: packages, exactly as the backend prices them --------------
+  // --- Dropdowns --------------------------------------------------------------
+
+  InputDecoration _dropdownDecoration(bool isDark,
+          {required String label, required IconData icon, String? errorText}) =>
+      InputDecoration(
+        labelText: label,
+        errorText: errorText,
+        errorMaxLines: 3,
+        prefixIcon: Icon(icon, color: AppColors.primary),
+        filled: true,
+        fillColor:
+            isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide:
+              BorderSide(color: isDark ? Colors.white12 : Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        ),
+      );
+
+  Widget _buildFormatDropdown(AdPricingCatalog catalog, bool isDark) {
+    return DropdownButtonFormField<String>(
+      key: const Key('ad_format_dropdown'),
+      initialValue: _format,
+      isExpanded: true,
+      menuMaxHeight: 420,
+      borderRadius: BorderRadius.circular(14),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded),
+      decoration: _dropdownDecoration(isDark,
+          label: 'ప్రకటన రకం',
+          icon: Icons.view_quilt_outlined,
+          errorText: _fieldError('ad_format')),
+      items: [
+        for (final f in catalog.formats)
+          DropdownMenuItem<String>(
+            key: Key('ad_format_option_${f.value}'),
+            value: f.value,
+            child: Text(f.label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+          ),
+      ],
+      onChanged: (v) {
+        if (v == null) return;
+        HapticFeedback.selectionClick();
+        setState(() {
+          _format = v;
+          _error = null;
+        });
+      },
+    );
+  }
+
+  /// One dropdown of the scope's priced areas; each shows its lowest price.
+  Widget _buildAreaDropdown(AdPricingCatalog catalog, bool isDark) {
+    final areas = catalog.areasFor(_scope);
+    return DropdownButtonFormField<String>(
+      // A new key per scope, so switching scope resets the field.
+      key: Key('ad_area_dropdown_$_scope'),
+      initialValue: _areaId,
+      isExpanded: true,
+      menuMaxHeight: 420,
+      borderRadius: BorderRadius.circular(14),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded),
+      decoration: _dropdownDecoration(isDark,
+          label: _scope == AdScope.state
+              ? 'రాష్ట్రాన్ని ఎంచుకోండి'
+              : 'ప్రాంతాన్ని ఎంచుకోండి',
+          icon: Icons.location_on_outlined,
+          errorText: _fieldError('area_id')),
+      items: [
+        for (final id in areas.keys)
+          DropdownMenuItem<String>(
+            key: Key('ad_area_option_$id'),
+            value: id,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _areaName(catalog, id),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _fromPrice(areas[id]!),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+      onChanged: (id) {
+        if (id == null || id == _areaId) return;
+        HapticFeedback.selectionClick();
+        setState(() {
+          _areaId = id;
+          // A package from another area no longer applies.
+          if (_selected?.areaId != id) _selected = null;
+          _error = null;
+        });
+      },
+    );
+  }
+
+  /// "₹1500" for a single package, "₹1500 నుండి" when there are several.
+  String _fromPrice(List<AdPackage> packages) {
+    double amount(AdPackage p) => double.tryParse(p.price.trim()) ?? 0;
+    final cheapest = packages.reduce((a, b) => amount(a) <= amount(b) ? a : b);
+    return packages.length == 1
+        ? cheapest.priceLabel
+        : '${cheapest.priceLabel} నుండి';
+  }
+
+  // --- Duration & price -----------------------------------------------------
 
   Widget _packageChip(AdPackage p, bool isDark) {
     final selected = p.sameAs(_selected);
     final hint = p.durationHint;
     return InkWell(
-      key: Key('ad_pkg_${p.adType}_${p.areaId ?? 'main'}_${p.durationDays}'),
+      key: Key('ad_pkg_${p.scope}_${p.areaId ?? 'all'}_${p.durationDays}'),
       onTap: () => _selectPackage(p),
       borderRadius: BorderRadius.circular(14),
       child: AnimatedContainer(
@@ -375,155 +545,32 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     );
   }
 
-  Widget _buildPackages(bool isDark) {
-    final catalog = _catalog!;
-    if (_adType == 'main') {
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [for (final p in catalog.main) _packageChip(p, isDark)],
+  Widget _buildPackages(AdPricingCatalog catalog, bool isDark) {
+    final packages = _packagesFor(catalog);
+    if (packages.isEmpty) {
+      return Text(
+        'ముందు ${_scope == AdScope.state ? 'రాష్ట్రాన్ని' : 'ప్రాంతాన్ని'} ఎంచుకోండి — దాని ధరలు ఇక్కడ కనిపిస్తాయి.',
+        style: const TextStyle(color: Colors.grey, fontSize: 13),
       );
     }
-    final areaId = _localAreaId;
-    final packages = areaId == null ? null : catalog.localByArea[areaId];
+    final err = _fieldError('duration_days');
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildAreaDropdown(catalog, isDark),
-        const SizedBox(height: 12),
-        if (areaId != null && packages != null)
-          for (final entry in [MapEntry(areaId, packages)])
-            Container(
-              key: Key('ad_area_${entry.key}'),
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.04)
-                    : Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _selected?.areaId == entry.key
-                      ? AppColors.primary
-                      : (isDark ? Colors.white12 : Colors.grey.shade200),
-                  width: _selected?.areaId == entry.key ? 1.6 : 1,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on_outlined,
-                          size: 18, color: AppColors.primary),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          catalog.areaNames[entry.key]?.isNotEmpty == true
-                              ? catalog.areaNames[entry.key]!
-                              : (entry.value.first.areaName ?? 'ప్రాంతం'),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w800, fontSize: 15),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final p in entry.value) _packageChip(p, isDark)
-                    ],
-                  ),
-                ],
-              ),
-            ),
-      ],
-    );
-  }
-
-  String _areaName(AdPricingCatalog catalog, String id) {
-    final name = catalog.areaNames[id];
-    if (name != null && name.isNotEmpty) return name;
-    return catalog.localByArea[id]?.first.areaName ?? 'ప్రాంతం';
-  }
-
-  /// One dropdown of every priced area instead of a long list of cards.
-  /// Each entry shows the lowest price so advertisers can compare quickly.
-  Widget _buildAreaDropdown(AdPricingCatalog catalog, bool isDark) {
-    final ids = catalog.localByArea.keys.toList();
-    return DropdownButtonFormField<String>(
-      key: const Key('ad_area_dropdown'),
-      initialValue: _localAreaId,
-      isExpanded: true,
-      menuMaxHeight: 420,
-      borderRadius: BorderRadius.circular(14),
-      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-      decoration: InputDecoration(
-        labelText: 'ప్రాంతాన్ని ఎంచుకోండి',
-        prefixIcon:
-            const Icon(Icons.location_on_outlined, color: AppColors.primary),
-        filled: true,
-        fillColor:
-            isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide:
-              BorderSide(color: isDark ? Colors.white12 : Colors.grey.shade300),
+        Wrap(
+          key: Key('ad_packages_${_scope}_${_areaId ?? 'all'}'),
+          spacing: 10,
+          runSpacing: 10,
+          children: [for (final p in packages) _packageChip(p, isDark)],
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
-        ),
-      ),
-      items: [
-        for (final id in ids)
-          DropdownMenuItem<String>(
-            key: Key('ad_area_option_$id'),
-            value: id,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _areaName(catalog, id),
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _fromPrice(catalog.localByArea[id]!),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
+        if (err != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(err,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
           ),
       ],
-      onChanged: (id) {
-        if (id == null || id == _localAreaId) return;
-        HapticFeedback.selectionClick();
-        setState(() {
-          _localAreaId = id;
-          // A package from another area no longer applies.
-          if (_selected?.areaId != id) _selected = null;
-          _error = null;
-        });
-      },
     );
-  }
-
-  /// "₹1500" for a single package, "₹1500 నుండి" when there are several.
-  String _fromPrice(List<AdPackage> packages) {
-    double amount(AdPackage p) => double.tryParse(p.price.trim()) ?? 0;
-    final cheapest = packages.reduce((a, b) => amount(a) <= amount(b) ? a : b);
-    return packages.length == 1
-        ? cheapest.priceLabel
-        : '${cheapest.priceLabel} నుండి';
   }
 
   /// No packages to offer (endpoint not live, nothing priced, or offline).
@@ -543,25 +590,14 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
           Text(
             _loadFailed
                 ? 'ప్రకటన ప్యాకేజీలను లోడ్ చేయడంలో విఫలమైంది. మళ్లీ ప్రయత్నించండి.'
-                : 'ప్రస్తుతం ప్రకటన ప్యాకేజీలు అందుబాటులో లేవు. వివరాల కోసం WhatsApp ద్వారా సంప్రదించండి.',
+                : 'ప్రస్తుతం ప్రకటన ప్యాకేజీలు అందుబాటులో లేవు. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ చూడండి.',
             style: const TextStyle(fontSize: 13.5, height: 1.4),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            children: [
-              if (_loadFailed)
-                TextButton.icon(
-                  onPressed: _loadCatalog,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('మళ్లీ ప్రయత్నించండి'),
-                ),
-              TextButton.icon(
-                onPressed: () => _launchWhatsApp(null),
-                icon: const Icon(Icons.chat_bubble_rounded,
-                    size: 18, color: Color(0xFF25D366)),
-                label: const Text('WhatsApp'),
-              ),
-            ],
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: _loadCatalog,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('మళ్లీ ప్రయత్నించండి'),
           ),
         ],
       ),
@@ -573,24 +609,23 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   Widget _buildSuccessScreen(bool isDark) {
     final data = _bookingSuccessData ?? {};
     final pkg = _selected;
-    final bookingId = data['id']?.toString() ?? 'Pending';
+    final bookingId = data['id']?.toString() ?? '-';
     final price = data['quoted_price']?.toString();
-    final currency = data['currency']?.toString();
-    final priceText = price != null && currency != null
-        ? AdPackage(
-                adType: pkg?.adType ?? _adType,
-                durationDays: pkg?.durationDays ?? 0,
-                price: price,
-                currency: currency)
-            .priceLabel
+    final currency = data['currency']?.toString() ?? pkg?.currency ?? 'INR';
+    final priceText = price != null && price.isNotEmpty
+        ? AdPackage.formatPrice(price, currency)
         : pkg?.priceLabel;
-    final whatsappUrl = data['whatsapp_url']?.toString();
-
-    final areaName = pkg?.adType == 'local'
-        ? (pkg?.areaName ??
+    final whatsappUrl = data['whatsapp_url']?.toString() ?? '';
+    final scope = AdScope.normalize((data['scope'] ?? _scope).toString());
+    final area = data['area'];
+    final areaName = scope == AdScope.global
+        ? scopeTitle(AdScope.global)
+        : ((area is Map ? area['name']?.toString() : null) ??
+            pkg?.areaName ??
             _catalog?.areaNames[pkg?.areaId] ??
-            'స్థానిక ప్రాంతం')
-        : 'రాష్ట్రవ్యాప్తంగా (అన్ని ఫీడ్‌లు)';
+            scopeTitle(scope));
+    final days = data['duration_days'] ?? pkg?.durationDays;
+    final format = _formatLabel((data['ad_format'] ?? _format)?.toString());
 
     return Scaffold(
       appBar: AppBar(
@@ -601,7 +636,6 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 16),
               Container(
@@ -625,7 +659,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'మీ అభ్యర్థన నమోదు చేయబడింది. మీ బ్యానర్లు సమర్పించడానికి మరియు షెడ్యూల్‌ను ఖరారు చేయడానికి నేరుగా WhatsApp లో సంప్రదించండి.',
+                'మీ అభ్యర్థన నమోదైంది. అడ్మిన్ ఆమోదించిన తర్వాతే మీ ప్రకటన ప్రచురించబడుతుంది.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -654,7 +688,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                       children: [
                         const Flexible(
                           child: Text(
-                            'అంచనా వేసిన ధర',
+                            'కోట్ చేసిన ధర',
                             style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 color: Colors.grey),
@@ -669,7 +703,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text(
-                            'పరిశీలనలో ఉంది',
+                            'ఆమోదం కోసం వేచి ఉంది',
                             style: TextStyle(
                               color: Colors.orange,
                               fontWeight: FontWeight.w700,
@@ -682,6 +716,7 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                     const SizedBox(height: 6),
                     Text(
                       priceText ?? 'ధర నిర్ధారణ కోసం వేచి ఉంది',
+                      key: const Key('ad_booking_quoted_price'),
                       style: TextStyle(
                         fontSize: priceText != null ? 28 : 16,
                         fontWeight: FontWeight.w900,
@@ -691,15 +726,18 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                       ),
                     ),
                     const Divider(height: 28),
-                    _buildDetailRow('రిఫరెన్స్ ఐడీ',
-                        '#${bookingId.length > 8 ? bookingId.substring(0, 8) : bookingId}'),
+                    _buildDetailRow('బుకింగ్ ఐడీ', bookingId,
+                        key: const Key('ad_booking_id'), copyable: true),
                     const SizedBox(height: 10),
                     _buildDetailRow(
                         'వ్యాపారం', _businessController.text.trim()),
                     const SizedBox(height: 10),
                     _buildDetailRow('ప్రకటన పరిధి', areaName),
                     const SizedBox(height: 10),
-                    _buildDetailRow('కాలపరిమితి', pkg?.durationLabel ?? '-'),
+                    _buildDetailRow('ప్రకటన రకం', format),
+                    const SizedBox(height: 10),
+                    _buildDetailRow(
+                        'కాలపరిమితి', days != null ? '$days రోజులు' : '-'),
                     const SizedBox(height: 10),
                     _buildDetailRow(
                         'సంప్రదింపు నంబర్', _phoneController.text.trim()),
@@ -707,26 +745,30 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 ),
               ),
               const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.chat_bubble_rounded, size: 22),
-                  label: const Text(
-                    'WhatsApp లో చాట్ చేయండి',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              if (whatsappUrl.isNotEmpty) ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    key: const Key('ad_booking_whatsapp'),
+                    icon: const Icon(Icons.chat_bubble_rounded, size: 22),
+                    label: const Text(
+                      'WhatsApp లో కొనసాగించండి',
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 2,
+                    ),
+                    onPressed: () => _launchWhatsApp(whatsappUrl),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    elevation: 2,
-                  ),
-                  onPressed: () => _launchWhatsApp(whatsappUrl),
                 ),
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 14),
+              ],
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -749,17 +791,32 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     );
   }
 
-  Widget _buildDetailRow(String title, String value) {
+  Widget _buildDetailRow(String title, String value,
+      {Key? key, bool copyable = false}) {
     return Row(
+      key: key,
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(title, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+        const SizedBox(width: 12),
         Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            overflow: TextOverflow.ellipsis,
+          child: GestureDetector(
+            onLongPress: copyable
+                ? () {
+                    Clipboard.setData(ClipboardData(text: value));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      behavior: SnackBarBehavior.floating,
+                      content: Text('బుకింగ్ ఐడీ కాపీ చేయబడింది'),
+                    ));
+                  }
+                : null,
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+              maxLines: copyable ? 2 : 1,
+            ),
           ),
         ),
       ],
@@ -769,10 +826,13 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
   InputDecoration _fieldDecoration(bool isDark,
           {required String label,
           required String hint,
-          required IconData icon}) =>
+          required IconData icon,
+          String? errorText}) =>
       InputDecoration(
         labelText: label,
         hintText: hint,
+        errorText: errorText,
+        errorMaxLines: 3,
         prefixIcon: Icon(icon),
         filled: true,
         fillColor: isDark
@@ -781,6 +841,12 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none),
+      );
+
+  Widget _stepTitle(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(text,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
       );
 
   @override
@@ -794,6 +860,9 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
     final catalog = _catalog;
     final hasPackages = catalog != null && !catalog.isEmpty;
     final selected = _selected;
+    final error = _error;
+    var step = 0;
+    String next(String title) => '${++step}. $title';
 
     return Scaffold(
       appBar: AppBar(
@@ -813,13 +882,13 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'మీ బ్రాండ్‌ను నేరుగా స్థానిక మరియు రాష్ట్రవ్యాప్త పాఠకులకు చేరవేయడానికి వారధిలో ప్రకటనలు ఇవ్వండి.',
+                'మీ బ్రాండ్‌ను నేరుగా స్థానిక, రాష్ట్ర మరియు అన్ని ప్రాంతాల పాఠకులకు చేరవేయడానికి వారధిలో ప్రకటనలు ఇవ్వండి.',
                 style: TextStyle(
                     color: isDark ? Colors.white60 : Colors.black54,
                     fontSize: 14),
               ),
               const SizedBox(height: 24),
-              if (_loading)
+              if (_loading && catalog == null)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: Row(
@@ -839,25 +908,37 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
               else if (!hasPackages)
                 _buildUnavailable(isDark)
               else ...[
-                // 1. Main vs Local
-                const Text(
-                  '1. ప్రకటన స్థానాన్ని ఎంచుకోండి',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-                const SizedBox(height: 10),
-                _buildAdTypeSelector(isDark),
+                // Coverage: global / state / local
+                _stepTitle(next('ప్రకటన పరిధిని ఎంచుకోండి')),
+                _buildScopeSelector(catalog, isDark),
+                if (_fieldError('scope') != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, left: 4),
+                    child: Text(_fieldError('scope')!,
+                        style: const TextStyle(
+                            color: Colors.redAccent, fontSize: 12)),
+                  ),
                 const SizedBox(height: 20),
 
-                // 2. Package (area + duration + price)
-                Text(
-                  _adType == 'local'
-                      ? '2. ప్రాంతం & ప్యాకేజీని ఎంచుకోండి'
-                      : '2. ప్యాకేజీని ఎంచుకోండి',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-                const SizedBox(height: 10),
-                _buildPackages(isDark),
+                // Ad format
+                if (catalog.formats.isNotEmpty) ...[
+                  _stepTitle(next('ప్రకటన రకాన్ని ఎంచుకోండి')),
+                  _buildFormatDropdown(catalog, isDark),
+                  const SizedBox(height: 20),
+                ],
+
+                // Area — state or local only
+                if (_scope != AdScope.global) ...[
+                  _stepTitle(next(_scope == AdScope.state
+                      ? 'రాష్ట్రాన్ని ఎంచుకోండి'
+                      : 'ప్రాంతాన్ని ఎంచుకోండి')),
+                  _buildAreaDropdown(catalog, isDark),
+                  const SizedBox(height: 20),
+                ],
+
+                // Duration & price of the chosen area
+                _stepTitle(next('కాలపరిమితి & ధర')),
+                _buildPackages(catalog, isDark),
                 const SizedBox(height: 12),
 
                 // Selected package summary
@@ -872,7 +953,6 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                         color: AppColors.primary.withValues(alpha: 0.25)),
                   ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Column(
@@ -884,8 +964,16 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                             const SizedBox(height: 2),
                             Text(
                               selected == null
-                                  ? 'పైన ఒక ప్యాకేజీని ఎంచుకోండి'
-                                  : '${selected.adType == 'local' ? (selected.areaName ?? catalog.areaNames[selected.areaId] ?? '') : 'రాష్ట్రవ్యాప్తంగా'} · ${selected.durationLabel}',
+                                  ? 'పైన కాలపరిమితిని ఎంచుకోండి'
+                                  : [
+                                      selected.needsArea
+                                          ? _areaName(
+                                              catalog, selected.areaId ?? '')
+                                          : scopeTitle(AdScope.global),
+                                      if (_format != null)
+                                        _formatLabel(_format),
+                                      selected.durationLabel,
+                                    ].join(' · '),
                               style: const TextStyle(
                                   color: Colors.grey, fontSize: 12),
                             ),
@@ -905,55 +993,41 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // 3. Advertiser details
-                const Text(
-                  '3. ప్రకటనదారు వివరాలు',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                ),
-                const SizedBox(height: 12),
+                // Advertiser details
+                _stepTitle(next('ప్రకటనదారు వివరాలు')),
                 TextFormField(
                   controller: _businessController,
                   decoration: _fieldDecoration(isDark,
-                      label: 'వ్యాపారం / బ్రాండ్ పేరు',
+                      label: 'వ్యాపారం / బ్రాండ్ పేరు (ఐచ్ఛికం)',
                       hint: 'ఉదా. రవి మొబైల్స్',
-                      icon: Icons.storefront_rounded),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'మీ వ్యాపారం పేరు నమోదు చేయండి';
-                    }
-                    if (v.trim().length < 2) {
-                      return 'సరైన వ్యాపారం పేరు నమోదు చేయండి';
-                    }
-                    return null;
-                  },
+                      icon: Icons.storefront_rounded,
+                      errorText: _fieldError('business_name')),
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _nameController,
                   decoration: _fieldDecoration(isDark,
-                      label: 'సంప్రదించవలసిన వ్యక్తి పేరు',
+                      label: 'మీ పేరు *',
                       hint: 'ఉదా. రమేష్',
-                      icon: Icons.person_outline_rounded),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'సంప్రదించవలసిన వ్యక్తి పేరు నమోదు చేయండి';
-                    }
-                    return null;
-                  },
+                      icon: Icons.person_outline_rounded,
+                      errorText: _fieldError('advertiser_name')),
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'మీ పేరు నమోదు చేయండి'
+                      : null,
                 ),
                 const SizedBox(height: 14),
                 TextFormField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
                   decoration: _fieldDecoration(isDark,
-                      label: 'ఫోన్ / WhatsApp నంబర్',
+                      label: 'ఫోన్ / WhatsApp నంబర్ *',
                       hint: 'ఉదా. 9876543210',
-                      icon: Icons.phone_outlined),
+                      icon: Icons.phone_outlined,
+                      errorText: _fieldError('phone')),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'ఫోన్ నంబర్ నమోదు చేయండి';
-                    }
-                    if (v.trim().length < 10) {
+                    final t = v?.trim() ?? '';
+                    if (t.isEmpty) return 'ఫోన్ నంబర్ నమోదు చేయండి';
+                    if (t.replaceAll(RegExp(r'\D'), '').length < 10) {
                       return 'సరైన 10 అంకెల ఫోన్ నంబర్ నమోదు చేయండి';
                     }
                     return null;
@@ -966,12 +1040,14 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                   decoration: _fieldDecoration(isDark,
                       label: 'ప్రత్యేక వివరాలు / సూచనలు (ఐచ్ఛికం)',
                       hint: 'ఉదా. పండుగ ప్రత్యేక బ్యానర్',
-                      icon: Icons.notes_rounded),
+                      icon: Icons.notes_rounded,
+                      errorText: _fieldError('message')),
                 ),
                 const SizedBox(height: 16),
 
-                if (_error != null)
+                if (error != null)
                   Container(
+                    key: const Key('ad_booking_error'),
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
@@ -986,10 +1062,16 @@ class _AdBookingScreenState extends State<AdBookingScreen> {
                             color: Colors.redAccent, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(_error!,
+                          child: Text(error.message,
                               style: const TextStyle(
                                   color: Colors.redAccent, fontSize: 13)),
                         ),
+                        if (error.retryable)
+                          TextButton(
+                            key: const Key('ad_booking_retry'),
+                            onPressed: _isSubmitting ? null : _submitBooking,
+                            child: const Text('మళ్లీ'),
+                          ),
                       ],
                     ),
                   ),

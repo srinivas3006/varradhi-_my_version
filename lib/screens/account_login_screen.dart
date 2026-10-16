@@ -392,8 +392,7 @@ class _AccountLoginScreenState extends State<AccountLoginScreen> {
                           child: Text(
                             'మీ సమాచారం సురక్షితంగా ఉంటుంది',
                             textAlign: TextAlign.center,
-                            style:
-                                TextStyle(color: mutedColor, fontSize: 12.5),
+                            style: TextStyle(color: mutedColor, fontSize: 12.5),
                           ),
                         ),
                       ],

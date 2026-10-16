@@ -29,7 +29,8 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
@@ -55,7 +56,9 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           boxShadow: [
             BoxShadow(
@@ -72,7 +75,7 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-              AdBadge.positioned(),
+                AdBadge.positioned(),
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
                   fit: BoxFit.cover,
@@ -93,7 +96,6 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
                     return const SizedBox.shrink();
                   },
                 ),
-
               ],
             ),
           ),

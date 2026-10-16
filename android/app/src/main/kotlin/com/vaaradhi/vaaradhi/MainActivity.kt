@@ -8,9 +8,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var deepLinkChannel: MethodChannel? = null
     private var initialLinkConsumed = false
+    private var watermarkChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        registerWatermark(flutterEngine)
         deepLinkChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             DEEP_LINK_CHANNEL,
@@ -20,6 +22,29 @@ class MainActivity : FlutterActivity() {
                     val initialLink = if (initialLinkConsumed) null else intent?.dataString
                     initialLinkConsumed = true
                     result.success(initialLink)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        }
+    }
+
+    private fun registerWatermark(flutterEngine: FlutterEngine) {
+        val watermarker = VideoWatermarker(applicationContext)
+        watermarkChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            WATERMARK_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "watermark") {
+                    val input = call.argument<String>("input")
+                    val output = call.argument<String>("output")
+                    val label = call.argument<String>("label") ?: "Vaaradhi"
+                    if (input == null || output == null) {
+                        result.error("bad_args", "input and output are required", null)
+                    } else {
+                        watermarker.handle(input, output, label, result)
+                    }
                 } else {
                     result.notImplemented()
                 }
@@ -39,10 +64,13 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         deepLinkChannel?.setMethodCallHandler(null)
         deepLinkChannel = null
+        watermarkChannel?.setMethodCallHandler(null)
+        watermarkChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
     companion object {
         private const val DEEP_LINK_CHANNEL = "com.vaaradhi.vaaradhi/deep_links"
+        private const val WATERMARK_CHANNEL = "com.vaaradhi.vaaradhi/video_watermark"
     }
 }

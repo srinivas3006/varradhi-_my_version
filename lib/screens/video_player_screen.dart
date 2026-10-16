@@ -4,6 +4,8 @@ import '../core/media/media_resolver.dart';
 import '../core/media/media_source.dart';
 import '../core/media/video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
+import '../models/news_article.dart';
+import '../services/content_analytics.dart';
 
 /// Screen 12: VideoPlayerScreen
 /// Fullscreen or standalone video player for news video or short.
@@ -12,11 +14,16 @@ class VideoPlayerScreen extends StatefulWidget {
   final String? title;
   final String? thumbnailUrl;
 
+  /// The story the video belongs to, for analytics (video_start /
+  /// video_progress / video_complete). None for the Home videos rail.
+  final NewsArticle? story;
+
   const VideoPlayerScreen({
     super.key,
     required this.videoUrl,
     this.title,
     this.thumbnailUrl,
+    this.story,
   });
 
   @override
@@ -26,6 +33,7 @@ class VideoPlayerScreen extends StatefulWidget {
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   VideoPlaybackController? _controller;
   bool _isMuted = false;
+  VideoWatchTracker? _watch;
 
   @override
   void initState() {
@@ -56,6 +64,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       }
       setState(() {
         _controller = ctrl;
+        final story = widget.story;
+        if (story != null) {
+          _watch = VideoWatchTracker(story, ctrl,
+              source: source.isYouTube ? 'youtube' : 's3');
+        }
       });
     } catch (e) {
       debugPrint('[VideoPlayerScreen] Playback init error: $e');
@@ -76,6 +89,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _watch?.dispose();
     _controller?.pause();
     _controller?.dispose();
     super.dispose();

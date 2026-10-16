@@ -30,7 +30,8 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
@@ -57,7 +58,9 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
           borderRadius: BorderRadius.circular(12),
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           boxShadow: [
             BoxShadow(
@@ -68,7 +71,8 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
           ],
         ),
         child: AspectRatio(
-          aspectRatio: 16 / 5, // Fixed 16:5 aspect ratio per spec (height ~90-120dp)
+          aspectRatio:
+              16 / 5, // Fixed 16:5 aspect ratio per spec (height ~90-120dp)
           child: InkWell(
             onTap: _handleTap,
             child: Stack(
@@ -76,7 +80,8 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
               children: [
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
-                  fit: BoxFit.cover, // Keep image BoxFit.cover inside fixed aspect ratio
+                  fit: BoxFit
+                      .cover, // Keep image BoxFit.cover inside fixed aspect ratio
                   placeholder: (context, url) => Container(
                     color: isDark ? Colors.white10 : AppColors.chipBg,
                     child: const Center(
@@ -95,7 +100,6 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
                     return const SizedBox.shrink();
                   },
                 ),
-
                 AdBadge.positioned(),
               ],
             ),

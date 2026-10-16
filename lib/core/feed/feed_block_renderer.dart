@@ -6,6 +6,7 @@ import '../../theme/article_typography.dart';
 import '../../widgets/ads/unified_ad_widget.dart';
 import '../../widgets/feed/daily_greeting_widget.dart';
 import '../../widgets/poll_card.dart';
+import '../../services/poll_exposure.dart';
 import 'feed_block.dart';
 
 /// Callbacks required by the feed block renderer.
@@ -69,9 +70,13 @@ class FeedBlockRenderer {
         );
 
       case FeedBlockType.poll:
+        // Same frequency cap as Home and Spotlight.
+        if (!PollExposure.instance.shouldShow((block as PollBlock).poll)) {
+          return const SizedBox.shrink();
+        }
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: PollCard(poll: (block as PollBlock).poll),
+          child: PollCard(poll: block.poll),
         );
 
       case FeedBlockType.postersStrip:

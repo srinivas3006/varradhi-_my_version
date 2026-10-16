@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
@@ -7,10 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:dio/dio.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
 import '../models/news_article.dart';
+import '../services/analytics_queue.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/article_typography.dart';
 
@@ -53,14 +56,17 @@ class ShareService {
     return '$webBaseUrl/$route/${Uri.encodeComponent(identifier)}/';
   }
 
-  /// Builds clean, professional share text with title, web article link, and app download link.
+  /// Share text: the headline and one link — the story on vaaradhinews.com.
+  ///
+  /// That single link does both jobs: with the app installed, Android App
+  /// Links open the story straight in the app; without it, the site's share
+  /// page sends the reader to the Play Store. A second, Play Store link only
+  /// cluttered the message.
   static String buildShareText(NewsArticle article) {
     final webUrl = buildWebArticleUrl(article);
     return '📰 ${article.title.trim()}\n\n'
-        '🔗 కథనం లింక్:\n'
-        '$webUrl\n\n'
-        '📲 వారధి యాప్ డౌన్‌లోడ్ చేసుకోండి:\n'
-        '$appDownloadUrl';
+        '🔗 వారధిలో చదవండి:\n'
+        '$webUrl';
   }
 
   /// Pre-fetches the image bytes into memory so `Image.memory` paints synchronously
@@ -123,7 +129,8 @@ class ShareService {
   static Future<void> shareArticle(NewsArticle article,
       {NewsArticle? fallback, VoidCallback? onReady}) async {
     if (_isSharing) {
-      debugPrint('ShareService: share already in progress, ignoring duplicate tap');
+      debugPrint(
+          'ShareService: share already in progress, ignoring duplicate tap');
       return;
     }
     _isSharing = true;
@@ -135,19 +142,34 @@ class ShareService {
       // share sheet opens.
       onReady?.call();
 
+      final ShareResult result;
       if (file != null) {
-        await Share.shareXFiles(
+        result = await Share.shareXFiles(
           [XFile(file.path, mimeType: 'image/jpeg')],
           text: shareText,
         );
       } else {
-        await Share.share(shareText);
+        result = await Share.share(shareText);
       }
+      trackShare(article, result);
     } catch (e) {
       debugPrint('Error sharing article: $e');
     } finally {
       _isSharing = false;
     }
+  }
+
+  /// Analytics `share`, unless the reader closed the sheet without sharing.
+  /// The channel is the app chosen when Android reports it.
+  @visibleForTesting
+  static void trackShare(NewsArticle article, ShareResult result) {
+    if (result.status == ShareResultStatus.dismissed) return;
+    final raw = result.raw.trim();
+    final channel = raw.isEmpty || raw.startsWith('dev.fluttercommunity')
+        ? 'share_sheet'
+        : (raw.toLowerCase().contains('whatsapp') ? 'whatsapp' : raw);
+    unawaited(AnalyticsQueue.instance
+        .trackContent('share', article, metadata: {'channel': channel}));
   }
 
   /// Whether a shareable/downloadable poster can be built for [article].
@@ -176,6 +198,34 @@ class ShareService {
     final cacheKey = _cardCacheKey(article, forDownload);
     final ready = _madeCards[cacheKey];
     if (ready != null && await ready.exists()) return ready;
+    // Already being made (e.g. prepared in the background): wait for it.
+    final making = _makingCards[cacheKey];
+    if (making != null) return making;
+    final future = _makeArticleImage(article, cacheKey, fallback, forDownload);
+    _makingCards[cacheKey] = future;
+    try {
+      return await future;
+    } finally {
+      _makingCards.remove(cacheKey);
+    }
+  }
+
+  static final Map<String, Future<File?>> _makingCards = {};
+
+  /// Whether the share image for [article] is already made, so Share can
+  /// open the share sheet at once.
+  static bool isShareReady(NewsArticle article) =>
+      _madeCards.containsKey(_cardCacheKey(article, false));
+
+  /// Makes the share image in the background while the reader is on the
+  /// story, so tapping Share opens the share sheet immediately.
+  static Future<void> prepareShare(NewsArticle article) async {
+    if (isShareReady(article)) return;
+    await generateArticleImage(article);
+  }
+
+  static Future<File?> _makeArticleImage(NewsArticle article, String cacheKey,
+      NewsArticle? fallback, bool forDownload) async {
     try {
       final candidates = <String>{
         ..._imageCandidates(article),
@@ -215,14 +265,14 @@ class ShareService {
         summary: forDownload ? shareSummary(source) : '',
         portrait: forDownload,
       );
-      final card = await _captureNewsCard(cardWidget,
-          width: cardWidget.cardWidth);
+      final card =
+          await _captureNewsCard(cardWidget, width: cardWidget.cardWidth);
       if (card == null) return _buildWatermarkOnlyFile(article);
 
       final dir = await getTemporaryDirectory();
       final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final file = File(
-          '${dir.path}/vaaradhi_$safeId${forDownload ? '_dl' : ''}.jpg');
+      final file =
+          File('${dir.path}/vaaradhi_$safeId${forDownload ? '_dl' : ''}.jpg');
       await file.writeAsBytes(card);
       _madeCards[cacheKey] = file;
       return file;
@@ -273,8 +323,18 @@ class ShareService {
   @visibleForTesting
   static String shareMeta(NewsArticle a) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     final d = a.publishedAt.toLocal();
     final date = d.year > 2000
@@ -304,8 +364,7 @@ class ShareService {
         ),
         pixelRatio: 1,
         delay: const Duration(milliseconds: 150),
-        constraints: BoxConstraints(
-            minWidth: width, maxWidth: width),
+        constraints: BoxConstraints(minWidth: width, maxWidth: width),
       );
       // PNG → JPEG is the slowest step for a 1600 px card: done on a
       // background isolate so the screen never freezes while it runs.
@@ -338,8 +397,7 @@ class ShareService {
   static Future<File?> _composeBranded(ui.Image image, String fileName) async {
     try {
       // 2. Banner decoding
-      final bannerByteData =
-          await rootBundle.load(WatermarkBanner.asset);
+      final bannerByteData = await rootBundle.load(WatermarkBanner.asset);
       final bannerBytes = bannerByteData.buffer.asUint8List();
       final ui.Image banner = await decodeImageFromList(bannerBytes);
 
@@ -388,8 +446,8 @@ class ShareService {
       // Draw the cropped strip below the photo.
       final bannerSrcRect =
           Rect.fromLTWH(0, srcTop, banner.width.toDouble(), srcHeight);
-      final bannerDstRect = Rect.fromLTWH(
-          0, bannerTop, targetWidth.toDouble(), bannerHeight);
+      final bannerDstRect =
+          Rect.fromLTWH(0, bannerTop, targetWidth.toDouble(), bannerHeight);
       canvas.drawImageRect(banner, bannerSrcRect, bannerDstRect, paint);
 
       final picture = recorder.endRecording();
@@ -480,8 +538,7 @@ class ShareService {
 
       final dir = await getTemporaryDirectory();
       final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final file =
-          await File('${dir.path}/vaaradhi_card_$safeId.png').create();
+      final file = await File('${dir.path}/vaaradhi_card_$safeId.png').create();
       await file.writeAsBytes(bytes);
       return file;
     } catch (e) {
@@ -536,7 +593,8 @@ class ShareService {
         await put(album: 'Vaaradhi');
         return downloadSaved;
       } catch (albumError) {
-        debugPrint('ShareService: Album save error ($albumError), retrying root gallery...');
+        debugPrint(
+            'ShareService: Album save error ($albumError), retrying root gallery...');
         try {
           await put();
           return downloadSaved;
@@ -587,6 +645,72 @@ class ShareService {
     }
   }
 
+  // --- Video download --------------------------------------------------------
+
+  static const MethodChannel _watermarkChannel =
+      MethodChannel('com.vaaradhi.vaaradhi/video_watermark');
+
+  /// The story's video as a file that can be downloaded, or null: YouTube
+  /// videos (their terms forbid it) and streams (HLS / DASH) are not.
+  static String? downloadableVideoUrl(NewsArticle article) {
+    if (!article.isVideo) return null;
+    final url = UrlNormalizer.normalize(article.effectiveVideoUrl);
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return null;
+    }
+    final host = uri.host.toLowerCase();
+    if (host.contains('youtube.com') || host.contains('youtu.be')) return null;
+    final path = uri.path.toLowerCase();
+    if (path.endsWith('.m3u8') || path.endsWith('.mpd')) return null;
+    return url;
+  }
+
+  /// Downloads the story's video, stamps the Vaaradhi logo on it (on the
+  /// phone, Android Media3) and saves it to the gallery. An unbranded video
+  /// is never saved: if the logo cannot be added, the download fails.
+  /// [onProgress] gets 0–1 while the file downloads, then null while the
+  /// logo is added.
+  static Future<int> downloadVideo(NewsArticle article,
+      {void Function(double? progress)? onProgress}) async {
+    final url = downloadableVideoUrl(article);
+    if (url == null || !Platform.isAndroid) return downloadFailed;
+    if (_isSharing) return downloadFailed;
+    _isSharing = true;
+    final dir = await getTemporaryDirectory();
+    final safeId = article.id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final source = File('${dir.path}/vaaradhi_src_${safeId}_$stamp.mp4');
+    final branded = File('${dir.path}/Vaaradhi_${safeId}_$stamp.mp4');
+    try {
+      await Dio().download(
+        url,
+        source.path,
+        onReceiveProgress: (got, total) {
+          if (total > 0) onProgress?.call(got / total);
+        },
+      );
+      onProgress?.call(null);
+      final out = await _watermarkChannel.invokeMethod<String>('watermark', {
+        'input': source.path,
+        'output': branded.path,
+        'label': 'వారధి',
+      });
+      if (out == null || !await File(out).exists()) return downloadFailed;
+      return await saveFileToGallery(out, isVideo: true);
+    } catch (e) {
+      debugPrint('[ShareService] video download failed: $e');
+      return downloadFailed;
+    } finally {
+      _isSharing = false;
+      for (final f in [source, branded]) {
+        try {
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }
+    }
+  }
+
   /// Shares plain text or deep links via native share sheet.
   static Future<void> shareText(String text, {String? subject}) async {
     try {
@@ -596,4 +720,3 @@ class ShareService {
     }
   }
 }
-

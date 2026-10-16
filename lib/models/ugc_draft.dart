@@ -150,7 +150,8 @@ class UgcDraft {
       subdistrict: json['subdistrict']?.toString(),
       locationEdited: json['locationEdited'] == true,
       mobile: json['mobile']?.toString(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 

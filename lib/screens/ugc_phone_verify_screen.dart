@@ -173,12 +173,12 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
                 if (_c.busy == UgcVerifyBusy.checkingExisting)
                   _checkingExisting()
                 else
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _c.step == UgcVerifyStep.enterCode
-                      ? _codeStep(isDark)
-                      : _phoneStep(isDark),
-                ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: _c.step == UgcVerifyStep.enterCode
+                        ? _codeStep(isDark)
+                        : _phoneStep(isDark),
+                  ),
                 if (_c.errorMessage != null) ...[
                   const SizedBox(height: 16),
                   _banner(_c.errorMessage!, Icons.error_outline_rounded,
@@ -288,7 +288,8 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
         ),
         if (_c.mode == UgcVerifyMode.backendSms) ...[
           const SizedBox(height: 8),
-          Text(_t('OTP SMS ద్వారా పంపబడుతుంది.', 'The OTP will be sent by SMS.'),
+          Text(
+              _t('OTP SMS ద్వారా పంపబడుతుంది.', 'The OTP will be sent by SMS.'),
               style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
         ],
         const SizedBox(height: 20),
@@ -297,9 +298,8 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
           label: _t('OTP పంపండి', 'Send OTP'),
           busy: sending,
           busyLabel: _t('OTP పంపుతోంది…', 'Sending OTP…'),
-          onPressed: IndianMobile.isValid(_c.mobile) && !_c.isBusy
-              ? _sendCode
-              : null,
+          onPressed:
+              IndianMobile.isValid(_c.mobile) && !_c.isBusy ? _sendCode : null,
         ),
       ],
     );

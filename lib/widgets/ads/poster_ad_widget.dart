@@ -29,7 +29,8 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
@@ -55,7 +56,9 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           boxShadow: [
             BoxShadow(
@@ -72,7 +75,7 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-              AdBadge.positioned(),
+                AdBadge.positioned(),
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
                   fit: BoxFit.cover,
@@ -120,7 +123,8 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
                     bottom: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
                           colors: [AppColors.primary, Color(0xFFFF5722)],
@@ -146,7 +150,8 @@ class _PosterAdWidgetState extends State<PosterAdWidget> {
                             ),
                           ),
                           SizedBox(width: 4),
-                          Icon(Icons.arrow_forward_rounded, size: 12, color: Colors.white),
+                          Icon(Icons.arrow_forward_rounded,
+                              size: 12, color: Colors.white),
                         ],
                       ),
                     ),

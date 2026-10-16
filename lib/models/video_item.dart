@@ -56,7 +56,8 @@ class VideoItem {
       final int m = durationSecs ~/ 60;
       final int s = durationSecs % 60;
       durationStr = '$m:${s.toString().padLeft(2, '0')}';
-    } else if (json['duration'] != null && json['duration'].toString().isNotEmpty) {
+    } else if (json['duration'] != null &&
+        json['duration'].toString().isNotEmpty) {
       durationStr = json['duration'].toString();
     }
 
@@ -73,7 +74,8 @@ class VideoItem {
     }
 
     // 3. Normalize thumbnail
-    String rawThumb = (json['thumbnail_url'] ?? json['image_url'] ?? '').toString();
+    String rawThumb =
+        (json['thumbnail_url'] ?? json['image_url'] ?? '').toString();
     if (rawThumb.isEmpty && resolvedYtId != null && resolvedYtId.isNotEmpty) {
       rawThumb = 'https://i.ytimg.com/vi/$resolvedYtId/hqdefault.jpg';
     }
@@ -101,7 +103,9 @@ class VideoItem {
       durationSeconds: durationSecs,
       duration: durationStr,
       viewsCount: viewsCnt,
-      views: viewsCnt > 0 ? viewsCnt.toString() : (json['views']?.toString() ?? '0'),
+      views: viewsCnt > 0
+          ? viewsCnt.toString()
+          : (json['views']?.toString() ?? '0'),
       likesCount: likesCnt,
       likes: likesCnt,
       isLiked: json['is_liked_by_user'] == true || json['is_liked'] == true,

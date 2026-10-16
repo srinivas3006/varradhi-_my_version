@@ -40,7 +40,8 @@ class _NativeAdCardState extends State<NativeAdCard> {
   Future<void> _handleTap() async {
     if (widget.ad == null) return;
     HapticFeedback.selectionClick();
-    AdManager.instance.recordClick(widget.ad!, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad!, placementZone: widget.placementZone);
 
     if (widget.ad!.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad!.destinationUrl);
@@ -49,7 +50,6 @@ class _NativeAdCardState extends State<NativeAdCard> {
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +128,9 @@ class _NativeAdCardState extends State<NativeAdCard> {
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           boxShadow: [
             BoxShadow(
@@ -155,12 +157,14 @@ class _NativeAdCardState extends State<NativeAdCard> {
                       fit: BoxFit.cover,
                       placeholder: (context, url) => Container(
                         color: isDark ? Colors.white10 : AppColors.chipBg,
-                        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2)),
                       ),
                       errorWidget: (context, url, error) => Container(
                         color: isDark ? Colors.white10 : AppColors.chipBg,
                         child: const Center(
-                          child: Icon(Icons.campaign_rounded, size: 48, color: AppColors.textMuted),
+                          child: Icon(Icons.campaign_rounded,
+                              size: 48, color: AppColors.textMuted),
                         ),
                       ),
                     ),
@@ -190,16 +194,19 @@ class _NativeAdCardState extends State<NativeAdCard> {
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.65),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.white24, width: 0.8),
+                              border:
+                                  Border.all(color: Colors.white24, width: 0.8),
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.campaign_rounded, color: Colors.amber, size: 14),
+                                Icon(Icons.campaign_rounded,
+                                    color: Colors.amber, size: 14),
                                 SizedBox(width: 5),
                                 Text(
                                   'SPONSORED',

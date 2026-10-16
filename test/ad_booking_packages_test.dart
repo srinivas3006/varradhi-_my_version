@@ -1,29 +1,52 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/models/ad_package.dart';
 import 'package:vaaradhi/screens/ad_booking_screen.dart';
 
-const _areas = [
-  {'id': 'kar', 'name': 'Karimnagar Local Area'},
-  {'id': 'vik', 'name': 'Vikarabad'},
-];
-
-/// Only what the backend prices: Vikarabad 7 days and 45 days, and one
-/// state-wide package. Karimnagar has none.
+/// GET /api/v1/ads/pricing/options/ as the backend handover describes it.
 const _options = {
-  'main': [
-    {'duration_days': 10, 'price': '9000.00', 'currency': 'INR'},
-  ],
-  'local': [
-    {
-      'area': {'id': 'vik', 'name': 'Vikarabad'},
-      'options': [
-        {'duration_days': 45, 'price': '6000.00', 'currency': 'INR'},
-        {'duration_days': 7, 'price': '1500.00', 'currency': 'INR'},
-      ],
-    },
-    {'area': {'id': 'kar', 'name': 'Karimnagar Local Area'}, 'options': []},
+  'coverage_options': {
+    'global': [
+      {'duration_days': 7, 'price': '5000.00', 'currency': 'INR'},
+    ],
+    'state': [
+      {
+        'area': {
+          'id': 'ap',
+          'name': 'Andhra Pradesh',
+          'coverage_level': 'state',
+        },
+        'options': [
+          {'duration_days': 7, 'price': '2500.00', 'currency': 'INR'},
+        ],
+      },
+    ],
+    'local': [
+      {
+        'area': {
+          'id': 'vik',
+          'name': 'Vikarabad',
+          'coverage_level': 'district',
+        },
+        'options': [
+          {'duration_days': 15, 'price': '1500.00', 'currency': 'INR'},
+          {'duration_days': 7, 'price': '1000.00', 'currency': 'INR'},
+        ],
+      },
+      {
+        'area': {'id': 'kar', 'name': 'Karimnagar'},
+        'options': [
+          {'duration_days': 30, 'price': '3000.00', 'currency': 'INR'},
+        ],
+      },
+    ],
+  },
+  'ad_formats': [
+    {'value': 'banner', 'label': 'Banner'},
+    {'value': 'video', 'label': 'Video'},
+    {'value': 'poster', 'label': 'Poster'},
   ],
 };
 
@@ -31,38 +54,69 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('catalog comes only from the backend', () {
-    test('grouped reply: areas with packages, durations sorted', () {
-      final c = AdPricingCatalog.parse(_options, areas: _areas);
+    test('coverage_options: global, state and local, durations sorted', () {
+      final c = AdPricingCatalog.parse(_options);
+      expect(c.global.single.priceLabel, '₹5000');
+      expect(c.stateByArea.keys, ['ap']);
+      expect(c.stateByArea['ap']!.single.priceLabel, '₹2500');
+      expect(c.localByArea.keys, ['vik', 'kar']);
+      expect(c.localByArea['vik']!.map((p) => p.durationDays), [7, 15]);
+      expect(c.areaNames['vik'], 'Vikarabad');
+      expect(c.formats.map((f) => f.value), ['banner', 'video', 'poster']);
+      expect(c.formats.first.label, 'Banner');
+    });
+
+    test('the older main/local reply still reads (main = global)', () {
+      final c = AdPricingCatalog.parse({
+        'main': [
+          {'duration_days': 10, 'price': '9000.00', 'currency': 'INR'}
+        ],
+        'local': [
+          {
+            'area': {'id': 'vik', 'name': 'Vikarabad'},
+            'options': [
+              {'duration_days': 7, 'price': '1500.00', 'currency': 'INR'}
+            ]
+          },
+          {
+            'area': {'id': 'kar', 'name': 'Karimnagar'},
+            'options': []
+          },
+        ],
+      });
+      expect(c.global.single.durationDays, 10);
       expect(c.localByArea.keys, ['vik'], reason: 'Karimnagar has no price');
-      expect(c.localByArea['vik']!.map((p) => p.durationDays), [7, 45]);
-      expect(c.main.single.durationDays, 10);
-      expect(c.localByArea['vik']!.first.priceLabel, '₹1500');
+      expect(c.stateByArea, isEmpty);
     });
 
     test('flat rows are read too', () {
       final c = AdPricingCatalog.parse([
         {
-          'ad_type': 'local',
-          'area_id': 'vik',
+          'scope': 'state',
+          'area_id': 'ap',
           'duration_days': 7,
-          'price': '1500.00',
-          'currency': 'INR'
+          'price': '2500.00',
         },
-        {'ad_type': 'main', 'duration_days': 30, 'price': 20000, 'currency': 'INR'},
+        {'ad_type': 'main', 'duration_days': 30, 'price': 20000},
         {'ad_type': 'local', 'area_id': 'vik', 'duration_days': 0, 'price': 1},
-      ], areas: _areas);
-      expect(c.localByArea['vik']!.single.durationDays, 7);
-      expect(c.main.single.priceLabel, '₹20000');
+      ]);
+      expect(c.stateByArea['ap']!.single.durationDays, 7);
+      expect(c.global.single.priceLabel, '₹20000');
+      expect(c.localByArea, isEmpty);
     });
 
     test('nothing priced / endpoint missing → empty', () {
       expect(AdPricingCatalog.parse(null).isEmpty, isTrue);
-      expect(AdPricingCatalog.parse({'main': [], 'local': []}).isEmpty, isTrue);
+      expect(
+          AdPricingCatalog.parse({
+            'coverage_options': {'global': [], 'state': [], 'local': []}
+          }).isEmpty,
+          isTrue);
     });
 
     test('duration hints are derived, not assumed', () {
-      AdPackage p(int d) =>
-          AdPackage(adType: 'main', durationDays: d, price: '1', currency: 'INR');
+      AdPackage p(int d) => AdPackage(
+          scope: AdScope.global, durationDays: d, price: '1', currency: 'INR');
       expect(p(7).durationHint, '1 వారం');
       expect(p(14).durationHint, '2 వారాలు');
       expect(p(30).durationHint, '1 నెల');
@@ -70,45 +124,68 @@ void main() {
     });
   });
 
-  test('the exact reply the backend sent parses as expected', () {
-    final c = AdPricingCatalog.parse({
-      'main': [
-        {'duration_days': 7, 'price': '5000.00', 'currency': 'INR'}
-      ],
-      'local': [
-        {
-          'area': {
-            'id': '49330c1f-bfee-4b2c-8204-a55f85255154',
-            'name': 'Vikarabad'
+  group('booking errors', () {
+    test('400 field messages, from the envelope or the bare body', () {
+      final a = AdBookingError.from(400, {
+        'data': null,
+        'errors': {
+          'code': 400,
+          'message': 'An error occurred.',
+          'details': {
+            'area_id': ['Select a state-level area for state bookings.']
           },
-          'options': [
-            {'duration_days': 7, 'price': '1500.00', 'currency': 'INR'}
-          ]
-        }
-      ]
+        },
+      });
+      expect(
+          a.fields['area_id'], 'Select a state-level area for state bookings.');
+      expect(a.message, 'Select a state-level area for state bookings.');
+
+      final b = AdBookingError.from(400, {
+        'duration_days': [
+          'No active pricing is available for the selected area and duration.'
+        ]
+      });
+      expect(b.fields['duration_days'], contains('No active pricing'));
     });
-    expect(c.main.single.priceLabel, '₹5000');
-    final vik = c.localByArea['49330c1f-bfee-4b2c-8204-a55f85255154']!;
-    expect(vik.single.areaName, 'Vikarabad');
-    expect(vik.single.priceLabel, '₹1500');
+
+    test('404 reloads options; 5xx and offline offer retry; 429 waits', () {
+      expect(AdBookingError.from(404, null).refreshOptions, isTrue);
+      expect(AdBookingError.from(503, null).retryable, isTrue);
+      expect(AdBookingError.from(null, null).retryable, isTrue);
+      expect(AdBookingError.from(429, null).message, contains('అభ్యర్థనలు'));
+      expect(AdBookingError.from(401, null).message, contains('లాగిన్'));
+    });
   });
 
   group('booking screen', () {
     setUp(() => SharedPreferences.setMockInitialValues({}));
 
-    Future<Map<String, dynamic>?> pumpScreen(WidgetTester tester,
-        {dynamic options = _options}) async {
-      tester.view.physicalSize = const Size(1080, 5400);
+    Future<List<Map<String, dynamic>>> pumpScreen(WidgetTester tester,
+        {dynamic options = _options,
+        Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
+            submitter}) async {
+      tester.view.physicalSize = const Size(1080, 6000);
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
-      Map<String, dynamic>? sent;
+      final sent = <Map<String, dynamic>>[];
       await tester.pumpWidget(MaterialApp(
         home: AdBookingScreen(
-          areasLoader: () async => _areas,
+          areasLoader: () async => const [],
           optionsLoader: () async => options,
           submitter: (payload) async {
-            sent = payload;
-            return {'id': 'bk-1', 'quoted_price': '1500.00', 'currency': 'INR'};
+            sent.add(payload);
+            if (submitter != null) return submitter(payload);
+            return {
+              'id': 'booking-uuid-1',
+              'status': 'pending',
+              'scope': payload['scope'],
+              'ad_format': payload['ad_format'],
+              'area': {'id': 'vik', 'name': 'Vikarabad'},
+              'duration_days': payload['duration_days'],
+              'quoted_price': '1500.00',
+              'currency': 'INR',
+              'whatsapp_url': 'https://wa.me/910000000000',
+            };
           },
         ),
       ));
@@ -116,144 +193,182 @@ void main() {
       return sent;
     }
 
-    testWidgets('no 7/14/30 of its own: only the backend packages show',
-        (tester) async {
-      await pumpScreen(tester);
-      expect(find.byKey(const Key('ad_area_vik')), findsOneWidget);
-      expect(find.byKey(const Key('ad_area_kar')), findsNothing);
-      expect(find.byKey(const Key('ad_pkg_local_vik_7')), findsOneWidget);
-      expect(find.byKey(const Key('ad_pkg_local_vik_45')), findsOneWidget);
-      expect(find.text('14 రోజులు'), findsNothing);
-      expect(find.text('30 రోజులు'), findsNothing);
-    });
-
-    testWidgets('pick a package → its area, duration and price are booked',
-        (tester) async {
-      Map<String, dynamic>? sent;
-      tester.view.physicalSize = const Size(1080, 5400);
-      tester.view.devicePixelRatio = 3;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(MaterialApp(
-        home: AdBookingScreen(
-          areasLoader: () async => _areas,
-          optionsLoader: () async => _options,
-          submitter: (payload) async {
-            sent = payload;
-            return {'id': 'bk-1', 'quoted_price': '1500.00', 'currency': 'INR'};
-          },
-        ),
-      ));
+    Future<void> chooseFormat(WidgetTester tester, String label) async {
+      await tester.tap(find.byKey(const Key('ad_format_dropdown')));
       await tester.pumpAndSettle();
-
-      // Book is off until a package is chosen.
-      final book = find.byKey(const Key('ad_book_submit'));
-      expect(tester.widget<ElevatedButton>(book).onPressed, isNull);
-
-      await tester.tap(find.byKey(const Key('ad_pkg_local_vik_7')));
+      await tester.tap(find.text(label).last);
       await tester.pumpAndSettle();
-      expect(find.text('₹1500'), findsWidgets);
+    }
 
-      await tester.enterText(find.byType(TextFormField).at(0), 'Ravi Mobiles');
-      await tester.enterText(find.byType(TextFormField).at(1), 'Ravi');
+    Future<void> chooseArea(
+        WidgetTester tester, String scope, String name) async {
+      await tester.tap(find.byKey(Key('ad_area_dropdown_$scope')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(name).last);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> fillDetails(WidgetTester tester) async {
+      await tester.enterText(find.byType(TextFormField).at(0), 'Ganesh Stores');
+      await tester.enterText(find.byType(TextFormField).at(1), 'Ganesh');
       await tester.enterText(find.byType(TextFormField).at(2), '9876543210');
-      await tester.tap(book);
-      await tester.pumpAndSettle();
+    }
 
-      expect(sent!['ad_type'], 'local');
-      expect(sent!['area_id'], 'vik');
-      expect(sent!['duration_days'], 7);
-      expect(find.text('ప్రకటన బుకింగ్ సమర్పించబడింది!'), findsOneWidget);
-    });
-
-    testWidgets('a main booking sends area_id null', (tester) async {
-      Map<String, dynamic>? sent;
-      tester.view.physicalSize = const Size(1080, 5400);
-      tester.view.devicePixelRatio = 3;
-      addTearDown(tester.view.reset);
-      await tester.pumpWidget(MaterialApp(
-        home: AdBookingScreen(
-          areasLoader: () async => _areas,
-          optionsLoader: () async => _options,
-          submitter: (payload) async {
-            sent = payload;
-            return {'id': 'bk-2'};
-          },
-        ),
-      ));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('ad_type_main')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('ad_pkg_main_main_10')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField).at(0), 'Ravi Mobiles');
-      await tester.enterText(find.byType(TextFormField).at(1), 'Ravi');
-      await tester.enterText(find.byType(TextFormField).at(2), '9876543210');
-      await tester.tap(find.byKey(const Key('ad_book_submit')));
-      await tester.pumpAndSettle();
-      expect(sent!['ad_type'], 'main');
-      expect(sent!.containsKey('area_id'), isTrue);
-      expect(sent!['area_id'], isNull);
-      expect(sent!['duration_days'], 10);
-    });
-
-    testWidgets('several areas → pick one from the dropdown, see its prices',
+    testWidgets('local: area dropdown shows only local areas and their prices',
         (tester) async {
-      const multi = {
-        'local': [
-          {
-            'area': {'id': 'vik', 'name': 'Vikarabad'},
-            'options': [
-              {'duration_days': 7, 'price': '1500.00', 'currency': 'INR'},
-            ],
-          },
-          {
-            'area': {'id': 'kar', 'name': 'Karimnagar Local Area'},
-            'options': [
-              {'duration_days': 30, 'price': '3000.00', 'currency': 'INR'},
-              {'duration_days': 7, 'price': '1000.00', 'currency': 'INR'},
-            ],
-          },
-        ],
-      };
-      await pumpScreen(tester, options: multi);
-
-      // No long list of cards: only the dropdown until an area is chosen.
-      expect(find.byKey(const Key('ad_area_dropdown')), findsOneWidget);
-      expect(find.byKey(const Key('ad_area_vik')), findsNothing);
-      expect(find.byKey(const Key('ad_area_kar')), findsNothing);
-
-      await tester.tap(find.byKey(const Key('ad_area_dropdown')));
-      await tester.pumpAndSettle();
-      // The menu shows each area with its lowest price.
-      expect(find.text('₹1000 నుండి'), findsWidgets);
-      await tester.tap(find.text('Karimnagar Local Area').last);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('ad_area_kar')), findsOneWidget);
-      expect(find.byKey(const Key('ad_pkg_local_kar_30')), findsOneWidget);
+      final sent = await pumpScreen(tester);
+      expect(find.byKey(const Key('ad_scope_local')), findsOneWidget);
+      // Several local areas → nothing picked until the advertiser chooses.
       expect(find.byKey(const Key('ad_pkg_local_vik_7')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('ad_pkg_local_kar_30')));
+      await tester.tap(find.byKey(const Key('ad_area_dropdown_local')));
       await tester.pumpAndSettle();
-      expect(find.text('₹3000'), findsWidgets);
-
-      // Switching area drops the package picked for the other one.
-      await tester.tap(find.byKey(const Key('ad_area_dropdown')));
-      await tester.pumpAndSettle();
+      expect(find.text('Andhra Pradesh'), findsNothing,
+          reason: 'state areas are not offered under local');
       await tester.tap(find.text('Vikarabad').last);
       await tester.pumpAndSettle();
-      expect(
-          tester
-              .widget<ElevatedButton>(find.byKey(const Key('ad_book_submit')))
-              .onPressed,
-          isNull);
+
+      expect(find.byKey(const Key('ad_pkg_local_vik_7')), findsOneWidget);
+      expect(find.byKey(const Key('ad_pkg_local_vik_15')), findsOneWidget);
+      expect(find.byKey(const Key('ad_pkg_local_kar_30')), findsNothing);
+
+      await chooseFormat(tester, 'Poster');
+      await tester.tap(find.byKey(const Key('ad_pkg_local_vik_15')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+
+      final p = sent.single;
+      expect(p['scope'], 'local');
+      expect(p['ad_format'], 'poster');
+      expect(p['area_id'], 'vik');
+      expect(p['duration_days'], 15);
+      expect(p['advertiser_name'], 'Ganesh');
+      expect(p.containsKey('ad_type'), isFalse);
+
+      // Confirmation: booking ID, quoted price, WhatsApp.
+      expect(find.text('ప్రకటన బుకింగ్ సమర్పించబడింది!'), findsOneWidget);
+      expect(find.text('booking-uuid-1'), findsOneWidget);
+      expect(find.text('₹1500'), findsOneWidget);
+      expect(find.byKey(const Key('ad_booking_whatsapp')), findsOneWidget);
     });
 
-    testWidgets('main packages come from the backend too', (tester) async {
-      await pumpScreen(tester);
-      await tester.tap(find.byKey(const Key('ad_type_main')));
+    testWidgets('global: no location field and no area_id sent',
+        (tester) async {
+      final sent = await pumpScreen(tester);
+      await tester.tap(find.byKey(const Key('ad_scope_global')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('ad_pkg_main_main_10')), findsOneWidget);
+      expect(find.byKey(const Key('ad_area_dropdown_global')), findsNothing);
+      expect(find.byKey(const Key('ad_area_dropdown_local')), findsNothing);
+
+      await chooseFormat(tester, 'Banner');
+      await tester.tap(find.byKey(const Key('ad_pkg_global_all_7')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+
+      expect(sent.single['scope'], 'global');
+      expect(sent.single.containsKey('area_id'), isFalse);
+      expect(sent.single['ad_format'], 'banner');
+    });
+
+    testWidgets('state: only state areas; a single one is preselected',
+        (tester) async {
+      final sent = await pumpScreen(tester);
+      await tester.tap(find.byKey(const Key('ad_scope_state')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('ad_pkg_state_ap_7')), findsOneWidget);
+
+      await chooseFormat(tester, 'Video');
+      await tester.tap(find.byKey(const Key('ad_pkg_state_ap_7')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+      expect(sent.single['scope'], 'state');
+      expect(sent.single['area_id'], 'ap');
+      expect(sent.single['ad_format'], 'video');
+    });
+
+    testWidgets('format is required when the backend offers formats',
+        (tester) async {
+      final sent = await pumpScreen(tester);
+      await tester.tap(find.byKey(const Key('ad_scope_global')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('ad_pkg_global_all_7')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      expect(find.text('ప్రకటన రకాన్ని ఎంచుకోండి.'), findsWidgets);
+    });
+
+    testWidgets('400: backend message under the field, form kept',
+        (tester) async {
+      await pumpScreen(tester, submitter: (_) async {
+        throw DioException(
+          requestOptions: RequestOptions(path: '/api/v1/ads/bookings/'),
+          type: DioExceptionType.badResponse,
+          response: Response(
+            requestOptions: RequestOptions(path: '/api/v1/ads/bookings/'),
+            statusCode: 400,
+            data: {
+              'errors': {
+                'details': {
+                  'duration_days': [
+                    'No active pricing is available for the selected area and duration.'
+                  ]
+                }
+              }
+            },
+          ),
+        );
+      });
+      await tester.tap(find.byKey(const Key('ad_scope_global')));
+      await tester.pumpAndSettle();
+      await chooseFormat(tester, 'Banner');
+      await tester.tap(find.byKey(const Key('ad_pkg_global_all_7')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('No active pricing'), findsWidgets);
+      expect(find.text('Ganesh Stores'), findsOneWidget);
+      expect(find.text('9876543210'), findsOneWidget);
+    });
+
+    testWidgets('offline: form kept and Retry offered', (tester) async {
+      var calls = 0;
+      final sent = await pumpScreen(tester, submitter: (p) async {
+        calls++;
+        if (calls == 1) {
+          throw DioException(
+            requestOptions: RequestOptions(path: '/x'),
+            type: DioExceptionType.connectionTimeout,
+          );
+        }
+        return {'id': 'bk-2', 'quoted_price': '5000.00', 'currency': 'INR'};
+      });
+      await tester.tap(find.byKey(const Key('ad_scope_global')));
+      await tester.pumpAndSettle();
+      await chooseFormat(tester, 'Banner');
+      await tester.tap(find.byKey(const Key('ad_pkg_global_all_7')));
+      await tester.pumpAndSettle();
+      await fillDetails(tester);
+      await tester.tap(find.byKey(const Key('ad_book_submit')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('ad_booking_retry')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('ad_booking_retry')));
+      await tester.pumpAndSettle();
+      expect(sent.length, 2);
+      expect(find.text('bk-2'), findsOneWidget);
+      // No whatsapp_url in the reply → no WhatsApp button.
+      expect(find.byKey(const Key('ad_booking_whatsapp')), findsNothing);
     });
 
     testWidgets('endpoint not live → clear message, no made-up options',

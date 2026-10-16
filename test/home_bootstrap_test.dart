@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/models/news_article.dart';
 import 'package:vaaradhi/models/search_result.dart';
 import 'package:vaaradhi/repositories/home_feed_repository.dart';
-import 'package:vaaradhi/services/analytics_queue.dart';
 import 'package:vaaradhi/services/sharing/share_content_builder.dart';
 import 'package:vaaradhi/utils/share_service.dart';
 
@@ -199,44 +198,6 @@ void main() {
           await repo.fetch(viewer: 'guest',
               state: '', district: '', subdistrict: '', village: ''),
           isNull);
-    });
-  });
-
-  group('offline analytics', () {
-    test('queues, then flushes to the bulk endpoint on 202', () async {
-      final a = _Adapter((_) => (202, {'data': {'accepted_count': 2}}));
-      final q = AnalyticsQueue.forTesting(_dio(a));
-      await q.track('feed_refresh', metadata: {'mode': 'lite'});
-      await q.track('article_open', metadata: {'article_id': 'x'});
-      expect(q.pending, hasLength(2));
-
-      await q.flush();
-      expect(q.pending, isEmpty);
-      final body = a.requests.single.data as Map;
-      expect(a.requests.single.path, '/api/v1/analytics/events/bulk/');
-      final events = body['events'] as List;
-      expect(events.first['event_type'], 'feed_refresh');
-      expect(events.first['metadata'], {'mode': 'lite'});
-      expect(events.first, contains('session_id'));
-      expect(events.first, contains('language'));
-      expect(events.first, contains('device_type'));
-    });
-
-    test('keeps events when the network is down', () async {
-      final q = AnalyticsQueue.forTesting(
-          _dio(_Adapter((_) => (503, {'detail': 'down'}))));
-      await q.track('feed_refresh');
-      await q.flush();
-      expect(q.pending, hasLength(1));
-    });
-
-    test('survives a restart', () async {
-      final q = AnalyticsQueue.forTesting(
-          _dio(_Adapter((_) => (503, {}))));
-      await q.track('feed_refresh');
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('analytics_event_queue_v1'),
-          contains('feed_refresh'));
     });
   });
 

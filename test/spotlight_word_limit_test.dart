@@ -5,30 +5,77 @@ import 'package:vaaradhi/models/news_article.dart';
 import 'package:vaaradhi/state/app_state.dart';
 import 'package:vaaradhi/widgets/spotlight/spotlight_news_card.dart';
 
-String _words(int n) => List.generate(n, (i) => 'పదం${i + 1}').join(' ');
+/// [n] letters of story: words "abcd" (4 letters + space = 5 each).
+String _letters(int n) {
+  final b = StringBuffer();
+  var i = 0;
+  while (b.length < n) {
+    b.write(i % 5 == 4 ? ' ' : String.fromCharCode(0x61 + i % 5));
+    i++;
+  }
+  return b.toString().trim();
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('60-word excerpt', () {
-    test('60 words or fewer: whole story, not truncated', () {
-      final e = SpotlightNewsCard.wordExcerpt(_words(60));
+  group('400–500 letter excerpt (what an ordinary counter shows)', () {
+    test('500 letters or fewer: whole story, not truncated', () {
+      final text = _letters(495);
+      final e = SpotlightNewsCard.storyExcerpt(text);
       expect(e.truncated, isFalse);
-      expect(e.text, _words(60));
+      expect(e.text, text);
     });
 
-    test('61+ words: first 60 and "…"', () {
-      final e = SpotlightNewsCard.wordExcerpt(_words(95));
+    test('longer: cut at a word between 400 and 500 letters, with "…"', () {
+      final e = SpotlightNewsCard.storyExcerpt(_letters(1500));
       expect(e.truncated, isTrue);
-      expect(e.text, '${_words(60)}…');
-      expect(RegExp(r'\S+').allMatches(e.text).length, 60);
+      expect(e.text.endsWith('…'), isTrue);
+      expect(e.text.length - 1, inInclusiveRange(400, 500));
+      expect(e.text, isNot(contains(' …')));
     });
 
-    test('paragraph breaks inside the 60 words are kept', () {
-      final text = '${_words(10)}\n\n${_words(70)}';
-      final e = SpotlightNewsCard.wordExcerpt(text);
-      expect(e.text, contains('\n\n'));
+    test('prefers ending on a full sentence inside the range', () {
+      final text = '${_letters(450)}. ${_letters(900)}';
+      final e = SpotlightNewsCard.storyExcerpt(text);
       expect(e.truncated, isTrue);
+      expect(e.text, '${_letters(450)}.');
+    });
+
+    test('a sentence end before 400 letters is not used', () {
+      final text = '${_letters(100)}. ${_letters(1200)}';
+      final e = SpotlightNewsCard.storyExcerpt(text);
+      expect(e.text.length, greaterThanOrEqualTo(400));
+    });
+
+    test('Telugu: about 60 words fit; a cluster is never split', () {
+      final sixty = List.filled(60, 'వార్త').join(' '); // 359 letters
+      expect(SpotlightNewsCard.storyExcerpt(sixty).truncated, isFalse);
+      final long = List.filled(150, 'రాష్ట్రంలో').join(' ');
+      final e = SpotlightNewsCard.storyExcerpt(long);
+      expect(e.truncated, isTrue);
+      expect(
+          e.text.replaceAll('…', '').split(' ').every((w) => w == 'రాష్ట్రంలో'),
+          isTrue);
+    });
+
+    test('type is exactly proportional to the screen width', () {
+      expect(SpotlightNewsCard.typeScale(392), 1.0);
+      expect(SpotlightNewsCard.typeScale(360), closeTo(360 / 392, 1e-9));
+      expect(SpotlightNewsCard.typeScale(450), closeTo(450 / 392, 1e-9));
+    });
+
+    test('fitting: largest size that fits, within the allowed band', () {
+      // Fits up to 19.0.
+      final s = SpotlightNewsCard.fitBodySize(base: 18.5, fits: (x) => x <= 19);
+      expect(s, lessThanOrEqualTo(19));
+      expect(s, greaterThan(18.9));
+      // Room to spare: grows only to the band's top.
+      expect(SpotlightNewsCard.fitBodySize(base: 18.5, fits: (_) => true),
+          closeTo(18.5 * SpotlightNewsCard.fitGrow, 1e-9));
+      // Nothing fits: the band's bottom (the card then shows "…").
+      expect(SpotlightNewsCard.fitBodySize(base: 18.5, fits: (_) => false),
+          closeTo(18.5 * SpotlightNewsCard.fitShrink, 1e-9));
     });
   });
 
@@ -39,7 +86,7 @@ void main() {
     });
 
     Future<void> pump(WidgetTester tester, String body) async {
-      // A tall screen: here only the word limit decides Read more.
+      // A tall screen: here only the letter limit decides Read more.
       tester.view.physicalSize = const Size(1080, 4000);
       tester.view.devicePixelRatio = 2;
       addTearDown(tester.view.reset);
@@ -69,17 +116,55 @@ void main() {
       await tester.pump(const Duration(minutes: 1));
     }
 
-    testWidgets('a 40-word story: no Read more', (tester) async {
-      await pump(tester, _words(40));
+    testWidgets('a short story: no Read more', (tester) async {
+      await pump(tester, _letters(300));
+      expect(find.byKey(const Key('vaaradhi_logo_badge')), findsOneWidget);
       expect(find.text('ఇంకా చదవండి'), findsNothing);
       await done(tester);
     });
 
-    testWidgets('a 90-word story: 60 words and Read more', (tester) async {
-      await pump(tester, _words(90));
+    testWidgets('a long story: excerpt and Read more', (tester) async {
+      await pump(tester, '${_letters(1400)} ENDMARK');
       expect(find.text('ఇంకా చదవండి'), findsOneWidget);
-      expect(find.textContaining('పదం61', findRichText: true), findsNothing);
-      expect(find.textContaining('పదం60…', findRichText: true), findsOneWidget);
+      expect(find.textContaining('ENDMARK', findRichText: true), findsNothing);
+      expect(find.textContaining('…', findRichText: true), findsOneWidget);
+      await done(tester);
+    });
+
+    testWidgets('system font size does not change the card text',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 4000);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      Future<double> headlineHeight(double scale) async {
+        await tester.pumpWidget(MediaQuery(
+          data: MediaQueryData(
+              size: const Size(540, 2000),
+              textScaler: TextScaler.linear(scale)),
+          child: MaterialApp(
+            home: Scaffold(
+              body: SpotlightNewsCard(
+                article: NewsArticle.fromJson({
+                  'id': 'w2',
+                  'title': 'శీర్షిక శీర్షిక శీర్షిక',
+                  'content': _letters(200),
+                  'feed_item_type': 'ugc',
+                  'published_at': DateTime.now().toIso8601String(),
+                }),
+                onTap: () {},
+                onShare: () {},
+                onClose: () {},
+              ),
+            ),
+          ),
+        ));
+        await tester.pump(const Duration(milliseconds: 300));
+        return tester.getSize(find.text('శీర్షిక శీర్షిక శీర్షిక')).height;
+      }
+
+      final normal = await headlineHeight(1.0);
+      final large = await headlineHeight(1.3);
+      expect(large, normal);
       await done(tester);
     });
   });

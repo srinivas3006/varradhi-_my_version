@@ -1054,18 +1054,27 @@ class ApiService {
     String? city,
     String? subdistrict,
     String? village,
+    String scope = 'main',
   }) async {
+    // The reader's chosen place unless the caller gave one; never the
+    // placeholder, and never an empty value (backend contract).
+    final place = AppState.instance.feedPlace;
+    state ??= place.state;
+    district ??= place.district;
+    subdistrict ??= place.subdistrict;
+    village ??= place.village;
     final response = await _dio.get('/api/v1/feed/', queryParameters: {
       if (cursor != null) 'cursor': cursor,
       if (pageSize != null) 'page_size': pageSize,
       if (include != null) 'include': include,
+      'scope': scope,
       if (lang != null) 'lang': lang,
       if (category != null) 'category': category,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state.isNotEmpty) 'state': state,
+      if (district.isNotEmpty) 'district': district,
+      if (city != null && city.isNotEmpty) 'city': city,
+      if (subdistrict.isNotEmpty) 'subdistrict': subdistrict,
+      if (village.isNotEmpty) 'village': village,
     });
     return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1194,25 +1203,32 @@ class ApiService {
     // Defaulting here is what made every fresh install request Telugu-only
     // and hide English articles before the reader had chosen anything.
     final effectiveLang = lang;
+    // Main / no-scope feeds: the reader's chosen place when the caller gave
+    // none; empty (not sent) until one is chosen — backend contract.
+    final place = AppState.instance.feedPlace;
     final effectiveState = state != null
         ? (state.isNotEmpty ? state : null)
-        : (scope == 'local' ? AppState.instance.stateName : null);
+        : (scope == 'local' ? AppState.instance.stateName : place.state);
     final effectiveDistrict = district != null
         ? (district.isNotEmpty ? district : null)
-        : (scope == 'local' ? AppState.instance.district : null);
+        : (scope == 'local' ? AppState.instance.district : place.district);
     final effectiveCity = city != null
         ? (city.isNotEmpty ? city : null)
-        : (scope == 'local' ? AppState.instance.city : null);
+        : (scope == 'local'
+            ? AppState.instance.city
+            : (AppState.instance.hasValidLocation
+                ? AppState.instance.city
+                : null));
     final effectiveSubdistrict = subdistrict != null
         ? (subdistrict.isNotEmpty ? subdistrict : null)
         : (scope == 'local' && AppState.instance.subdistrict.isNotEmpty
             ? AppState.instance.subdistrict
-            : null);
+            : place.subdistrict);
     final effectiveVillage = village != null
         ? (village.isNotEmpty ? village : null)
         : (scope == 'local' && AppState.instance.village.isNotEmpty
             ? AppState.instance.village
-            : null);
+            : place.village);
     final effectivePageSize = pageSize ?? 25;
 
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
@@ -1487,8 +1503,8 @@ class ApiService {
     String? next;
     do {
       final response = next == null
-          ? await _dio.get('/api/v1/bookmarks/',
-              queryParameters: {'page_size': 20})
+          ? await _dio
+              .get('/api/v1/bookmarks/', queryParameters: {'page_size': 20})
           : await _dio.get(next);
 
       final rawData = response.data;
@@ -1555,8 +1571,8 @@ class ApiService {
   /// POST /api/v1/bookmarks/ — saves an article and never removes one, so it
   /// is safe to repeat (201 new, 200 already saved). Used for every save.
   Future<void> addBookmark(String articleId) async {
-    final response = await _dio
-        .post('/api/v1/bookmarks/', data: {'article_id': articleId});
+    final response =
+        await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
     debugPrint('[Bookmark] POST /api/v1/bookmarks/ article_id=$articleId '
         '-> ${response.statusCode}');
     if (response.statusCode != 200 && response.statusCode != 201) {
@@ -1689,12 +1705,24 @@ class ApiService {
       'lang': AppState.instance.feedLang,
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
-    if (state != null) params['state'] = state;
-    if (district != null) params['district'] = district;
-    if (subdistrict != null && subdistrict.isNotEmpty) {
+    // Callers that pass nothing get the reader's chosen place; an empty
+    // string means "no location" and is never sent (backend: omitted
+    // location = broad feed).
+    // Local requests send exactly the level they ask for (a mandal request
+    // leaves the village out on purpose), so only main is filled in.
+    final place = scope == 'local'
+        ? (state: '', district: '', subdistrict: '', village: '')
+        : AppState.instance.feedPlace;
+    state ??= place.state;
+    district ??= place.district;
+    subdistrict ??= place.subdistrict;
+    village ??= place.village;
+    if (state.isNotEmpty) params['state'] = state;
+    if (district.isNotEmpty) params['district'] = district;
+    if (subdistrict.isNotEmpty) {
       params['subdistrict'] = subdistrict;
     }
-    if (village != null && village.isNotEmpty) params['village'] = village;
+    if (village.isNotEmpty) params['village'] = village;
     if (scope != null) params['scope'] = scope;
 
     try {
@@ -1767,8 +1795,20 @@ class ApiService {
   /// `GET /api/v1/ugc/{submission_id}/` — one public citizen post (handover
   /// §11), with its engagement state (§17.4). Throws on 404: the post is
   /// missing, unapproved or no longer visible.
+  ///
+  /// The reader's place goes with it: the backend shows a village, mandal
+  /// or district post only to readers in that area, so without it the
+  /// detail call answered 404 for posts the feed had just shown.
   Future<NewsArticle> getUgcDetail(String submissionId) async {
-    final response = await _dio.get('/api/v1/ugc/$submissionId/');
+    final place = AppState.instance.feedPlace;
+    final response =
+        await _dio.get('/api/v1/ugc/$submissionId/', queryParameters: {
+      'lang': AppState.instance.feedLang,
+      if (place.state.isNotEmpty) 'state': place.state,
+      if (place.district.isNotEmpty) 'district': place.district,
+      if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+      if (place.village.isNotEmpty) 'village': place.village,
+    });
     final data = response.data is Map ? response.data['data'] : null;
     if (data is! Map) {
       throw ParsingException('Unexpected citizen post payload.');
@@ -1934,9 +1974,8 @@ class ApiService {
           .map((v) => v?.toString() ?? '')
           .firstWhere((v) => v.isNotEmpty, orElse: () => ''),
       status: postStatus,
-      submittedAt:
-          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
-              DateTime.now(),
+      submittedAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.now(),
       rejectionReason:
           (json['review_note'] ?? json['rejection_reason'])?.toString(),
     );
@@ -1974,6 +2013,31 @@ class ApiService {
     final response = await _dio.get('/api/v1/rewards/payouts/',
         queryParameters: {'page_size': pageSize});
     return response.data['data'] as List<dynamic>? ?? [];
+  }
+
+  /// One cursor page of reward history: pass [nextUrl] (the previous page's
+  /// `meta.next`) to continue. Returns the items and the next page's URL,
+  /// null when there are no more (meta.count is the page size, not a total).
+  Future<({List<dynamic> items, String? next})> getRewardTransactionsPage(
+          {String? nextUrl, int pageSize = 20}) =>
+      _rewardPage('/api/v1/rewards/transactions/', nextUrl, pageSize);
+
+  /// Cursor page of the user's withdrawal requests; see
+  /// [getRewardTransactionsPage].
+  Future<({List<dynamic> items, String? next})> getRewardPayoutsPage(
+          {String? nextUrl, int pageSize = 20}) =>
+      _rewardPage('/api/v1/rewards/payouts/', nextUrl, pageSize);
+
+  Future<({List<dynamic> items, String? next})> _rewardPage(
+      String path, String? nextUrl, int pageSize) async {
+    final response = nextUrl != null && nextUrl.isNotEmpty
+        ? await _dio.get(nextUrl)
+        : await _dio.get(path, queryParameters: {'page_size': pageSize});
+    final body = response.data;
+    final items = body is Map ? body['data'] as List<dynamic>? ?? [] : [];
+    final meta = body is Map ? body['meta'] : null;
+    final next = meta is Map ? meta['next']?.toString() : null;
+    return (items: items, next: (next == null || next.isEmpty) ? null : next);
   }
 
   Future<Map<String, dynamic>> createRewardPayout(

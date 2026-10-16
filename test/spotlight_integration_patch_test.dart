@@ -93,7 +93,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late HttpClientAdapter previous;
   late _FeedAdapter adapter;
+  tearDown(() => AppState.instance.hasValidLocation = false);
   setUp(() {
+    // A reader who has chosen a place: feeds carry it (backend contract).
+    AppState.instance.hasValidLocation = true;
     // The first-run news-language sheet is onboarding, not the
     // behaviour under test here.
     AppState.instance.contentLanguagePrompted = true;
@@ -108,7 +111,7 @@ void main() {
   });
 
   test(
-      'Spotlight composes four parents and one ad without splitting mixed media',
+      'Spotlight composes four parents without splitting mixed media; no ad that early',
       () async {
     adapter.mixed = true;
     final controller = SpotlightController();
@@ -120,7 +123,8 @@ void main() {
       SpotlightType.ugc,
       SpotlightType.poster,
       SpotlightType.poster,
-      SpotlightType.ad
+      // Ads are at least 6 stories apart and not in the first 4
+      // (AdFrequencyPolicy.spotlight), so a 4-card feed has none.
     ]);
     expect(items.first.article!.orderedMedia.length, 3);
     expect(items[1].article!.orderedMedia.length, 2);

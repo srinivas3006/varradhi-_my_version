@@ -24,9 +24,12 @@ import '../widgets/feed/daily_greeting_widget.dart';
 import '../models/category.dart';
 import '../models/poll.dart';
 import '../widgets/poll_card.dart';
+import '../services/poll_exposure.dart';
 import '../repositories/home_feed_repository.dart';
 import '../core/ads/home_ads.dart';
+import '../core/ads/ad_insertion.dart' show AdFrequencyPolicy;
 import '../services/analytics_queue.dart';
+import '../services/content_analytics.dart';
 import 'profile_tab.dart';
 import 'poster_detail_screen.dart';
 import '../models/poster_images.dart';
@@ -73,6 +76,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   List<Category> _categories = [];
   String? _selectedCategory;
+
+  /// This Home screen's impressions: each story once (analytics).
+  final ImpressionLog _impressions = ImpressionLog();
   Poll? _poll;
   List<dynamic> _posters = [];
 
@@ -192,10 +198,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       final cached = await repo.cached(
         viewer: viewer,
         lang: _feedLang,
-        state: app.stateName,
-        district: app.district,
-        subdistrict: app.subdistrict,
-        village: app.village,
+        state: app.feedPlace.state,
+        district: app.feedPlace.district,
+        subdistrict: app.feedPlace.subdistrict,
+        village: app.feedPlace.village,
       );
       if (cached != null && mounted && generation == _generation) {
         setState(() {
@@ -210,10 +216,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final fresh = await repo.fetch(
       viewer: viewer,
       lang: _feedLang,
-      state: app.stateName,
-      district: app.district,
-      subdistrict: app.subdistrict,
-      village: app.village,
+      state: app.feedPlace.state,
+      district: app.feedPlace.district,
+      subdistrict: app.feedPlace.subdistrict,
+      village: app.feedPlace.village,
       forceRefresh: forceRefresh,
     );
     // A request for an old reader or place: ignore it.
@@ -246,7 +252,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     });
 
     final bulk = fresh.analyticsBulkEndpoint;
-    if (bulk != null && bulk.isNotEmpty) AnalyticsQueue.instance.endpoint = bulk;
+    if (bulk != null && bulk.isNotEmpty) {
+      AnalyticsQueue.instance.endpoint = bulk;
+    }
     // The network just answered; a good moment to send what queued offline.
     unawaited(AnalyticsQueue.instance.flush());
   }
@@ -269,10 +277,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       final page = await HomeFeedRepository.instance.fetchLatest(
         next: next,
         lang: _feedLang,
-        state: app.stateName,
-        district: app.district,
-        subdistrict: app.subdistrict,
-        village: app.village,
+        state: app.feedPlace.state,
+        district: app.feedPlace.district,
+        subdistrict: app.feedPlace.subdistrict,
+        village: app.feedPlace.village,
         category: _selectedCategory,
       );
       if (!mounted || generation != _latestGeneration) return;
@@ -338,13 +346,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  void _trackOpen(NewsArticle article, String section) {
-    unawaited(AnalyticsQueue.instance.track('article_open', metadata: {
-      'article_id': article.id,
-      'content_kind': article.contentKind,
-      'section': section,
-    }));
-  }
+  /// `article_open` is sent by the detail screen once it is actually shown
+  /// (analytics handover), not on the tap — that counted taps on stories
+  /// that never opened, and put the id where the backend does not read it.
+  void _trackOpen(NewsArticle article, String section) {}
 
   bool _hasLocation(String? value) => value?.trim().isNotEmpty == true;
 
@@ -364,8 +369,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   Future<void> _loadPoll(int generation) async {
     try {
       final polls = await ApiService.instance.getPolls();
+      // Only a poll the reader has not voted on or seen too often.
+      await PollExposure.instance.ready();
+      final eligible = PollExposure.instance.eligible(polls);
       if (mounted && generation == _generation) {
-        setState(() => _poll = polls.isNotEmpty ? polls.first : null);
+        setState(() => _poll = eligible.isNotEmpty ? eligible.first : null);
       }
     } catch (_) {}
   }
@@ -376,8 +384,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       if (!mounted || generation != _generation) return;
       // isShort is the single classification both surfaces use, so a
       // mis-tagged Short cannot leak into the carousel.
-      final videos =
-          (response.data ?? []).where((v) => !v.isShort).toList();
+      final videos = (response.data ?? []).where((v) => !v.isShort).toList();
       setState(() => _homeVideos = videos);
     } catch (e) {
       debugPrint('[NewsFeedTab] home video load failed: $e');
@@ -438,7 +445,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     if (mounted && generation == _generation && _homeFailed && _latestFailed) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
+          content:
+              Text('రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
           duration: Duration(seconds: 3),
         ),
       );
@@ -448,9 +456,19 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// A category chip shows that category's news only (Home's hero, rails
   /// and extras step aside); "All" brings them back.
   void _selectCategory(String? slug) {
-    setState(() => _selectedCategory = slug);
-    unawaited(AnalyticsQueue.instance.track('category_select',
-        metadata: {'category': slug ?? 'all'}));
+    setState(() {
+      _selectedCategory = slug;
+      // Drop the previous list at once: it used to stay on screen until the
+      // new page arrived — and for good when that request failed — so the
+      // chip was on but the news was still "All" or the last category.
+      _latest = [];
+      _latestNext = null;
+      _latestHasMore = true;
+      _latestLoaded = false;
+      _latestFailed = false;
+    });
+    unawaited(AnalyticsQueue.instance
+        .track('category_select', metadata: {'category': slug ?? 'all'}));
     _loadLatest(reset: true);
   }
 
@@ -766,44 +784,44 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   ),
                 ),
                 child: Container(
-                width: 130,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                  image: imageUrl.isNotEmpty
-                      ? DecorationImage(
-                          image: CachedNetworkImageProvider(imageUrl,
-                              maxWidth: 300),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child: Container(
+                  width: 130,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.7),
-                      ],
+                    border: Border.all(color: borderColor),
+                    image: imageUrl.isNotEmpty
+                        ? DecorationImage(
+                            image: CachedNetworkImageProvider(imageUrl,
+                                maxWidth: 300),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.7),
+                        ],
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    alignment: Alignment.bottomCenter,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
-                  padding: const EdgeInsets.all(8),
-                  alignment: Alignment.bottomCenter,
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
                 ),
               );
             },
@@ -862,9 +880,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       height: 36,
                       fit: BoxFit.cover,
                       filterQuality: FilterQuality.high,
-                      cacheWidth: (36 *
-                              MediaQuery.devicePixelRatioOf(context))
-                          .round(),
+                      cacheWidth:
+                          (36 * MediaQuery.devicePixelRatioOf(context)).round(),
                     ),
                   ),
                 ),
@@ -896,11 +913,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         final photo = state.isLoggedIn ? state.profileAvatar : null;
         final hasPhoto = photo != null;
         final name = state.userName.trim();
-        final initial = state.isLoggedIn &&
-                name.isNotEmpty &&
-                name != 'Guest User'
-            ? String.fromCharCode(name.runes.first).toUpperCase()
-            : '';
+        final initial =
+            state.isLoggedIn && name.isNotEmpty && name != 'Guest User'
+                ? String.fromCharCode(name.runes.first).toUpperCase()
+                : '';
 
         final Widget face;
         if (hasPhoto) {
@@ -960,77 +976,72 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// Top-right: Search and Notifications.
   List<Widget> _buildHeaderActions() {
     return [
-              IconButton(
-                key: const Key('home_header_search'),
-                tooltip: AppState.instance.language == 'Telugu'
-                    ? 'వెతకండి'
-                    : 'Search',
-                icon: Icon(Icons.search_rounded,
-                    color: Theme.of(context).iconTheme.color),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SearchScreen()),
-                  );
-                },
-              ),
+      IconButton(
+        key: const Key('home_header_search'),
+        tooltip: AppState.instance.language == 'Telugu' ? 'వెతకండి' : 'Search',
+        icon: Icon(Icons.search_rounded,
+            color: Theme.of(context).iconTheme.color),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SearchScreen()),
+          );
+        },
+      ),
 
-              // Notifications, badged with whatever is unread. Rebuilt from
-              // AppState so the count follows a push arriving or the list
-              // being read, without this bar polling anything.
-              AnimatedBuilder(
-                animation: AppState.instance,
-                builder: (context, _) {
-                  final unread = AppState.instance.unreadNotificationsCount;
-                  return IconButton(
-                    tooltip: AppState.instance.language == 'Telugu'
-                        ? 'నోటిఫికేషన్లు'
-                        : 'Notifications',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen()),
+      // Notifications, badged with whatever is unread. Rebuilt from
+      // AppState so the count follows a push arriving or the list
+      // being read, without this bar polling anything.
+      AnimatedBuilder(
+        animation: AppState.instance,
+        builder: (context, _) {
+          final unread = AppState.instance.unreadNotificationsCount;
+          return IconButton(
+            tooltip: AppState.instance.language == 'Telugu'
+                ? 'నోటిఫికేషన్లు'
+                : 'Notifications',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            ),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_none_rounded,
+                    color: Theme.of(context).iconTheme.color),
+                if (unread > 0)
+                  Positioned(
+                    right: -3,
+                    top: -3,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      constraints: const BoxConstraints(minWidth: 15),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        // Past 99 the badge would widen enough to
+                        // push the icons along.
+                        unread > 99 ? '99+' : '$unread',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                        ),
+                      ),
                     ),
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(Icons.notifications_none_rounded,
-                            color: Theme.of(context).iconTheme.color),
-                        if (unread > 0)
-                          Positioned(
-                            right: -3,
-                            top: -3,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4, vertical: 1),
-                              constraints: const BoxConstraints(minWidth: 15),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                // Past 99 the badge would widen enough to
-                                // push the icons along.
-                                unread > 99 ? '99+' : '$unread',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.2,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     ];
   }
-
-
 
   /// The hero carousel, from [_heroStories]: live, breaking, featured.
   Widget _buildBreakingNewsSection(List<NewsArticle> heroItems) {
@@ -1069,271 +1080,277 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               final subtitle =
                   isLive ? 'లైవ్ ప్రసారం' : 'Updated ${article.timeAgo}';
 
-              return GestureDetector(
-                onTap: () {
-                  AdManager.instance.recordContentInteraction();
-                  _trackOpen(article, 'hero');
-                  _openStory(article);
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: isLive
-                          ? Colors.red.withValues(alpha: 0.4)
-                          : borderColor,
-                      width: isLive ? 1.5 : 1.0,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: isLive
-                            ? Colors.red.withValues(alpha: 0.2)
-                            : Colors.black.withValues(alpha: 0.12),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                    image: imageUrl.isNotEmpty
-                        ? DecorationImage(
-                            image: CachedNetworkImageProvider(imageUrl,
-                                maxWidth: 800),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
-                    // A story with no picture gets the brand's deep red
-                    // instead of a flat grey card.
-                    gradient: imageUrl.isEmpty ? _noImageGradient : null,
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: isLive
-                            ? [
-                                Colors.black.withValues(alpha: 0.2),
-                                Colors.black.withValues(alpha: 0.55),
-                                Colors.black.withValues(alpha: 0.95),
-                              ]
-                            : [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.4),
-                                Colors.black.withValues(alpha: 0.9),
-                              ],
-                        stops: const [0.4, 0.7, 1.0],
-                      ),
-                    ),
-                    padding: const EdgeInsets.all(20),
-                    child: Stack(
-                      children: [
-                        if (isLive)
-                          Center(
-                            child: Container(
-                              width: 54,
-                              height: 54,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.35),
-                                  width: 1.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.3),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.play_arrow_rounded,
-                                color: Colors.white,
-                                size: 34,
-                              ),
-                            ),
+              return ImpressionTracker(
+                  story: article,
+                  child: GestureDetector(
+                    onTap: () {
+                      AdManager.instance.recordContentInteraction();
+                      _trackOpen(article, 'hero');
+                      _openStory(article);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: isLive
+                              ? Colors.red.withValues(alpha: 0.4)
+                              : borderColor,
+                          width: isLive ? 1.5 : 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isLive
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
                           ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ],
+                        image: imageUrl.isNotEmpty
+                            ? DecorationImage(
+                                image: CachedNetworkImageProvider(imageUrl,
+                                    maxWidth: 800),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
+                        // A story with no picture gets the brand's deep red
+                        // instead of a flat grey card.
+                        gradient: imageUrl.isEmpty ? _noImageGradient : null,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: isLive
+                                ? [
+                                    Colors.black.withValues(alpha: 0.2),
+                                    Colors.black.withValues(alpha: 0.55),
+                                    Colors.black.withValues(alpha: 0.95),
+                                  ]
+                                : [
+                                    Colors.transparent,
+                                    Colors.black.withValues(alpha: 0.4),
+                                    Colors.black.withValues(alpha: 0.9),
+                                  ],
+                            stops: const [0.4, 0.7, 1.0],
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(20),
+                        child: Stack(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            if (isLive)
+                              Center(
+                                child: Container(
+                                  width: 54,
+                                  height: 54,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.35),
+                                      width: 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color:
+                                            Colors.black.withValues(alpha: 0.3),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: Colors.white,
+                                    size: 34,
+                                  ),
+                                ),
+                              ),
+                            Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                if (isLive)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          gradient: const LinearGradient(
-                                            colors: [
-                                              Color(0xFFDC2626),
-                                              Color(0xFFB91C1C),
-                                            ],
-                                          ),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.red
-                                                  .withValues(alpha: 0.5),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Container(
-                                              width: 7,
-                                              height: 7,
-                                              decoration: const BoxDecoration(
-                                                color: Colors.white,
-                                                shape: BoxShape.circle,
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (isLive)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                colors: [
+                                                  Color(0xFFDC2626),
+                                                  Color(0xFFB91C1C),
+                                                ],
                                               ),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.red
+                                                      .withValues(alpha: 0.5),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(width: 6),
-                                            const Text(
-                                              'LIVE',
-                                              style: TextStyle(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Container(
+                                                  width: 7,
+                                                  height: 7,
+                                                  decoration:
+                                                      const BoxDecoration(
+                                                    color: Colors.white,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                const Text(
+                                                  'LIVE',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w900,
+                                                    letterSpacing: 1.2,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    else if (badge != null)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            // Solid, so it reads on any photo
+                                            // (the 30% orange washed out).
+                                            color: AppColors.primary,
+                                            child: Text(
+                                              badge,
+                                              style: const TextStyle(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w900,
                                                 letterSpacing: 1.2,
                                                 color: Colors.white,
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else if (badge != null)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        // Solid, so it reads on any photo
-                                        // (the 30% orange washed out).
-                                        color: AppColors.primary,
-                                        child: Text(
-                                          badge,
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 1.2,
-                                            color: Colors.white,
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                if (badge == null && !isLive) const SizedBox(),
-                                if (!isLive &&
-                                    article.category.isNotEmpty)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.15),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.2),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          article.category.toUpperCase(),
-                                          style: const TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.5,
-                                            color: Colors.white,
+                                    if (badge == null && !isLive)
+                                      const SizedBox(),
+                                    if (!isLive && article.category.isNotEmpty)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.15),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.2),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              article.category.toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.5,
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -0.5,
-                                    height: 1.2,
-                                    color: Colors.white,
-                                  ),
+                                  ],
                                 ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  subtitle,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color:
-                                        Colors.white.withValues(alpha: 0.8),
-                                  ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.5,
+                                        height: 1.2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      subtitle,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color:
+                                            Colors.white.withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: BackdropFilter(
-                              filter: dart_ui.ImageFilter.blur(
-                                  sigmaX: 8, sigmaY: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
-                                color: Colors.white.withValues(alpha: 0.15),
-                                child: Text(
-                                  '${(index + 1).toString().padLeft(2, '0')} / ${heroItems.length.toString().padLeft(2, '0')}',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.5,
-                                    color: Colors.white,
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: BackdropFilter(
+                                  filter: dart_ui.ImageFilter.blur(
+                                      sigmaX: 8, sigmaY: 8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 6),
+                                    color: Colors.white.withValues(alpha: 0.15),
+                                    child: Text(
+                                      '${(index + 1).toString().padLeft(2, '0')} / ${heroItems.length.toString().padLeft(2, '0')}',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              );
+                  ));
             },
           ),
         ),
@@ -1376,7 +1393,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         const SizedBox(height: 16),
         DailyGreetingWidget(
           imageUrl: _dailyQuote!['image_url'] ?? _dailyQuote!['imageUrl'] ?? '',
-          title: _dailyQuote!['author'] ?? 'Daily Quote',
+          title: _dailyQuote!['author']?.toString() ?? '',
           quote: _dailyQuote!['text'] ?? _dailyQuote!['quote'] ?? '',
         ),
       ],
@@ -1431,7 +1448,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   'home_${_identity}_${_latestGeneration}_${item.stableKey}',
             );
           }
-          return _buildFeedArticleCard(item, cardColor, borderColor);
+          return ImpressionTracker(
+            story: item.content!,
+            child: _buildFeedArticleCard(item, cardColor, borderColor),
+          );
         },
       ),
     );
@@ -1528,6 +1548,34 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   /// Header over the paginated latest feed.
   /// A category with no stories yet.
+  Widget _buildCategoryFailed() {
+    final telugu = AppState.instance.language == 'Telugu';
+    return Padding(
+      key: const Key('home_category_failed'),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+      child: Column(
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 44, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            telugu
+                ? 'ఈ వర్గం వార్తలు లోడ్ కాలేదు.'
+                : 'Could not load this category.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            key: const Key('home_category_retry'),
+            onPressed: () => _loadLatest(reset: true),
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCategoryEmpty() {
     final telugu = AppState.instance.language == 'Telugu';
     return Padding(
@@ -1587,102 +1635,106 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               itemBuilder: (context, index) {
                 final article = items[index];
                 final image = _storyImage(article);
-                return SizedBox(
-                  width: 220,
-                  child: Material(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      key: ValueKey('for_you_${article.id}'),
-                      onTap: () {
-                        AdManager.instance.recordContentInteraction();
-                        _trackOpen(article, 'for_you');
-                        _openStory(article);
-                      },
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 16 / 9,
-                              child: image.isEmpty
-                                  ? _noImageTile()
-                                  : CachedNetworkImage(
-                                      imageUrl: image,
-                                      fit: BoxFit.cover,
-                                      memCacheWidth: 480,
-                                      placeholder: (_, __) =>
-                                          Container(color: AppColors.chipBg),
-                                      errorWidget: (_, __, ___) => Container(
-                                        color: AppColors.chipBg,
-                                        child: const Icon(
-                                            Icons.image_not_supported_outlined,
-                                            color: AppColors.textMuted),
-                                      ),
+                return ImpressionTracker(
+                    story: article,
+                    child: SizedBox(
+                      width: 220,
+                      child: Material(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          key: ValueKey('for_you_${article.id}'),
+                          onTap: () {
+                            AdManager.instance.recordContentInteraction();
+                            _trackOpen(article, 'for_you');
+                            _openStory(article);
+                          },
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: image.isEmpty
+                                      ? _noImageTile()
+                                      : CachedNetworkImage(
+                                          imageUrl: image,
+                                          fit: BoxFit.cover,
+                                          memCacheWidth: 480,
+                                          placeholder: (_, __) => Container(
+                                              color: AppColors.chipBg),
+                                          errorWidget: (_, __, ___) =>
+                                              Container(
+                                            color: AppColors.chipBg,
+                                            child: const Icon(
+                                                Icons
+                                                    .image_not_supported_outlined,
+                                                color: AppColors.textMuted),
+                                          ),
+                                        ),
+                                ),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                                  child: Text(
+                                    article.category.isNotEmpty
+                                        ? article.category.toUpperCase()
+                                        : '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.4,
+                                      color: AppColors.primary,
                                     ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                              child: Text(
-                                article.category.isNotEmpty
-                                    ? article.category.toUpperCase()
-                                    : '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.4,
-                                  color: AppColors.primary,
+                                  ),
                                 ),
-                              ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                              child: Text(
-                                article.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: ArticleTypography.heading(
-                                  fontSize: 14,
-                                  height: 1.35,
-                                  fontWeight: FontWeight.w700,
-                                  color: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge
-                                          ?.color ??
-                                      (Theme.of(context).brightness ==
-                                              Brightness.dark
-                                          ? AppColors.readingTitleDark
-                                          : AppColors.readingTitleLight),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                  child: Text(
+                                    article.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: ArticleTypography.heading(
+                                      fontSize: 14,
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w700,
+                                      color: Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge
+                                              ?.color ??
+                                          (Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? AppColors.readingTitleDark
+                                              : AppColors.readingTitleLight),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const Spacer(),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                              child: Text(
-                                article.timeAgo,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.textMuted,
+                                const Spacer(),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                                  child: Text(
+                                    article.timeAgo,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                );
+                    ));
               },
             ),
           ),
@@ -1802,12 +1854,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                           fontWeight: FontWeight.w800,
                           height: 1.3,
                           letterSpacing: 0.0,
-                          color:
-                              Theme.of(context).textTheme.bodyLarge?.color ??
-                                  (Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? AppColors.readingTitleDark
-                                      : AppColors.readingTitleLight),
+                          color: Theme.of(context).textTheme.bodyLarge?.color ??
+                              (Theme.of(context).brightness == Brightness.dark
+                                  ? AppColors.readingTitleDark
+                                  : AppColors.readingTitleLight),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -1832,6 +1882,23 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             ),
                           ),
                         ],
+                      ),
+                      // Publishing source on every card (Play News policy).
+                      const SizedBox(height: 3),
+                      Text(
+                        article.isUgc && article.byline.isNotEmpty
+                            ? '${article.sourceLabel(telugu: true)} · ${article.byline}'
+                            : article.sourceLabel(telugu: true),
+                        key: const Key('home_card_source'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.readingMetaDark
+                              : AppColors.readingMetaLight,
+                        ),
                       ),
                     ],
                   ),
@@ -1977,274 +2044,307 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     final stillLoading = !_homeLoaded || (!_latestLoaded && _latestLoading);
     final bothFailed = _homeFailed && _latestFailed;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Stack(
-        children: [
-          !hasHomeContent
-              ? (stillLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : bothFailed
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.error_outline_rounded,
-                                    size: 56, color: AppColors.error),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'కథనాలు లోడ్ చేయడం విఫలమైంది',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      fontSize: 13, color: AppColors.textMuted),
-                                ),
-                                const SizedBox(height: 16),
-                                ElevatedButton(
-                                  key: const Key('home_retry'),
-                                  onPressed: _refresh,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.primary,
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
-                                  ),
-                                  child: const Text('మళ్ళీ ప్రయత్నించండి'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.article_outlined,
-                                  size: 56,
-                                  color: AppColors.textMuted
-                                      .withValues(alpha: 0.5)),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'కథనాలు అందుబాటులో లేవు',
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.textDark),
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'తాజా కథనాల కోసం వేచి ఉండండి.',
-                                style: TextStyle(
-                                    fontSize: 13, color: AppColors.textMuted),
-                              ),
-                              const SizedBox(height: 12),
-                              TextButton.icon(
-                                key: const Key('home_empty_refresh'),
-                                onPressed: _refresh,
-                                icon: const Icon(Icons.refresh_rounded),
-                                label: const Text('రిఫ్రెష్ చేయండి'),
-                              ),
-                            ],
-                          ),
-                        ))
-              : RefreshIndicator(
-                  key: const Key('home_refresh'),
-                  onRefresh: _refresh,
-                  color: AppColors.primary,
-                  // The header floats over the list, so the spinner starts
-                  // below it (and below the breaking strip when shown);
-                  // from the very top it appeared hidden behind the header.
-                  edgeOffset: MediaQuery.of(context).padding.top +
-                      (_breakingStripAds.isNotEmpty ? 118 : 68),
-                  displacement: 32,
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (ScrollNotification scrollInfo) {
-                      if (scrollInfo.metrics.pixels >=
-                              scrollInfo.metrics.maxScrollExtent - 200 &&
-                          !_latestLoading &&
-                          _latestHasMore) {
-                        _loadLatest();
-                      }
-                      return false;
-                    },
-                    child: Builder(
-                      builder: (context) {
-                        final isDark =
-                            Theme.of(context).brightness == Brightness.dark;
-                        final cardColor = isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.black.withValues(alpha: 0.03);
-                        final borderColor = isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.05);
-                        // Inline slots take what the strip and the bottom
-                        // sticky banner do not — all from the one /ads/ call.
-                        final inlineAds = HomeAds.inline(_feedAds);
-
-                        final presentationItems = recommended.isNotEmpty
-                            ? AdManager.instance
-                                .buildFeedPresentation<NewsArticle>(
-                                contentItems: recommended,
-                                adsPool: inlineAds,
-                                contentKey: (article) =>
-                                    '${article.contentKind}:${article.id}',
-                              )
-                            : <FeedPresentationItem<NewsArticle>>[];
-
-                        // A category chip is on: Home becomes that
-                        // category's news only — the hero, rails and extras
-                        // step aside, so the choice visibly changes the page.
-                        final filtering = _selectedCategory != null;
-
-                        return CustomScrollView(
-                          // A pull must always reach the refresh, even when
-                          // Home is shorter than the screen.
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          slivers: [
-                            SliverPadding(
-                              padding: EdgeInsets.only(
-                                top: MediaQuery.of(context).padding.top +
-                                    (_breakingStripAds.isNotEmpty ? 120 : 70), // Space for floating app bar & breaking strip
-                              ),
-                              sliver: SliverToBoxAdapter(
+    return ImpressionScope(
+        log: _impressions,
+        child: Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Stack(
+            children: [
+              !hasHomeContent
+                  ? (stillLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : bothFailed
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
                                 child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    // Showing the saved copy because the
-                                    // refresh failed (offline, 5xx, 429).
-                                    if (_homeFailed) _buildOfflineNotice(),
-                                    RepaintBoundary(
-                                      child: _buildCategorySelector(),
-                                    ),
-                                    if (!filtering)
-                                      RepaintBoundary(
-                                        child: _buildBreakingNewsSection(
-                                            heroItems),
-                                      ),
-                                    // For You — personalized rail.
-                                    if (!filtering && forYou.isNotEmpty)
-                                      RepaintBoundary(
-                                        child: _buildForYouRail(forYou),
-                                      ),
-                                    // Near You — the bootstrap's local
-                                    // section; hidden when it is empty.
-                                    if (!filtering)
-                                    _buildLocationSection(
-                                      title: AppState.instance.language ==
-                                              'Telugu'
-                                          ? 'మీ సమీపంలో'
-                                          : 'Near You',
-                                      location:
-                                          AppState.instance.displayLocation,
-                                      icon: Icons.near_me_outlined,
-                                      accent: AppColors.primary,
-                                      articles: _nearYou,
-                                      cardColor: cardColor,
-                                      borderColor: borderColor,
-                                    ),
-                                    // Village, Mandal, District, State and
-                                    // National are not separate sections:
-                                    // /feed/home/ returns only For You and
-                                    // Near You. Those stories reach the
-                                    // reader through Latest (/feed/).
+                                    const Icon(Icons.error_outline_rounded,
+                                        size: 56, color: AppColors.error),
                                     const SizedBox(height: 16),
-                                    if (recommended.isNotEmpty)
-                                      _buildLatestHeader(),
-                                    // No Latest stories yet: the extras show
-                                    // here rather than not at all.
-                                    if (presentationItems.isEmpty &&
-                                        !filtering)
-                                      ..._homeExtras(),
-                                    if (filtering &&
-                                        presentationItems.isEmpty &&
-                                        _latestLoaded &&
-                                        !_latestLoading)
-                                      _buildCategoryEmpty(),
+                                    const Text(
+                                      'కథనాలు లోడ్ చేయడం విఫలమైంది',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: AppColors.textMuted),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    ElevatedButton(
+                                      key: const Key('home_retry'),
+                                      onPressed: _refresh,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.primary,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                      ),
+                                      child: const Text('మళ్ళీ ప్రయత్నించండి'),
+                                    ),
                                   ],
                                 ),
                               ),
-                            ),
-                            // News first: the opening Latest
-                            // stories come straight after the sections, then
-                            // the quote / poll / posters / videos, then the
-                            // rest of Latest.
-                            if (filtering && presentationItems.isNotEmpty)
-                              _buildLatestSliver(
-                                presentationItems,
-                                cardColor: cardColor,
-                                borderColor: borderColor,
-                                padding: const EdgeInsets.only(
-                                    left: 16, right: 16, top: 8, bottom: 120),
-                                showSpinner: _latestHasMore,
-                              )
-                            else if (presentationItems.isNotEmpty) ...[
-                              _buildLatestSliver(
-                                presentationItems
-                                    .take(_latestLeadCount)
-                                    .toList(),
-                                cardColor: cardColor,
-                                borderColor: borderColor,
-                                padding: const EdgeInsets.only(
-                                    left: 16, right: 16, top: 8),
-                                showSpinner: false,
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.article_outlined,
+                                      size: 56,
+                                      color: AppColors.textMuted
+                                          .withValues(alpha: 0.5)),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'కథనాలు అందుబాటులో లేవు',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'తాజా కథనాల కోసం వేచి ఉండండి.',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppColors.textMuted),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextButton.icon(
+                                    key: const Key('home_empty_refresh'),
+                                    onPressed: _refresh,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: const Text('రిఫ్రెష్ చేయండి'),
+                                  ),
+                                ],
                               ),
-                              SliverToBoxAdapter(
-                                child: Column(
-                                  key: const Key('home_extras'),
-                                  children: [
-                                    ..._homeExtras(),
-                                    const SizedBox(height: 10),
-                                  ],
-                                ),
-                              ),
-                              _buildLatestSliver(
-                                presentationItems
-                                    .skip(_latestLeadCount)
-                                    .toList(),
-                                cardColor: cardColor,
-                                borderColor: borderColor,
-                                padding: const EdgeInsets.only(
-                                    left: 16, right: 16, bottom: 120),
-                                showSpinner: _latestHasMore,
-                              ),
-                            ] else
-                              const SliverToBoxAdapter(
-                                child: SizedBox(height: 120),
-                              ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
+                            ))
+                  : RefreshIndicator(
+                      key: const Key('home_refresh'),
+                      onRefresh: _refresh,
+                      color: AppColors.primary,
+                      // The header floats over the list, so the spinner starts
+                      // below it (and below the breaking strip when shown);
+                      // from the very top it appeared hidden behind the header.
+                      edgeOffset: MediaQuery.of(context).padding.top +
+                          (_breakingStripAds.isNotEmpty ? 118 : 68),
+                      displacement: 32,
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (ScrollNotification scrollInfo) {
+                          if (scrollInfo.metrics.pixels >=
+                                  scrollInfo.metrics.maxScrollExtent - 200 &&
+                              !_latestLoading &&
+                              _latestHasMore) {
+                            _loadLatest();
+                          }
+                          return false;
+                        },
+                        child: Builder(
+                          builder: (context) {
+                            final isDark =
+                                Theme.of(context).brightness == Brightness.dark;
+                            final cardColor = isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.03);
+                            final borderColor = isDark
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.black.withValues(alpha: 0.05);
+                            // Inline slots take what the strip and the bottom
+                            // sticky banner do not — all from the one /ads/ call.
+                            final inlineAds = HomeAds.inline(_feedAds);
 
-          // Floating Top App Bar Layer
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildTopAppBar(),
-                if (_breakingStripAds.isNotEmpty)
-                  RotatingBreakingStrip(
-                    ads: _breakingStripAds,
-                    placementZone: 'feed',
-                  ),
-              ],
-            ),
+                            final presentationItems = recommended.isNotEmpty
+                                ? AdManager.instance
+                                    .buildFeedPresentation<NewsArticle>(
+                                    contentItems: recommended,
+                                    adsPool: inlineAds,
+                                    // Each ad once, spaced out, capped — not
+                                    // the same banner every few stories.
+                                    policy: AdFrequencyPolicy.home,
+                                    contentKey: (article) =>
+                                        '${article.contentKind}:${article.id}',
+                                  )
+                                : <FeedPresentationItem<NewsArticle>>[];
+
+                            // A category chip is on: Home becomes that
+                            // category's news only — the hero, rails and extras
+                            // step aside, so the choice visibly changes the page.
+                            final filtering = _selectedCategory != null;
+
+                            return CustomScrollView(
+                              // A pull must always reach the refresh, even when
+                              // Home is shorter than the screen.
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              slivers: [
+                                SliverPadding(
+                                  padding: EdgeInsets.only(
+                                    top: MediaQuery.of(context).padding.top +
+                                        (_breakingStripAds.isNotEmpty
+                                            ? 120
+                                            : 70), // Space for floating app bar & breaking strip
+                                  ),
+                                  sliver: SliverToBoxAdapter(
+                                    child: Column(
+                                      children: [
+                                        // Showing the saved copy because the
+                                        // refresh failed (offline, 5xx, 429).
+                                        if (_homeFailed) _buildOfflineNotice(),
+                                        RepaintBoundary(
+                                          child: _buildCategorySelector(),
+                                        ),
+                                        if (!filtering)
+                                          RepaintBoundary(
+                                            child: _buildBreakingNewsSection(
+                                                heroItems),
+                                          ),
+                                        // For You — personalized rail.
+                                        if (!filtering && forYou.isNotEmpty)
+                                          RepaintBoundary(
+                                            child: _buildForYouRail(forYou),
+                                          ),
+                                        // Near You — the bootstrap's local
+                                        // section; hidden when it is empty.
+                                        if (!filtering)
+                                          _buildLocationSection(
+                                            title: AppState.instance.language ==
+                                                    'Telugu'
+                                                ? 'మీ సమీపంలో'
+                                                : 'Near You',
+                                            location: AppState
+                                                .instance.displayLocation,
+                                            icon: Icons.near_me_outlined,
+                                            accent: AppColors.primary,
+                                            articles: _nearYou,
+                                            cardColor: cardColor,
+                                            borderColor: borderColor,
+                                          ),
+                                        // Village, Mandal, District, State and
+                                        // National are not separate sections:
+                                        // /feed/home/ returns only For You and
+                                        // Near You. Those stories reach the
+                                        // reader through Latest (/feed/).
+                                        const SizedBox(height: 16),
+                                        if (recommended.isNotEmpty)
+                                          _buildLatestHeader(),
+                                        // No Latest stories yet: the extras show
+                                        // here rather than not at all.
+                                        if (presentationItems.isEmpty &&
+                                            !filtering)
+                                          ..._homeExtras(),
+                                        // The chosen category is loading.
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            !_latestLoaded)
+                                          const Padding(
+                                            key: Key('home_category_loading'),
+                                            padding: EdgeInsets.symmetric(
+                                                vertical: 48),
+                                            child: Center(
+                                                child:
+                                                    CircularProgressIndicator()),
+                                          ),
+                                        // It failed: say so, offer a retry — never
+                                        // the previous category's news.
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            _latestLoaded &&
+                                            _latestFailed &&
+                                            !_latestLoading)
+                                          _buildCategoryFailed(),
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            _latestLoaded &&
+                                            !_latestFailed &&
+                                            !_latestLoading)
+                                          _buildCategoryEmpty(),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // News first: the opening Latest
+                                // stories come straight after the sections, then
+                                // the quote / poll / posters / videos, then the
+                                // rest of Latest.
+                                if (filtering && presentationItems.isNotEmpty)
+                                  _buildLatestSliver(
+                                    presentationItems,
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16,
+                                        right: 16,
+                                        top: 8,
+                                        bottom: 120),
+                                    showSpinner: _latestHasMore,
+                                  )
+                                else if (presentationItems.isNotEmpty) ...[
+                                  _buildLatestSliver(
+                                    presentationItems
+                                        .take(_latestLeadCount)
+                                        .toList(),
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16, right: 16, top: 8),
+                                    showSpinner: false,
+                                  ),
+                                  SliverToBoxAdapter(
+                                    child: Column(
+                                      key: const Key('home_extras'),
+                                      children: [
+                                        ..._homeExtras(),
+                                        const SizedBox(height: 10),
+                                      ],
+                                    ),
+                                  ),
+                                  _buildLatestSliver(
+                                    presentationItems
+                                        .skip(_latestLeadCount)
+                                        .toList(),
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16, right: 16, bottom: 120),
+                                    showSpinner: _latestHasMore,
+                                  ),
+                                ] else
+                                  const SliverToBoxAdapter(
+                                    child: SizedBox(height: 120),
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+              // Floating Top App Bar Layer
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildTopAppBar(),
+                    if (_breakingStripAds.isNotEmpty)
+                      RotatingBreakingStrip(
+                        ads: _breakingStripAds,
+                        placementZone: 'feed',
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        ));
   }
 }

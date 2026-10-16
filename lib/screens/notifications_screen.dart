@@ -10,6 +10,8 @@ import 'notifications_tab.dart';
 import '../services/api_service.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../services/notification_service.dart';
+import '../models/news_article.dart';
+import '../models/notification_target.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -41,7 +43,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
-    
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -51,7 +53,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           elevation: 0,
           surfaceTintColor: Colors.transparent,
           leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black87),
+            icon: Icon(Icons.arrow_back_ios_new_rounded,
+                color: isDark ? Colors.white : Colors.black87),
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(
@@ -79,22 +82,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 if (AppState.instance.unreadNotificationsCount == 0) {
                   return const SizedBox.shrink();
                 }
-                return TextButton(
+                // An icon, so the screen title is not squeezed to "నో...".
+                return IconButton(
+                  key: const Key('notifications_mark_all_read'),
+                  icon: const Icon(Icons.done_all_rounded,
+                      color: AppColors.primary),
+                  tooltip: 'అన్నీ చదివినట్లు గుర్తించు',
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     AppState.instance.markAllNotificationsRead();
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      behavior: SnackBarBehavior.floating,
+                      duration: Duration(seconds: 2),
+                      content: Text('అన్నీ చదివినట్లు గుర్తించబడ్డాయి'),
+                    ));
                   },
-                  child: const Text('అన్నీ చదివినట్లు గుర్తించు', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
                 );
               },
             ),
             IconButton(
-              icon: Icon(Icons.tune_rounded, color: isDark ? Colors.white70 : Colors.black87),
+              icon: Icon(Icons.tune_rounded,
+                  color: isDark ? Colors.white70 : Colors.black87),
               tooltip: 'నోటిఫికేషన్ సెట్టింగ్‌లు',
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+                  MaterialPageRoute(
+                      builder: (_) => const NotificationSettingsScreen()),
                 );
               },
             ),
@@ -106,9 +120,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               animation: AppState.instance,
               builder: (context, _) {
                 final notifications = AppState.instance.notifications;
-                
+
                 if (_isLoading && notifications.isEmpty) {
-                  return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+                  return const Center(
+                      child:
+                          CircularProgressIndicator(color: AppColors.primary));
                 }
 
                 if (notifications.isEmpty) {
@@ -124,17 +140,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                     ),
                   );
                 }
-                
+
                 return RefreshIndicator(
                   onRefresh: _loadNotifications,
                   color: AppColors.primary,
                   child: ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
                     itemCount: notifications.length,
-                    separatorBuilder: (context, index) => const SizedBox(height: 12),
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      return _buildNotificationCard(notifications[index], isDark);
+                      return _buildNotificationCard(
+                          notifications[index], isDark);
                     },
                   ),
                 );
@@ -152,7 +171,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.notifications_off_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
+          Icon(Icons.notifications_off_outlined,
+              size: 64, color: isDark ? Colors.white24 : Colors.black26),
           const SizedBox(height: 16),
           Text(
             'ఇంకా ఎలాంటి నోటిఫికేషన్లు లేవు',
@@ -177,7 +197,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Widget _buildNotificationCard(AppNotification notification, bool isDark) {
     final bool isUnread = !notification.isRead;
-    
+
     // Determine icon and color based on type
     IconData icon;
     Color iconColor;
@@ -208,110 +228,172 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ApiService.instance.markNotificationRead(notification.id);
         }
 
-        final target = NotificationDeepLinkResolver.resolveFromAppNotification(notification);
+        final target = NotificationDeepLinkResolver.resolveFromAppNotification(
+            notification);
         if (mounted) {
-          NotificationService.instance.navigateToTarget(target, context: context);
+          NotificationService.instance
+              .navigateToTarget(target, context: context);
         }
       },
+      // News-style row: picture on the left; headline (2 lines), a short
+      // summary (2 lines) and the time on the right — full width for text.
       child: Container(
-        padding: const EdgeInsets.all(16),
+        key: Key('notification_card_${notification.id}'),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isUnread 
-              ? (isDark ? AppColors.primary.withValues(alpha: 0.1) : AppColors.primary.withValues(alpha: 0.05))
-              : (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02)),
+          color: isUnread
+              ? (isDark
+                  ? AppColors.primary.withValues(alpha: 0.10)
+                  : AppColors.primary.withValues(alpha: 0.04))
+              : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isUnread
-                ? AppColors.primary.withValues(alpha: 0.3)
-                : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
-            width: isUnread ? 1.5 : 1.0,
+                ? AppColors.primary.withValues(alpha: 0.25)
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.06)),
           ),
+          boxShadow: isDark
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: iconColor, size: 24),
-            ),
-            const SizedBox(width: 16),
+            _thumbnail(notification, icon, iconColor),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text(
+                    notification.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      height: 1.35,
+                      fontWeight: isUnread ? FontWeight.w800 : FontWeight.w600,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                  ),
+                  if (_showMessage(notification)) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      notification.message.trim(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        height: 1.4,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      Icon(icon, size: 14, color: iconColor),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          notification.title,
+                          _formatTimestamp(notification.timestamp),
+                          maxLines: 1,
                           style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: isUnread ? FontWeight.bold : FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black87,
+                            fontSize: 12,
+                            color: isDark ? Colors.white38 : Colors.black45,
+                            fontWeight:
+                                isUnread ? FontWeight.w600 : FontWeight.normal,
                           ),
                         ),
                       ),
-                      Text(
-                        _formatTimestamp(notification.timestamp),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white38 : Colors.black38,
-                          fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
+                      if (isUnread)
+                        Container(
+                          key: const Key('notification_unread_dot'),
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
                         ),
-                      ),
                     ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    notification.message,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? (isUnread ? Colors.white70 : Colors.white54) : (isUnread ? Colors.black87 : Colors.black54),
-                      height: 1.4,
-                    ),
                   ),
                 ],
               ),
             ),
-            if (notification.imageUrl != null && notification.imageUrl!.isNotEmpty) ...[
-              const SizedBox(width: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  notification.imageUrl!,
-                  width: 50,
-                  height: 50,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ],
-            if (isUnread) ...[
-              const SizedBox(width: 12),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: AppColors.primary,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ]
           ],
         ),
       ),
     );
   }
 
+  /// The news picture, or the type icon on a tinted square when there is none.
+  Widget _thumbnail(AppNotification n, IconData icon, Color iconColor) {
+    const size = 84.0;
+    final fallback = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: iconColor.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icon, color: iconColor, size: 30),
+    );
+    final url = n.imageUrl?.trim() ?? '';
+    if (url.isEmpty) {
+      // No picture in the notification: show the story's own photo.
+      return _StoryImage(
+        key: ValueKey('notification_story_image_${n.id}'),
+        notification: n,
+        size: size,
+        fallback: fallback,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Image.network(
+        url,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        cacheWidth: 252,
+        errorBuilder: (_, __, ___) => fallback,
+        loadingBuilder: (context, child, progress) => progress == null
+            ? child
+            : Container(
+                width: size,
+                height: size,
+                color: iconColor.withValues(alpha: 0.06),
+              ),
+      ),
+    );
+  }
+
+  /// The summary line, unless it only repeats the headline (news pushes
+  /// often send the same text as title and body).
+  static bool _showMessage(AppNotification n) {
+    String norm(String s) =>
+        s.replaceAll(RegExp(r'[\s.…।,!?]+'), '').toLowerCase();
+    final m = norm(n.message);
+    if (m.isEmpty) return false;
+    final t = norm(n.title);
+    return m != t && !t.startsWith(m);
+  }
+
   String _formatTimestamp(DateTime time) {
     final now = DateTime.now();
     final diff = now.difference(time);
-    if (diff.inMinutes < 60) {
+    if (diff.inMinutes < 1) {
+      return 'ఇప్పుడే';
+    } else if (diff.inMinutes < 60) {
       return '${diff.inMinutes} నిమిషాల కిందట';
     } else if (diff.inHours < 24) {
       return '${diff.inHours} గంటల కిందట';
@@ -320,5 +402,85 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } else {
       return DateFormat('MMM d').format(time);
     }
+  }
+}
+
+/// Thumbnail for a notification that carries no image: looks up the story it
+/// opens (article or reader post) and shows that story's photo. Lookups are
+/// cached per story, so scrolling the inbox does not refetch.
+class _StoryImage extends StatefulWidget {
+  const _StoryImage({
+    super.key,
+    required this.notification,
+    required this.size,
+    required this.fallback,
+  });
+
+  final AppNotification notification;
+  final double size;
+  final Widget fallback;
+
+  static final Map<String, Future<String?>> _cache = {};
+
+  @override
+  State<_StoryImage> createState() => _StoryImageState();
+}
+
+class _StoryImageState extends State<_StoryImage> {
+  Future<String?>? _image;
+
+  @override
+  void initState() {
+    super.initState();
+    final target = NotificationDeepLinkResolver.resolveFromAppNotification(
+        widget.notification);
+    final id = target.identifier?.trim() ?? '';
+    if (id.isEmpty) return;
+    final api = ApiService.instance;
+    switch (target.type) {
+      case NotificationTargetType.article:
+        _image = _StoryImage._cache
+            .putIfAbsent('article:$id', () => _pick(api.getArticleDetail(id)));
+      case NotificationTargetType.ugc:
+        _image = _StoryImage._cache
+            .putIfAbsent('ugc:$id', () => _pick(api.getUgcDetail(id)));
+      default:
+        break;
+    }
+  }
+
+  static Future<String?> _pick(Future<NewsArticle> detail) async {
+    try {
+      final a = await detail;
+      final candidates = [a.imageUrl, ...?a.imageUrls];
+      for (final c in candidates) {
+        if (c.trim().startsWith('http')) return c.trim();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = _image;
+    if (image == null) return widget.fallback;
+    return FutureBuilder<String?>(
+      future: image,
+      builder: (context, snap) {
+        final url = snap.data;
+        if (url == null) return widget.fallback;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            url,
+            width: widget.size,
+            height: widget.size,
+            fit: BoxFit.cover,
+            cacheWidth: 252,
+            errorBuilder: (_, __, ___) => widget.fallback,
+          ),
+        );
+      },
+    );
   }
 }

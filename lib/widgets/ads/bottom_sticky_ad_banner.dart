@@ -106,8 +106,8 @@ class _BottomStickyAdBannerState extends State<BottomStickyAdBanner> {
               left: 8,
               child: IgnorePointer(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFF4C3E35), // Dark brown pill
                     borderRadius: BorderRadius.circular(4),

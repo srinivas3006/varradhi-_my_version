@@ -390,6 +390,8 @@ class HomeFeedRepository {
     String? category,
     int pageSize = 20,
   }) async {
+    // A category is filtered by /feed/ itself (backend fix, Oct 2026): desk
+    // articles and approved citizen posts of that category together.
     final response = next != null
         ? await _dio.get(next)
         : await _dio.get(latestEndpoint, queryParameters: {
@@ -406,7 +408,8 @@ class HomeFeedRepository {
     return LatestPage.parse(response.data);
   }
 
-  Future<void> _persist(String key, Map<String, dynamic> body, bool lite) async {
+  Future<void> _persist(
+      String key, Map<String, dynamic> body, bool lite) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(

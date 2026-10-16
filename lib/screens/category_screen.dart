@@ -40,10 +40,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _error;
   late String _queryIdentity;
   String get _currentQueryIdentity => [
-    AppState.instance.contentLanguage, AppState.instance.stateName,
-    AppState.instance.district, AppState.instance.city,
-    AppState.instance.subdistrict, AppState.instance.village,
-  ].join('|');
+        AppState.instance.contentLanguage,
+        AppState.instance.stateName,
+        AppState.instance.district,
+        AppState.instance.city,
+        AppState.instance.subdistrict,
+        AppState.instance.village,
+      ].join('|');
 
   void _onPreferencesChanged() {
     final identity = _currentQueryIdentity;
@@ -84,17 +87,20 @@ class _CategoryScreenState extends State<CategoryScreen> {
       final response = await ApiService.instance.getNewsFeed(
         category: widget.categorySlug,
         scope: widget.scope == 'local' ? 'local' : null,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-        city: AppState.instance.city,
-        subdistrict: AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null,
-        village: AppState.instance.village.isNotEmpty ? AppState.instance.village : null,
+        // Chosen place only; none chosen → broad feed (backend contract).
+        state: AppState.instance.feedPlace.state,
+        district: AppState.instance.feedPlace.district,
+        city: AppState.instance.hasValidLocation ? AppState.instance.city : '',
+        subdistrict: AppState.instance.feedPlace.subdistrict,
+        village: AppState.instance.feedPlace.village,
         lang: _feedLang,
         pageSize: 20,
       );
 
       if (!mounted || generation != _generation) return;
-      if (response.hasErrors) throw ApiException(response.errorMessage ?? 'Unable to load articles.');
+      if (response.hasErrors) {
+        throw ApiException(response.errorMessage ?? 'Unable to load articles.');
+      }
       setState(() {
         _articles.clear();
         _articles.addAll(response.data ?? []);
@@ -122,18 +128,21 @@ class _CategoryScreenState extends State<CategoryScreen> {
       final response = await ApiService.instance.getNewsFeed(
         category: widget.categorySlug,
         scope: widget.scope == 'local' ? 'local' : null,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-        city: AppState.instance.city,
-        subdistrict: AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null,
-        village: AppState.instance.village.isNotEmpty ? AppState.instance.village : null,
+        // Chosen place only; none chosen → broad feed (backend contract).
+        state: AppState.instance.feedPlace.state,
+        district: AppState.instance.feedPlace.district,
+        city: AppState.instance.hasValidLocation ? AppState.instance.city : '',
+        subdistrict: AppState.instance.feedPlace.subdistrict,
+        village: AppState.instance.feedPlace.village,
         lang: _feedLang,
         cursor: _nextCursor,
         pageSize: 20,
       );
 
       if (!mounted || generation != _generation) return;
-      if (response.hasErrors) throw ApiException(response.errorMessage ?? 'Unable to load articles.');
+      if (response.hasErrors) {
+        throw ApiException(response.errorMessage ?? 'Unable to load articles.');
+      }
       final newArticles = response.data ?? [];
       setState(() {
         final seen = _articles.map((article) => article.id).toSet();
@@ -144,11 +153,15 @@ class _CategoryScreenState extends State<CategoryScreen> {
     } catch (_) {
       if (mounted && generation == _generation) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('మరిన్ని కథనాలను లోడ్ చేయడం సాధ్యం కాలేదు. దయచేసి మళ్లీ ప్రయత్నించండి.')),
+          const SnackBar(
+              content: Text(
+                  'మరిన్ని కథనాలను లోడ్ చేయడం సాధ్యం కాలేదు. దయచేసి మళ్లీ ప్రయత్నించండి.')),
         );
       }
     } finally {
-      if (mounted && generation == _generation) setState(() => _isLoadingMore = false);
+      if (mounted && generation == _generation) {
+        setState(() => _isLoadingMore = false);
+      }
     }
   }
 
@@ -342,9 +355,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w500,
                                                 color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.color,
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.color,
                                               ),
                                             ),
                                             Padding(
@@ -355,9 +368,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                                   style: TextStyle(
                                                       fontSize: 11,
                                                       color: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.color)),
+                                                          .textTheme
+                                                          .bodySmall
+                                                          ?.color)),
                                             ),
                                             Icon(
                                               Icons.favorite_rounded,
@@ -374,9 +387,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w500,
                                                 color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.color,
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.color,
                                               ),
                                             ),
                                           ],
@@ -394,7 +407,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                               children: [
                                 const Padding(
                                   padding: EdgeInsets.only(bottom: 14.0),
-                                  child: BannerAdSlot(placementZone: 'category_feed', maxHeight: 72),
+                                  child: BannerAdSlot(
+                                      placementZone: 'category_feed',
+                                      maxHeight: 72),
                                 ),
                                 card,
                               ],

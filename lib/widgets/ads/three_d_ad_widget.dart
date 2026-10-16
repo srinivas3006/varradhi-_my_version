@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -27,7 +29,13 @@ class ThreeDAdWidget extends StatefulWidget {
 }
 
 class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  /// Slow idle sway, so the card moves in 3D on its own while untouched.
+  late final AnimationController _idle = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 6),
+  )..repeat();
+  bool _touching = false;
   bool _hasError = false;
   double _tiltX = 0.0;
   double _tiltY = 0.0;
@@ -38,6 +46,9 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
   @override
   void initState() {
     super.initState();
+    _idle.addListener(() {
+      if (!_touching && mounted) setState(() {});
+    });
     _reboundController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 350),
@@ -52,12 +63,14 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
   @override
   void dispose() {
     _reboundController.dispose();
+    _idle.dispose();
     super.dispose();
   }
 
   void _onPanUpdate(DragUpdateDetails details, Size size) {
     if (size.width == 0 || size.height == 0) return;
     _reboundController.stop();
+    _touching = true;
 
     // Map gesture delta to subtle tilt angles (max ~0.15 radians)
     final dx = (details.localPosition.dx - size.width / 2) / (size.width / 2);
@@ -70,6 +83,7 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
   }
 
   void _onPanEnd(DragEndDetails details) {
+    _touching = false;
     _reboundX = Tween<double>(begin: _tiltX, end: 0.0).animate(
       CurvedAnimation(parent: _reboundController, curve: Curves.easeOutBack),
     );
@@ -81,7 +95,8 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
 
   Future<void> _handleTap() async {
     HapticFeedback.selectionClick();
-    AdManager.instance.recordClick(widget.ad, placementZone: widget.placementZone);
+    AdManager.instance
+        .recordClick(widget.ad, placementZone: widget.placementZone);
     if (widget.ad.destinationUrl.isNotEmpty) {
       final uri = Uri.tryParse(widget.ad.destinationUrl);
       if (uri != null && await canLaunchUrl(uri)) {
@@ -102,13 +117,21 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
       exposureKey: widget.exposureKey,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final size = Size(constraints.maxWidth, constraints.maxWidth * (3 / 4));
+          final size =
+              Size(constraints.maxWidth, constraints.maxWidth * (3 / 4));
 
           // 3D perspective transformation matrix
+          // Idle sway while nobody is touching it; a finger takes over.
+          final reduceMotion =
+              MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+          final t = _idle.value * 2 * math.pi;
+          final swayY = _touching || reduceMotion ? 0.0 : math.sin(t) * 0.14;
+          final swayX =
+              _touching || reduceMotion ? 0.0 : math.cos(t * 2) * 0.05;
           final transform = Matrix4.identity()
             ..setEntry(3, 2, 0.001) // perspective
-            ..rotateX(_tiltX)
-            ..rotateY(_tiltY);
+            ..rotateX(_tiltX + swayX)
+            ..rotateY(_tiltY + swayY);
 
           return GestureDetector(
             onPanUpdate: (d) => _onPanUpdate(d, size),
@@ -133,12 +156,14 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.25 : 0.12),
+                        color: const Color(0xFF6366F1)
+                            .withValues(alpha: isDark ? 0.25 : 0.12),
                         blurRadius: 20,
                         offset: Offset(_tiltY * 30, 8 - _tiltX * 30),
                       ),
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+                        color: Colors.black
+                            .withValues(alpha: isDark ? 0.35 : 0.08),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -149,7 +174,7 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                      AdBadge.positioned(),
+                        AdBadge.positioned(),
                         CachedNetworkImage(
                           imageUrl: widget.ad.imageUrl,
                           fit: BoxFit.cover,
@@ -159,7 +184,8 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                               child: SizedBox(
                                 width: 28,
                                 height: 28,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               ),
                             ),
                           ),
@@ -177,8 +203,10 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                             child: Container(
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  begin: Alignment(-1.0 + _tiltY * 3, -1.0 - _tiltX * 3),
-                                  end: Alignment(1.0 + _tiltY * 3, 1.0 - _tiltX * 3),
+                                  begin: Alignment(
+                                      -1.0 + _tiltY * 3, -1.0 - _tiltX * 3),
+                                  end: Alignment(
+                                      1.0 + _tiltY * 3, 1.0 - _tiltX * 3),
                                   colors: [
                                     Colors.white.withValues(alpha: 0.22),
                                     Colors.transparent,
@@ -196,7 +224,8 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                           bottom: 10,
                           right: 12,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.6),
                               borderRadius: BorderRadius.circular(6),
@@ -204,7 +233,8 @@ class _ThreeDAdWidgetState extends State<ThreeDAdWidget>
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.touch_app_rounded, size: 12, color: Colors.white70),
+                                Icon(Icons.touch_app_rounded,
+                                    size: 12, color: Colors.white70),
                                 SizedBox(width: 4),
                                 Text(
                                   'Tilt to interact',

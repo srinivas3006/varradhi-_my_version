@@ -61,9 +61,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
   }
 
   /// A guest's bookmarks, kept on this phone, newest first.
-  static List<SavedItem> _guestItems() => AppState.instance.deviceSavedStories
-      .map(SavedItem.onDevice)
-      .toList();
+  static List<SavedItem> _guestItems() =>
+      AppState.instance.deviceSavedStories.map(SavedItem.onDevice).toList();
 
   Future<void> _fetchBookmarks() async {
     if (!mounted) return;
@@ -153,7 +152,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black87),
+          icon: Icon(Icons.arrow_back_ios_new_rounded,
+              color: isDark ? Colors.white : Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -171,7 +171,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
 
   Widget _buildBody(bool isDark) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_error != null && _bookmarks.isEmpty) {
@@ -179,9 +180,12 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off_rounded, size: 48, color: isDark ? Colors.white38 : Colors.black38),
+            Icon(Icons.cloud_off_rounded,
+                size: 48, color: isDark ? Colors.white38 : Colors.black38),
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+            Text(_error!,
+                style:
+                    TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _fetchBookmarks,
@@ -208,7 +212,9 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.bookmarks_outlined, size: 64, color: isDark ? Colors.white24 : Colors.black26),
+                  Icon(Icons.bookmarks_outlined,
+                      size: 64,
+                      color: isDark ? Colors.white24 : Colors.black26),
                   const SizedBox(height: 16),
                   Text(
                     tr('no_saved_articles'),
@@ -251,29 +257,32 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           return SizedBox(
             height: _cardHeight(context),
             child: NewsFeedCard(
-            article: article,
-            onTap: () {
-              // content_id drives navigation: an article opens by slug, a
-              // citizen post by its id (the detail screen fetches either).
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => NewsDetailScreen(
-                    article: article,
-                    slug: item.isUgc ? null : article.slug,
+              article: article,
+              onTap: () {
+                // content_id drives navigation: an article opens by slug, a
+                // citizen post by its id (the detail screen fetches either).
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => NewsDetailScreen(
+                      article: article,
+                      slug: item.isUgc ? null : article.slug,
+                    ),
                   ),
-                ),
-              ).then((_) { if (mounted) _fetchBookmarks(); });
-            },
-            onLike: () {},
-            onBookmark: () => _remove(item),
-            onShare: () => ShareService.shareArticle(article),
-            onComment: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => CommentsScreen(article: article)),
-              );
-            },
+                ).then((_) {
+                  if (mounted) _fetchBookmarks();
+                });
+              },
+              onLike: () {},
+              onBookmark: () => _remove(item),
+              onShare: () => ShareService.shareArticle(article),
+              onComment: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => CommentsScreen(article: article)),
+                );
+              },
             ),
           );
         },

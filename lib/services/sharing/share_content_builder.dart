@@ -35,9 +35,9 @@ class ShareContentBuilder {
     final brandHost = Uri.parse(ShareBrandConfig.website).host;
     if (uri == null || uri.scheme != 'https') return null;
     final host = uri.host.toLowerCase();
-    final ok = host == brandHost ||
-        host == 'www.$brandHost' ||
-        host.endsWith('.$brandHost');
+    // Only the public site. api.vaaradhinews.com (or any other subdomain)
+    // is the backend, never a link to share — backend contract, Oct 2026.
+    final ok = host == brandHost || host == 'www.$brandHost';
     return ok ? value : null;
   }
 

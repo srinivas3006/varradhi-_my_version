@@ -192,7 +192,6 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
     }
   }
 
-
   void _toggleMute() {
     if (_playbackController != null && _isInitialized) {
       _playbackController!.setMuted(!_playbackController!.value.isMuted);

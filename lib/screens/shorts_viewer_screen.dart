@@ -218,15 +218,15 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
           // to, and the bottom bar is the way out.
           if (widget.showBackButton)
             SafeArea(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.of(context).maybePop(),
-                tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                ),
               ),
             ),
-          ),
 
           // Title of the Short currently on screen.
           Positioned(
@@ -271,7 +271,8 @@ class _Placeholder extends StatelessWidget {
           if (short.thumbnailUrl.isNotEmpty)
             Image.network(short.thumbnailUrl, fit: BoxFit.cover),
           const Center(
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Colors.white70),
           ),
         ],
       ),

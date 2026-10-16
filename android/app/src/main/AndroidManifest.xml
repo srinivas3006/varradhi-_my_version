@@ -1,5 +1,12 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The app does not use the advertising ID (its ads come from our own
+         backend). Play Console's Advertising ID declaration is "No", so this
+         removes the permission even if a library ever tries to add it —
+         Google's documented setup for apps that answer "No". -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -62,10 +69,11 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <!-- Only the apex host. On Android 11 and below, one host
-                     failing verification unverifies every host in every
-                     autoVerify filter, and www serves no assetlinks.json. -->
+                <!-- Both hosts serve /.well-known/assetlinks.json (verified
+                     Oct 2026). Keep it that way: on Android 11 and below one
+                     host failing verification unverifies every host here. -->
                 <data android:scheme="https" android:host="vaaradhinews.com" />
+                <data android:scheme="https" android:host="www.vaaradhinews.com" />
                 <data android:pathPrefix="/article/" />
                 <data android:pathPrefix="/poster/" />
                 <data android:pathPrefix="/poll/" />
@@ -109,6 +117,15 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" />
+        </intent>
+        <!-- Contact Us: email and phone open the mail app and the dialer. -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
         </intent>
         <!-- wa.me links open the WhatsApp app when it is installed. -->
         <package android:name="com.whatsapp" />

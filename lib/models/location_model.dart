@@ -29,7 +29,8 @@ class LocationNode {
       slug: (json['slug'] ?? '').toString(),
       code: (json['code'] ?? '').toString(),
       pincode: (json['pincode'] ?? '').toString(),
-      parentId: (json['state'] ?? json['district'] ?? json['subdistrict'] ?? '').toString(),
+      parentId: (json['state'] ?? json['district'] ?? json['subdistrict'] ?? '')
+          .toString(),
       sortOrder: int.tryParse(json['sort_order']?.toString() ?? '0') ?? 0,
     );
   }
@@ -190,7 +191,9 @@ class LocationProfile {
       return map.isEmpty ? null : LocationNode.fromJson(map);
     }
 
-    final legacy = json['legacy'] is Map ? Map<String, dynamic>.from(json['legacy']) : <String, dynamic>{};
+    final legacy = json['legacy'] is Map
+        ? Map<String, dynamic>.from(json['legacy'])
+        : <String, dynamic>{};
     return LocationProfile(
       locationType: (json['location_type'] ?? '').toString(),
       locationId: (json['location_id'] ?? '').toString(),
@@ -202,7 +205,9 @@ class LocationProfile {
       legacyDistrict: (legacy['district'] ?? '').toString(),
       legacySubdistrict: (legacy['subdistrict'] ?? '').toString(),
       legacyVillage: (legacy['village'] ?? '').toString(),
-      updatedAt: json['location_updated_at'] != null ? DateTime.tryParse(json['location_updated_at'].toString()) : null,
+      updatedAt: json['location_updated_at'] != null
+          ? DateTime.tryParse(json['location_updated_at'].toString())
+          : null,
     );
   }
 

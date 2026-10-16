@@ -113,6 +113,24 @@ class AppState extends ChangeNotifier {
     await _persist();
   }
 
+  /// The place every feed request is filtered by (backend contract, Oct
+  /// 2026): the reader's chosen or detected location — state, district,
+  /// subdistrict and village, whichever are known — or all empty when no
+  /// location has been set, which the backend treats as a broad feed.
+  ///
+  /// The placeholder Telangana / Hyderabad below is only a starting value;
+  /// sending it before the reader picked a place would hide other states'
+  /// news from a reader in Andhra Pradesh.
+  ({String state, String district, String subdistrict, String village})
+      get feedPlace => hasValidLocation
+          ? (
+              state: stateName.trim(),
+              district: district.trim(),
+              subdistrict: subdistrict.trim(),
+              village: village.trim(),
+            )
+          : (state: '', district: '', subdistrict: '', village: '');
+
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -1305,6 +1323,7 @@ class AppState extends ChangeNotifier {
     String? title,
     String? body,
     String? messageId,
+    String? imageUrl,
   }) async {
     final notificationId = data['notification_id']?.toString();
     final id = notificationId ??
@@ -1317,6 +1336,10 @@ class AppState extends ChangeNotifier {
       'body': body ?? data['body']?.toString() ?? '',
       'created_at':
           data['created_at']?.toString() ?? DateTime.now().toIso8601String(),
+      // FCM's notification image is not in `data`; keep it for the inbox.
+      if (AppNotification.imageFrom(data) == null &&
+          (imageUrl?.startsWith('http') ?? false))
+        'image_url': imageUrl,
       'is_read': false,
     });
     if (incoming.title.isEmpty && incoming.message.isEmpty) return;
@@ -1597,8 +1620,9 @@ class AppState extends ChangeNotifier {
       _commentBaseSeen[articleId] = baseCount;
       return baseCount;
     }
-    final before =
-        _commentBaseAtAdd[articleId] ?? _commentBaseSeen[articleId] ?? baseCount;
+    final before = _commentBaseAtAdd[articleId] ??
+        _commentBaseSeen[articleId] ??
+        baseCount;
     final optimistic = before + added;
     return baseCount > optimistic ? baseCount : optimistic;
   }
@@ -1765,11 +1789,10 @@ class AppState extends ChangeNotifier {
         return null;
       }
       final raw = m['verified_mobile'] ?? m['ugc_verified_mobile'];
-      final flagged = m['mobile_verified'] == true ||
-          m['is_mobile_verified'] == true;
-      final mobile =
-          IndianMobile.normalize((raw ?? (flagged ? m['mobile'] : null))
-              ?.toString());
+      final flagged =
+          m['mobile_verified'] == true || m['is_mobile_verified'] == true;
+      final mobile = IndianMobile.normalize(
+          (raw ?? (flagged ? m['mobile'] : null))?.toString());
       return (mobile != null && mobile.length == 10) ? mobile : null;
     }
 
