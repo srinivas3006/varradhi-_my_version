@@ -1,20 +1,17 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
-/// A vertical story reader: cards move past each other with depth, rather
-/// than a flat slide or a zoom.
+/// A vertical story reader with a "cover" transition: the next card slides
+/// up over the current one, which drifts upward slowly and dims beneath it.
 ///
-/// The previous version drove the transition with `Transform.scale` from 0.94
-/// to 1.0 and nothing else, which is why swiping read as zooming in and out
-/// — scale was the only thing actually changing.
+/// The previous version held the incoming card back (a reveal lag) while the
+/// outgoing one lifted extra, which opened a strip of bare background between
+/// them mid-swipe. Here the cards always overlap — the outgoing card moves
+/// slower than the page, the incoming one tracks the finger exactly — so
+/// something is painted on every pixel for the whole gesture.
 ///
-/// Here **translation is the primary motion**. The outgoing card lifts away
-/// and tilts back very slightly while a scrim deepens over it; the incoming
-/// card is revealed from behind by moving *slower* than the page itself, and
-/// settles to its natural size. Scale is deliberately a finishing touch
-/// (0.985 → 1.0), not the effect — the intended hierarchy is
-/// translation > scrim > scale > rotation.
+/// PageView paints later pages on top, which is exactly the order a cover
+/// needs: the incoming card is always above the one it is covering. The same
+/// maths runs in reverse when swiping back down.
 class FlipPageView extends StatelessWidget {
   const FlipPageView({
     super.key,
@@ -34,26 +31,19 @@ class FlipPageView extends StatelessWidget {
   /// decoding by the time it is revealed.
   final bool allowImplicitScrolling;
 
-  /// How far the outgoing card tilts, in radians — about 1.5°.
-  ///
-  /// Barely perceptible on purpose. The intended hierarchy is
-  /// translation > scrim > scale > rotation, so rotation is the faintest
-  /// signal of the four: enough to hint at depth, not enough to read as a
-  /// card being turned over.
-  static const double _maxTilt = 0.026;
+  /// Share of the pager's movement cancelled for the outgoing card. At 0.7 it
+  /// travels 30% of the distance, which reads as it staying put underneath
+  /// while still feeling attached to the gesture.
+  static const double _parallax = 0.7;
 
-  /// How much the incoming card lags the page. It travels 82% of the distance
-  /// the pager moves it, so the remaining 18% reads as it being *behind*.
-  static const double _revealLag = 0.18;
+  /// Peak darkness over the outgoing card, reached as it is fully covered.
+  static const double _maxScrim = 0.5;
 
-  /// The incoming card's starting size: a 1.5% change over the whole gesture.
-  ///
-  /// Deliberately almost nothing. Scale was the *only* thing moving in the
-  /// original implementation, which is precisely why it read as zooming.
-  static const double _incomingScale = 0.985;
+  /// Darkness of the shadow cast above the incoming card's top edge.
+  static const double _maxShadow = 0.22;
 
-  /// Peak darkness over the outgoing card.
-  static const double _maxScrim = 0.45;
+  /// Height of that shadow.
+  static const double _shadowHeight = 24;
 
   @override
   Widget build(BuildContext context) {
@@ -88,12 +78,12 @@ class FlipPageView extends StatelessWidget {
                 final delta = (index - page).clamp(-1.0, 1.0);
 
                 // Settled card: no transform at all, so a story at rest is
-                // pixel-exact and its text never sits on a scaled layer.
+                // pixel-exact and its text never sits on a transformed layer.
                 if (delta == 0) return child;
 
                 return delta < 0
-                    ? _outgoing(child, delta, pageHeight)
-                    : _incoming(child, delta, pageHeight);
+                    ? _outgoing(child, -delta, pageHeight)
+                    : _incoming(child, delta);
               },
             );
           },
@@ -102,20 +92,11 @@ class FlipPageView extends StatelessWidget {
     );
   }
 
-  /// The card being swiped away above. Lifts, tilts back a little, and darkens
-  /// as it goes — the darkening is what sells it as passing *behind* rather
-  /// than simply leaving.
-  Widget _outgoing(Widget child, double delta, double pageHeight) {
-    final progress = -delta; // 0 → 1 as it leaves
-
-    return Transform(
-      alignment: Alignment.topCenter,
-      transform: Matrix4.identity()
-        ..setEntry(3, 2, 0.0012) // perspective
-        // A little extra lift on top of the pager's own movement, so the card
-        // accelerates away instead of tracking the finger exactly.
-        ..translateByDouble(0.0, -progress * pageHeight * 0.06, 0.0, 1.0)
-        ..rotateX(progress * _maxTilt),
+  /// The card being covered. Pushed back down against the pager so it only
+  /// drifts up slowly, and dimmed so it reads as sinking under the new one.
+  Widget _outgoing(Widget child, double progress, double pageHeight) {
+    return Transform.translate(
+      offset: Offset(0, parallaxAt(progress, pageHeight)),
       child: Stack(
         fit: StackFit.passthrough,
         children: [
@@ -123,10 +104,8 @@ class FlipPageView extends StatelessWidget {
           // Ignore pointers: the scrim is decoration and must never eat a tap
           // meant for the story underneath it.
           IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: progress * _maxScrim),
-              ),
+            child: ColoredBox(
+              color: Colors.black.withValues(alpha: scrimAt(progress)),
             ),
           ),
         ],
@@ -134,64 +113,54 @@ class FlipPageView extends StatelessWidget {
     );
   }
 
-  /// The card rising into place from below. Revealed rather than slid: it
-  /// lags the pager, so the outgoing card appears to uncover it.
-  Widget _incoming(Widget child, double delta, double pageHeight) {
-    final settled = 1 - delta; // 0 → 1 as it arrives
+  /// The card sliding in on top. It tracks the finger exactly — no lag, no
+  /// scale — and casts a soft shadow onto the card it is covering.
+  Widget _incoming(Widget child, double delta) {
+    final shadow = shadowAt(delta);
+    if (shadow == 0) return child;
 
-    return Transform.translate(
-      // Positive: hold it back down the screen against the pager's motion.
-      offset: Offset(0, delta * pageHeight * _revealLag),
-      child: Transform.scale(
-        scale: _incomingScale + (1 - _incomingScale) * settled,
-        child: Stack(
-          fit: StackFit.passthrough,
-          children: [
-            child,
-            // A soft edge along the top, so the card reads as sitting under
-            // the one leaving rather than butting against it.
-            IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.center,
-                    colors: [
-                      Colors.black.withValues(alpha: delta * 0.28),
-                      Colors.transparent,
-                    ],
-                  ),
+    return Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(
+          top: -_shadowHeight,
+          left: 0,
+          right: 0,
+          height: _shadowHeight,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: shadow),
+                    Colors.transparent,
+                  ],
                 ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  /// Exposed for tests: the tilt applied at a given swipe progress.
+  /// Downward offset applied to the outgoing card at a given progress.
   @visibleForTesting
-  static double tiltAt(double progress) => progress.clamp(0.0, 1.0) * _maxTilt;
+  static double parallaxAt(double progress, double pageHeight) =>
+      progress.clamp(0.0, 1.0) * pageHeight * _parallax;
 
-  /// Exposed for tests: the incoming card's scale at a given swipe delta.
-  @visibleForTesting
-  static double incomingScaleAt(double delta) {
-    final settled = 1 - delta.clamp(0.0, 1.0);
-    return _incomingScale + (1 - _incomingScale) * settled;
-  }
-
-  /// Exposed for tests: how far the incoming card lags the pager.
-  @visibleForTesting
-  static double revealLagAt(double delta, double pageHeight) =>
-      delta.clamp(0.0, 1.0) * pageHeight * _revealLag;
-
-  /// Exposed for tests: scrim opacity over the outgoing card.
+  /// Scrim opacity over the outgoing card.
   @visibleForTesting
   static double scrimAt(double progress) =>
       progress.clamp(0.0, 1.0) * _maxScrim;
 
-  /// Degrees, for a readable assertion.
+  /// Shadow opacity above the incoming card. Full while it travels, fading
+  /// over the last stretch so it is gone by the time the card lands.
   @visibleForTesting
-  static double get maxTiltDegrees => _maxTilt * 180 / math.pi;
+  static double shadowAt(double delta) =>
+      (delta.clamp(0.0, 1.0) * 6).clamp(0.0, 1.0) * _maxShadow;
 }

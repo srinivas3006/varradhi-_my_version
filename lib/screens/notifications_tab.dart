@@ -55,17 +55,20 @@ class NotificationsTab extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.notifications_none_rounded, size: 48, color: AppColors.textMuted),
+                    Icon(Icons.notifications_none_rounded,
+                        size: 48, color: AppColors.textMuted),
                     SizedBox(height: 12),
                     Text(
                       'ఇంకా ఎలాంటి నోటిఫికేషన్లు లేవు',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     SizedBox(height: 6),
                     Text(
                       'అప్‌డేట్‌లు మరియు అలర్ట్‌లు ఇక్కడ కనిపిస్తాయి.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      style:
+                          TextStyle(color: AppColors.textMuted, fontSize: 13),
                     ),
                   ],
                 ),

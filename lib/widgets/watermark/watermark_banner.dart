@@ -14,10 +14,17 @@ class WatermarkBanner extends StatelessWidget {
     this.padding = const EdgeInsets.symmetric(vertical: 8),
   });
 
-  /// Artwork asset. 1600x296, so it is laid out at its own 5.4:1 ratio
+  /// Artwork asset. 1600x533, so it is laid out at its own 3:1 ratio
   /// rather than being squeezed to whatever box it lands in.
-  static const String asset = 'assets/images/watermark_banner.png';
-  static const double aspectRatio = 1600 / 296;
+  static const String asset = 'assets/images/watermark_bannerv1.jpeg';
+  static const double aspectRatio = 1600 / 533;
+
+  /// The artwork is an opaque JPEG: the red strip and logo circle sit in the
+  /// middle, with plain black above and below. These are the strip's top and
+  /// bottom as fractions of the artwork height — what share images crop to,
+  /// so the black margins never cover the photo or bloat the card.
+  static const double stripTop = 0.21;
+  static const double stripBottom = 0.80;
 
   final double? height;
   final double opacity;

@@ -116,8 +116,8 @@ class _HoroscopeScreenState extends State<HoroscopeScreen> {
                             fontSize: 12, color: AppColors.textMuted)),
                     const SizedBox(height: 16),
                     Text(
-                      _selected < _readings.length 
-                          ? _readings[_selected] 
+                      _selected < _readings.length
+                          ? _readings[_selected]
                           : 'నేటి రాశి ఫలాలు మరియు జ్యోతిష్య అంచనాలు రూపొందించబడుతున్నాయి. దిన ఫలాలు ఉదయపు ఎడిషన్‌తో పాటు నిరంతరం నవీకరించబడతాయి.',
                       style: const TextStyle(
                           fontSize: 15, height: 1.6, color: Color(0xFF2E2E2E)),

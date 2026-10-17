@@ -17,6 +17,13 @@ class NewsArticle {
   final String body;
   final String imageUrl;
   final String source;
+
+  /// The original publisher's link for a story from another outlet
+  /// (`source_url`); empty for Vaaradhi's own stories.
+  final String sourceUrl;
+
+  /// That publisher's logo (`source_logo_url`), when sent.
+  final String sourceLogoUrl;
   final String category;
   final DateTime publishedAt;
   int likes;
@@ -43,6 +50,11 @@ class NewsArticle {
   final bool hasMore;
   final String coverageLevel;
   final String authorName;
+
+  /// Citizen news: the uploader's profile photo (empty when none is sent)
+  /// and their reporter level ("VERIFIED_USER", "TRUSTED_REPORTER"…).
+  final String authorAvatarUrl;
+  final String authorLevel;
   final String language;
   final bool isFeatured;
   final List<MediaItem> mediaItems;
@@ -69,6 +81,8 @@ class NewsArticle {
     required this.body,
     required this.imageUrl,
     required this.source,
+    this.sourceUrl = '',
+    this.sourceLogoUrl = '',
     required this.category,
     required this.publishedAt,
     required this.likes,
@@ -90,6 +104,8 @@ class NewsArticle {
     this.hasMore = false,
     this.coverageLevel = 'global',
     this.authorName = '',
+    this.authorAvatarUrl = '',
+    this.authorLevel = '',
     this.language = 'te',
     this.isFeatured = false,
     this.mediaItems = const [],
@@ -128,7 +144,24 @@ class NewsArticle {
     'is_breaking',
     'is_featured',
     'is_bookmarked',
+    // Without it every Home story read as "global" ("India / Global").
+    'coverage_level',
+    // Third-party stories: who published it originally.
+    'source_url',
+    'source_name',
+    'source_logo_url',
   ];
+
+  /// Coverage when the payload gives none (citizen posts on Home): the most
+  /// specific place the story names, else global.
+  static String _coverageFromPlace(Map<String, dynamic> json) {
+    bool has(String k) => (json[k]?.toString().trim() ?? '').isNotEmpty;
+    if (has('village')) return 'village';
+    if (has('subdistrict')) return 'mandal';
+    if (has('district')) return 'district';
+    if (has('state')) return 'state';
+    return 'global';
+  }
 
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
     final metadata = json['metadata'];
@@ -233,9 +266,14 @@ class NewsArticle {
       source: json['source_name']?.toString() ??
           json['source']?.toString() ??
           'Vaaradhi',
+      sourceUrl: json['source_url']?.toString().trim() ?? '',
+      sourceLogoUrl: json['source_logo_url']?.toString().trim() ?? '',
       category: parsedCategory,
-      publishedAt: DateParser.tryParse(json['published_at']) ?? DateTime.now(),
-      // The backend sends singular *_count names: like_count, dislike_count,
+      publishedAt: DateParser.tryParse(json['published_at'] ??
+              json['created_at'] ??
+              json['publish_date'] ??
+              json['published_date']) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       // comment_count. Only dislike_count was listed, so likes and comments
       // fell through to plural keys that never arrive and rendered 0 no
       // matter what the article actually had. Plural spellings kept as
@@ -245,8 +283,8 @@ class NewsArticle {
           json['dislike_count'] ?? json['dislikes_count'] ?? json['dislikes']),
       comments: _toInt(
           json['comment_count'] ?? json['comments_count'] ?? json['comments']),
-      shares: _toInt(
-          json['share_count'] ?? json['shares_count'] ?? json['shares']),
+      shares:
+          _toInt(json['share_count'] ?? json['shares_count'] ?? json['shares']),
       readTimeMinutes: _toInt(json['read_time_minutes'], 2),
       viewCount: _toInt(json['view_count'] ?? json['views_count']),
       state: json['state']?.toString(),
@@ -278,13 +316,27 @@ class NewsArticle {
               (json['article']['has_more'] == true ||
                   json['article']['hasMore'] == true)),
       coverageLevel:
-          json['coverage_level']?.toString().toLowerCase() ?? 'global',
+          (json['coverage_level']?.toString().trim().isNotEmpty ?? false)
+              ? json['coverage_level'].toString().trim().toLowerCase()
+              // Citizen posts come without one; desk articles always carry
+              // it, and stay "global" if it is ever missing.
+              : (_parseContentKind(json) == 'ugc'
+                  ? _coverageFromPlace(json)
+                  : 'global'),
       authorName: _sanitizeAuthor(
         json['author_name']?.toString() ??
-            (json['author'] is Map ? json['author']['name']?.toString() : null) ??
+            (json['author'] is Map
+                ? json['author']['name']?.toString()
+                : null) ??
+            // Citizen news: the person who uploaded it.
+            uploaderName(json['uploader']) ??
             json['source_name']?.toString() ??
             json['source']?.toString(),
       ),
+      authorAvatarUrl: uploaderAvatar(json['uploader']),
+      authorLevel: json['uploader'] is Map
+          ? (json['uploader']['trust_level'] ?? '').toString()
+          : '',
       language:
           json['language']?.toString() ?? json['lang']?.toString() ?? 'te',
       isFeatured: json['is_featured'] == true,
@@ -304,6 +356,45 @@ class NewsArticle {
         : 'article';
   }
 
+  /// Who published the story — required for news apps by Google Play's News
+  /// & Magazines policy, on every card and detail screen. Desk stories are
+  /// Vaaradhi Telugu News, another outlet (source_url), or a citizen reporter.
+  ///
+  /// Backend rule (Oct 2026): a story with `source_url` came from another
+  /// outlet — its `source_name` is the publisher, never Vaaradhi. Without
+  /// one it is Vaaradhi's own story, published by Vaaradhi Telugu News.
+  String sourceLabel({required bool telugu}) {
+    if (isUgc) return telugu ? 'సిటిజన్ రిపోర్టర్' : 'Citizen Reporter';
+    if (isExternal) return externalSourceName;
+    return telugu ? 'వారధి తెలుగు న్యూస్' : 'Vaaradhi Telugu News';
+  }
+
+  /// Published by another outlet (it has an original link).
+  bool get isExternal => !isUgc && sourceUrl.isNotEmpty;
+
+  /// The other outlet's name: `source_name`, else the link's website.
+  String get externalSourceName {
+    final name = source.trim();
+    final generic = {'', 'vaaradhi', 'varadhi', 'user_upload'};
+    if (!generic.contains(name.toLowerCase())) return name;
+    final host = Uri.tryParse(sourceUrl)?.host ?? '';
+    return host.startsWith('www.') ? host.substring(4) : host;
+  }
+
+  /// "Source: … · By …" — the source always, the author/uploader when known.
+  String attributionLine({required bool telugu}) {
+    final source = sourceLabel(telugu: telugu);
+    var by = byline;
+    // The outlet's name is often also sent as the author.
+    if (by.toLowerCase() == source.toLowerCase()) by = '';
+    final sourcePart = telugu ? 'మూలం: $source' : 'Source: $source';
+    if (by.isEmpty) return sourcePart;
+    final byPart = isUgc
+        ? (telugu ? 'అప్‌లోడ్ చేసినవారు: $by' : 'Uploader: $by')
+        : (telugu ? 'రచయిత: $by' : 'Author: $by');
+    return '$sourcePart · $byPart';
+  }
+
   /// The real author name from the API, or '' when the story carries only a
   /// desk placeholder (or an email). Screens show nothing then, rather than
   /// hard-coded "News Desk / Editorial Team" text.
@@ -316,11 +407,54 @@ class NewsArticle {
       'varadhi',
       'vaaradhi',
       'null',
+      // Source codes, not people: never shown as a name.
+      'user_upload',
+      'user upload',
+      'ugc',
+      'admin',
+      'editorial',
     };
     if (name.isEmpty || lower.contains('@') || placeholders.contains(lower)) {
       return '';
     }
     return name;
+  }
+
+  /// The uploader of a citizen post, from `uploader: {display_name | name |
+  /// full_name | username}`. When the account has no name and the backend
+  /// sends the email as display_name, only the part before "@" is used —
+  /// an email address is never shown in the app.
+  static String? uploaderName(dynamic uploader) {
+    if (uploader is! Map) return null;
+    for (final k in ['display_name', 'full_name', 'name', 'username']) {
+      final v = uploader[k]?.toString().trim() ?? '';
+      if (v.isEmpty || v.toLowerCase() == 'null') continue;
+      if (v.contains('@')) {
+        final local = v.split('@').first.trim();
+        if (local.isNotEmpty) return local;
+        continue;
+      }
+      return v;
+    }
+    return null;
+  }
+
+  /// The uploader's photo URL if the backend sends one (avatar_url /
+  /// profile_image / photo_url / profile_picture), else ''.
+  static String uploaderAvatar(dynamic uploader) {
+    if (uploader is! Map) return '';
+    for (final k in [
+      'avatar_url',
+      'profile_image',
+      'profile_image_url',
+      'photo_url',
+      'profile_picture',
+      'avatar',
+    ]) {
+      final v = uploader[k]?.toString().trim() ?? '';
+      if (v.startsWith('http')) return v;
+    }
+    return '';
   }
 
   static String _sanitizeAuthor(String? raw) {
@@ -443,11 +577,19 @@ class NewsArticle {
       'id': id,
       'slug': slug,
       'author_name': authorName,
+      if (authorAvatarUrl.isNotEmpty || authorLevel.isNotEmpty)
+        'uploader': {
+          'display_name': authorName,
+          if (authorAvatarUrl.isNotEmpty) 'avatar_url': authorAvatarUrl,
+          if (authorLevel.isNotEmpty) 'trust_level': authorLevel,
+        },
       'title': title,
       'summary': summary,
       'content': body,
       'thumbnail_url': imageUrl,
       'source_name': source,
+      if (sourceUrl.isNotEmpty) 'source_url': sourceUrl,
+      if (sourceLogoUrl.isNotEmpty) 'source_logo_url': sourceLogoUrl,
       'category': {'name': category},
       'published_at': publishedAt.toIso8601String(),
       'likes_count': likes,
@@ -564,8 +706,7 @@ class Comment {
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     final author = json['author'] as Map<String, dynamic>?;
-    var authorName =
-        author?['display_name'] ?? json['username'] ?? 'Anonymous';
+    var authorName = author?['display_name'] ?? json['username'] ?? 'Anonymous';
     if (authorName.toString().toLowerCase().contains('john')) {
       authorName = 'Reader';
     }
@@ -680,7 +821,9 @@ class MediaItem {
 
   bool get isVideo {
     final m = mediaType.toLowerCase().trim();
-    if (m == 'video' || m.startsWith('video') || m.contains('video')) return true;
+    if (m == 'video' || m.startsWith('video') || m.contains('video')) {
+      return true;
+    }
     final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
     return const ['.mp4', '.m3u8', '.mov', '.webm', '.mkv', '.m4v']
             .any(path.endsWith) ||

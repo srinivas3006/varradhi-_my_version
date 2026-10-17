@@ -1,206 +1,305 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../services/cms_service.dart';
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../widgets/auth/auth_ui.dart' show AuthPrimaryButton, authMuted;
+import '../widgets/branded_page.dart';
+import '../widgets/cms_contact_actions.dart';
 
+/// A backend-managed page (About, Privacy, Terms, Contact …).
+///
+/// Everything shown comes from GET /api/v1/cms/{slug}/: the title and the
+/// HTML body. Nothing about the page is written into the app; [fallbackTitle]
+/// is only the menu label, used in the header until the page arrives.
+///
+/// The last good copy is kept on the device: it shows at once while the page
+/// refreshes, and stands in when the network or server fails.
 class CMSPageScreen extends StatefulWidget {
-  final String slug;
-  final String? initialTitle;
-
   const CMSPageScreen({
     super.key,
     required this.slug,
     this.initialTitle,
+    this.service,
   });
+
+  final String slug;
+
+  /// The menu label (e.g. "Privacy Policy") shown until the page loads.
+  final String? initialTitle;
+
+  @visibleForTesting
+  final CmsService? service;
 
   @override
   State<CMSPageScreen> createState() => _CMSPageScreenState();
 }
 
 class _CMSPageScreenState extends State<CMSPageScreen> {
-  bool _isLoading = true;
-  String? _title;
-  String? _content;
-  String? _error;
+  CmsService get _service => widget.service ?? CmsService.instance;
+
+  CmsPage? _page;
+  CmsStatus? _status;
+  bool _loading = true;
+
+  bool get _telugu => AppState.instance.language == 'Telugu';
 
   @override
   void initState() {
     super.initState();
-    _title = widget.initialTitle ?? _formatTitle(widget.slug);
-    _loadPage();
+    _showCachedThenRefresh();
   }
 
-  String _formatTitle(String slug) {
-    return slug
-        .replaceAll('-', ' ')
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '')
-        .join(' ');
+  Future<void> _showCachedThenRefresh() async {
+    final saved = await _service.cached(widget.slug);
+    if (!mounted) return;
+    if (saved != null && _page == null) {
+      setState(() {
+        _page = saved;
+        _status = CmsStatus.cached;
+      });
+    }
+    await _refresh();
   }
 
-  String _cleanHtml(String html) {
-    return html
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n\n')
-        .replaceAll(RegExp(r'</li>', caseSensitive: false), '\n')
-        .replaceAll(RegExp(r'<li>', caseSensitive: false), '• ')
-        .replaceAll(RegExp(r'<[^>]*>'), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'")
-        .trim();
-  }
-
-  Future<void> _loadPage() async {
+  Future<void> _refresh() async {
+    if (mounted) setState(() => _loading = true);
+    final result = await _service.load(widget.slug);
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
-      _error = null;
+      _loading = false;
+      _status = result.status;
+      // A missing page drops any earlier copy; a failure keeps what is shown.
+      if (result.page != null || result.status == CmsStatus.notFound) {
+        _page = result.page;
+      }
     });
-
-    try {
-      final cms = await ApiService.instance.getCmsPage(widget.slug);
-      if (cms != null && mounted) {
-        setState(() {
-          if (cms['title'] != null && cms['title'].toString().isNotEmpty) {
-            _title = cms['title'].toString();
-          }
-          if (cms['content'] != null) {
-            _content = _cleanHtml(cms['content'].toString());
-          }
-          _isLoading = false;
-        });
-      } else {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            // Provide fallback text if CMS is not seeded
-            _content = _getDefaultContent(widget.slug);
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = 'సమాచారాన్ని లోడ్ చేయడం విఫలమైంది.';
-          _isLoading = false;
-        });
-      }
-    }
   }
 
-  String _getDefaultContent(String slug) {
-    switch (slug.toLowerCase()) {
-      case 'about':
-        return 'వారధి ఆంధ్రప్రదేశ్ మరియు తెలంగాణ అంతటా విశ్వసనీయమైన, నిజ-సమయ స్థానిక వార్తలు మరియు సమాచారాన్ని అందించే ప్రముఖ వేదిక.\n\nపారదర్శకమైన సమాచారంతో పౌరులకు అండగా నిలవడం, సిటిజెన్ జర్నలిజం ద్వారా స్థానిక గళాన్ని వినిపించడం మా లక్ష్యం.';
-      case 'contact':
-        return 'మీకు ఏవైనా ప్రశ్నలు, అభిప్రాయాలు లేదా ప్రకటనల విచారణలు ఉన్నాయా?\n\nఇమెయిల్: contact@vaaradhinews.com\nఫోన్: +91 98765 43210\nచిరునామా: వారధి మీడియా నెట్‌వర్క్, హైదరాబాద్, తెలంగాణ, భారతదేశం.';
-      case 'privacy':
-      case 'privacy-policy':
-        return 'మీ గోప్యత మాకు చాలా ముఖ్యం. మీ వ్యక్తిగత సమాచారం మరియు ప్రాధాన్యతలు సురక్షితంగా రక్షించబడతాయి. మేము మీ వ్యక్తిగత వివరాలను ఎవరికీ విక్రయించము.';
-      case 'terms':
-      case 'terms-and-conditions':
-        return 'వారధిని ఉపయోగించడం ద్వారా, మీరు మా సేవా నిబంధనలకు కట్టుబడి ఉంటారు. పౌర జర్నలిజం ద్వారా వార్తలను పోస్ట్ చేసే వినియోగదారులు ఆ సమాచార వాస్తవికతకు బాధ్యత వహించాలి.';
-      default:
-        return 'సమాచారం త్వరలో అందుబాటులోకి వస్తుంది.';
-    }
+  IconData? get _icon => switch (widget.slug) {
+        CmsSlugs.about => null, // the logo
+        CmsSlugs.privacy => Icons.shield_outlined,
+        CmsSlugs.terms => Icons.gavel_rounded,
+        CmsSlugs.contact => Icons.support_agent_rounded,
+        _ => Icons.article_outlined,
+      };
+
+  String get _title {
+    final t = _page?.title ?? '';
+    if (t.isNotEmpty) return t;
+    return widget.initialTitle ?? '';
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = Theme.of(context).scaffoldBackgroundColor;
-
-    return Scaffold(
-      backgroundColor: bgColor,
-      appBar: AppBar(
-        backgroundColor: bgColor,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          _title ?? 'సమాచారం',
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
-        ),
-      ),
-      body: _buildBody(isDark),
+    return BrandedPage(
+      barTitle: _title,
+      title: _title,
+      icon: _icon,
+      onRefresh: _refresh,
+      children: [_buildBody(context)],
     );
   }
 
-  Widget _buildBody(bool isDark) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
-    }
+  Widget _buildBody(BuildContext context) {
+    final page = _page;
 
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline_rounded, size: 48, color: isDark ? Colors.white38 : Colors.black38),
-            const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadPage,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('మళ్లీ ప్రయత్నించండి'),
-            ),
-          ],
-        ),
+    if (page == null) {
+      if (_loading) {
+        return const Padding(
+          key: Key('cms_loading'),
+          padding: EdgeInsets.symmetric(vertical: 48),
+          child: Center(
+            child: CircularProgressIndicator(color: AppColors.primary),
+          ),
+        );
+      }
+      final missing = _status == CmsStatus.notFound;
+      return _StatePanel(
+        key: Key(missing ? 'cms_not_found' : 'cms_failed'),
+        icon: missing ? Icons.find_in_page_outlined : Icons.wifi_off_rounded,
+        message: missing
+            ? (_telugu ? 'పేజీ అందుబాటులో లేదు' : 'Page not available')
+            : (_telugu
+                ? 'పేజీని లోడ్ చేయలేకపోయాం. ఇంటర్నెట్ కనెక్షన్ చూసి మళ్లీ ప్రయత్నించండి.'
+                : 'Could not load this page. Check your connection and try again.'),
+        retryLabel: _telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry',
+        onRetry: _refresh,
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _loadPage,
-      color: AppColors.primary,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_status == CmsStatus.cached && !_loading) _buildOfflineNote(),
+        // Contact Us: the email / phone / website the page itself lists, as
+        // tap buttons above the text (Play News policy: clearly visible).
+        if (widget.slug == CmsSlugs.contact)
+          CmsContactActions(html: page.content),
+        SectionCard(
+          key: const Key('cms_content'),
+          child: _CmsHtml(html: _withoutRepeatedTitle(page)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOfflineNote() {
+    return Container(
+      key: const Key('cms_offline_note'),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 18, color: Colors.orange),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _telugu
+                  ? 'ఆఫ్‌లైన్ — చివరిగా సేవ్ చేసిన కాపీ'
+                  : 'Offline — showing the last saved copy',
+              style: const TextStyle(fontSize: 12.5),
+            ),
+          ),
+          TextButton(
+            onPressed: _refresh,
+            child: Text(_telugu ? 'రిఫ్రెష్' : 'Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The body often opens with an <h1> of the same title the header already
+  /// shows; drop that one heading so it is not printed twice.
+  String _withoutRepeatedTitle(CmsPage page) {
+    final m =
+        RegExp(r'^\s*<h1[^>]*>(.*?)</h1>', caseSensitive: false, dotAll: true)
+            .firstMatch(page.content);
+    if (m == null) return page.content;
+    final heading =
+        m.group(1)!.replaceAll(RegExp(r'<[^>]*>'), '').trim().toLowerCase();
+    if (heading.isEmpty || heading != page.title.trim().toLowerCase()) {
+      return page.content;
+    }
+    return page.content.substring(m.end);
+  }
+}
+
+/// Renders CMS HTML natively — no WebView and no scripts — in the app's
+/// reading style. Links open outside the app (mailto:/tel: included).
+class _CmsHtml extends StatelessWidget {
+  const _CmsHtml({required this.html});
+
+  final String html;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final body =
+        isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
+    final heading = isDark ? AppColors.readingTitleDark : AppColors.textDark;
+    String hex(Color c) =>
+        '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+    return HtmlWidget(
+      html,
+      textStyle: TextStyle(fontSize: 15, height: 1.6, color: body),
+      customStylesBuilder: (e) {
+        switch (e.localName) {
+          case 'h1':
+            return {
+              'font-size': '21px',
+              'font-weight': '800',
+              'color': hex(heading),
+              'margin': '4px 0 10px 0',
+            };
+          case 'h2':
+            return {
+              'font-size': '18px',
+              'font-weight': '800',
+              'color': hex(heading),
+              'margin': '16px 0 8px 0',
+            };
+          case 'h3':
+          case 'h4':
+            return {
+              'font-size': '16px',
+              'font-weight': '700',
+              'color': hex(heading),
+              'margin': '12px 0 6px 0',
+            };
+          case 'p':
+            return {'margin': '0 0 12px 0'};
+          case 'a':
+            return {
+              'color': hex(AppColors.primary),
+              'font-weight': '600',
+            };
+          case 'li':
+            return {'margin': '0 0 6px 0'};
+        }
+        return null;
+      },
+      onTapUrl: (url) async {
+        final uri = Uri.tryParse(url);
+        if (uri == null) return false;
+        return launchUrl(uri, mode: LaunchMode.externalApplication);
+      },
+    );
+  }
+}
+
+class _StatePanel extends StatelessWidget {
+  const _StatePanel({
+    super.key,
+    required this.icon,
+    required this.message,
+    required this.retryLabel,
+    required this.onRetry,
+  });
+
+  final IconData icon;
+  final String message;
+  final String retryLabel;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              _title ?? '',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 8),
             Container(
-              width: 48,
-              height: 3,
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(2),
+                color: AppColors.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
               ),
+              child: Icon(icon, size: 34, color: AppColors.primary),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
             Text(
-              _content ?? '',
+              message,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 16,
-                color: isDark ? Colors.white70 : Colors.black87,
-                height: 1.7,
-                letterSpacing: 0.2,
-              ),
+                  fontSize: 15, height: 1.5, color: authMuted(context)),
             ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 20),
+            AuthPrimaryButton(
+              key: const Key('cms_retry'),
+              label: retryLabel,
+              icon: Icons.refresh_rounded,
+              onPressed: onRetry,
+            ),
           ],
         ),
       ),

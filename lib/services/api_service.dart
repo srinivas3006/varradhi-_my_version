@@ -7,6 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
 import '../models/news_article.dart';
+import '../models/saved_item.dart';
+import '../localization/location_translations.dart';
 import '../models/search_result.dart';
 import '../models/submission_status.dart';
 export '../models/submission_status.dart';
@@ -306,21 +308,41 @@ class ApiService {
     }
   }
 
-  /// 2. Raise a deletion request: POST /api/v1/auth/account/deletion-request/
+  /// 2. Raise a deletion request.
+  ///
+  /// Backend contract: POST /api/v1/accounts/delete-request/ with
+  /// `{reason, feedback}` (reason as readable text). Until that path is
+  /// deployed it answers 404, so the request then goes to the existing
+  /// POST /api/v1/auth/account/deletion-request/ `{reason, notes, confirm}`.
+  /// A 401 is refreshed once (and logged out on failure) by the ApiClient
+  /// interceptor.
   Future<AccountDeletionRequest> requestAccountDeletion({
     String reason = 'other',
     String? notes,
     bool confirm = true,
   }) async {
+    final feedback = notes?.trim() ?? '';
     try {
-      final response = await _dio.post(
-        '/api/v1/auth/account/deletion-request/',
-        data: {
-          'reason': reason,
-          if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-          'confirm': confirm,
-        },
-      );
+      Response<dynamic> response;
+      try {
+        response = await _dio.post(
+          '/api/v1/accounts/delete-request/',
+          data: {
+            'reason': AccountDeletionRequest.getReasonLabel(reason),
+            if (feedback.isNotEmpty) 'feedback': feedback,
+          },
+        );
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 404) rethrow;
+        response = await _dio.post(
+          '/api/v1/auth/account/deletion-request/',
+          data: {
+            'reason': reason,
+            if (feedback.isNotEmpty) 'notes': feedback,
+            'confirm': confirm,
+          },
+        );
+      }
       final data = (response.data['data'] as Map<String, dynamic>?) ??
           (response.data as Map<String, dynamic>);
       return AccountDeletionRequest.fromJson(data);
@@ -653,7 +675,10 @@ class ApiService {
   }
 
   String _canonicalName(Map<String, dynamic> item) {
-    return (item['name_en'] ?? item['name'] ?? '').toString().trim();
+    final name = (item['name_en'] ?? item['name'] ?? '').toString().trim();
+    // A GPS-matched place keeps its Telugu name too, for Telugu display.
+    LocationTranslations.learn(name, item['name_te']?.toString());
+    return name;
   }
 
   String _canonicalField(Map<String, dynamic>? item, String field) {
@@ -678,8 +703,9 @@ class ApiService {
     for (final rawItem in items) {
       if (rawItem is! Map) continue;
       final item = Map<String, dynamic>.from(rawItem);
-      if (_normaliseLocationName(_canonicalName(item)) == requested)
+      if (_normaliseLocationName(_canonicalName(item)) == requested) {
         return item;
+      }
     }
     return null;
   }
@@ -719,8 +745,9 @@ class ApiService {
       if (itemState == expectedState && itemState.isNotEmpty) score += 20;
       final itemDistrict =
           _normaliseLocationName(_canonicalField(item, 'district'));
-      if (itemDistrict == expectedDistrict && itemDistrict.isNotEmpty)
+      if (itemDistrict == expectedDistrict && itemDistrict.isNotEmpty) {
         score += 20;
+      }
       if (score > bestScore) {
         best = item;
         bestScore = score;
@@ -1027,18 +1054,27 @@ class ApiService {
     String? city,
     String? subdistrict,
     String? village,
+    String scope = 'main',
   }) async {
+    // The reader's chosen place unless the caller gave one; never the
+    // placeholder, and never an empty value (backend contract).
+    final place = AppState.instance.feedPlace;
+    state ??= place.state;
+    district ??= place.district;
+    subdistrict ??= place.subdistrict;
+    village ??= place.village;
     final response = await _dio.get('/api/v1/feed/', queryParameters: {
       if (cursor != null) 'cursor': cursor,
       if (pageSize != null) 'page_size': pageSize,
       if (include != null) 'include': include,
+      'scope': scope,
       if (lang != null) 'lang': lang,
       if (category != null) 'category': category,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state.isNotEmpty) 'state': state,
+      if (district.isNotEmpty) 'district': district,
+      if (city != null && city.isNotEmpty) 'city': city,
+      if (subdistrict.isNotEmpty) 'subdistrict': subdistrict,
+      if (village.isNotEmpty) 'village': village,
     });
     return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1050,7 +1086,8 @@ class ApiService {
 
   Future<List<LiveNews>> getLiveNews() async {
     try {
-      final response = await _dio.get('/api/v1/articles/live/');
+      final response = await _dio.get('/api/v1/articles/live/',
+          queryParameters: {'lang': AppState.instance.feedLang});
       final List data = response.data['data'] as List? ?? [];
       return data
           .map((i) => LiveNews.fromJson(i as Map<String, dynamic>))
@@ -1166,25 +1203,32 @@ class ApiService {
     // Defaulting here is what made every fresh install request Telugu-only
     // and hide English articles before the reader had chosen anything.
     final effectiveLang = lang;
+    // Main / no-scope feeds: the reader's chosen place when the caller gave
+    // none; empty (not sent) until one is chosen — backend contract.
+    final place = AppState.instance.feedPlace;
     final effectiveState = state != null
         ? (state.isNotEmpty ? state : null)
-        : (scope == 'local' ? AppState.instance.stateName : null);
+        : (scope == 'local' ? AppState.instance.stateName : place.state);
     final effectiveDistrict = district != null
         ? (district.isNotEmpty ? district : null)
-        : (scope == 'local' ? AppState.instance.district : null);
+        : (scope == 'local' ? AppState.instance.district : place.district);
     final effectiveCity = city != null
         ? (city.isNotEmpty ? city : null)
-        : (scope == 'local' ? AppState.instance.city : null);
+        : (scope == 'local'
+            ? AppState.instance.city
+            : (AppState.instance.hasValidLocation
+                ? AppState.instance.city
+                : null));
     final effectiveSubdistrict = subdistrict != null
         ? (subdistrict.isNotEmpty ? subdistrict : null)
         : (scope == 'local' && AppState.instance.subdistrict.isNotEmpty
             ? AppState.instance.subdistrict
-            : null);
+            : place.subdistrict);
     final effectiveVillage = village != null
         ? (village.isNotEmpty ? village : null)
         : (scope == 'local' && AppState.instance.village.isNotEmpty
             ? AppState.instance.village
-            : null);
+            : place.village);
     final effectivePageSize = pageSize ?? 25;
 
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
@@ -1413,9 +1457,14 @@ class ApiService {
   }
 
   // --- Categories ---
-  Future<List<Category>> getCategories() async {
+  Future<List<Category>> getCategories({String? lang}) async {
     try {
-      final response = await _dio.get('/api/v1/categories/');
+      final effectiveLang = lang ??
+          AppState.instance.contentLanguage ??
+          (AppState.instance.language == 'Telugu' ? 'te' : 'en');
+      final response = await _dio.get('/api/v1/categories/', queryParameters: {
+        'lang': effectiveLang,
+      });
       return (response.data['data'] as List)
           .map((i) => Category.fromJson(i))
           .toList();
@@ -1441,16 +1490,22 @@ class ApiService {
   }
 
   // --- Bookmarks ---
-  Future<List<NewsArticle>> getBookmarks() async {
-    final articles = <NewsArticle>[];
+  //
+  // Bookmark handover: one combined saved list (articles and citizen posts),
+  // cursor-paginated by following meta.next exactly, de-duplicated by the
+  // bookmark id.
+
+  /// GET /api/v1/bookmarks/ — every page, newest first.
+  Future<List<SavedItem>> getBookmarks() async {
+    final items = <SavedItem>[];
     final seen = <String>{};
     final visited = <String>{};
-    String? cursor;
+    String? next;
     do {
-      final response = await _dio.get('/api/v1/bookmarks/', queryParameters: {
-        'page_size': 20,
-        if (cursor != null) 'cursor': cursor,
-      });
+      final response = next == null
+          ? await _dio
+              .get('/api/v1/bookmarks/', queryParameters: {'page_size': 20})
+          : await _dio.get(next);
 
       final rawData = response.data;
       if (rawData is Map) {
@@ -1464,18 +1519,18 @@ class ApiService {
         }
       }
 
-      final items = _extractBookmarkList(rawData);
-      for (final item in items) {
-        final article = _parseBookmarkItem(item);
-        final key = article.id.isNotEmpty ? article.id : article.slug;
-        if (key.isNotEmpty && seen.add(key)) {
-          articles.add(article);
-        }
+      for (final row in _extractBookmarkList(rawData)) {
+        if (row is! Map) continue;
+        final item = SavedItem.fromJson(Map<String, dynamic>.from(row));
+        final key = item.id.isNotEmpty ? item.id : item.contentId;
+        if (key.isNotEmpty && seen.add(key)) items.add(item);
       }
 
-      cursor = _extractBookmarkNextCursor(rawData);
-    } while (cursor != null && cursor.isNotEmpty && visited.add(cursor));
-    return articles;
+      next = _extractBookmarkNext(rawData);
+    } while (next != null && visited.add(next));
+    debugPrint('[Bookmark] GET /api/v1/bookmarks/ -> ${items.length} saved '
+        '(${items.where((i) => i.isUgc).length} citizen posts)');
+    return items;
   }
 
   static List<dynamic> _extractBookmarkList(dynamic rawData) {
@@ -1497,50 +1552,57 @@ class ApiService {
     return const [];
   }
 
-  static NewsArticle _parseBookmarkItem(dynamic item) {
-    if (item is! Map) {
-      return NewsArticle.fromJson(const {});
-    }
-    final map = Map<String, dynamic>.from(item);
-    final nested = map['article'];
-    Map<String, dynamic> articleData;
-    if (nested is Map) {
-      articleData = Map<String, dynamic>.from(nested);
-      if ((articleData['id'] == null || articleData['id'].toString().isEmpty) &&
-          map['article_id'] != null) {
-        articleData['id'] = map['article_id'];
-      }
-    } else {
-      articleData = Map<String, dynamic>.from(map);
-    }
-    articleData['is_bookmarked'] = true;
-    articleData['is_bookmarked_by_user'] = true;
-    return NewsArticle.fromJson(articleData);
-  }
-
-  static String? _extractBookmarkNextCursor(dynamic rawData) {
+  /// The next page's URL, used exactly as the server sent it (meta.next).
+  static String? _extractBookmarkNext(dynamic rawData) {
     if (rawData is! Map) return null;
     final map = Map<String, dynamic>.from(rawData);
     String? next;
     final meta = map['meta'];
-    if (meta is Map) {
-      next = meta['next']?.toString() ?? meta['cursor']?.toString();
-    }
+    if (meta is Map) next = meta['next']?.toString();
     next ??= map['next']?.toString();
     if (map['data'] is Map) {
       final dataMap = Map<String, dynamic>.from(map['data'] as Map);
       next ??= dataMap['next']?.toString();
     }
     if (next == null || next.trim().isEmpty) return null;
-    final uri = Uri.tryParse(next.trim());
-    if (uri != null && uri.queryParameters.containsKey('cursor')) {
-      return uri.queryParameters['cursor'];
-    }
     return next.trim();
   }
 
+  /// POST /api/v1/bookmarks/ — saves an article and never removes one, so it
+  /// is safe to repeat (201 new, 200 already saved). Used for every save.
   Future<void> addBookmark(String articleId) async {
-    await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
+    final response =
+        await _dio.post('/api/v1/bookmarks/', data: {'article_id': articleId});
+    debugPrint('[Bookmark] POST /api/v1/bookmarks/ article_id=$articleId '
+        '-> ${response.statusCode}');
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw ApiException('Bookmark failed (${response.statusCode}).');
+    }
+    final map = response.data;
+    if (map is Map && map['errors'] != null && map['errors'] != false) {
+      throw ApiException('Bookmark failed.');
+    }
+  }
+
+  /// DELETE /api/v1/bookmarks/{bookmarkId}/ — the bookmark's own id from the
+  /// saved list, not the article or post id. Works for both kinds.
+  ///
+  /// Returns true on 204, false when the bookmark was already gone (404), so
+  /// the caller removes the stale row either way. Throws on anything else.
+  Future<bool> deleteBookmark(String bookmarkId) async {
+    try {
+      final response = await _dio.delete('/api/v1/bookmarks/$bookmarkId/');
+      debugPrint('[Bookmark] DELETE /api/v1/bookmarks/$bookmarkId/ '
+          '-> ${response.statusCode}');
+      return true;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        debugPrint('[Bookmark] DELETE /api/v1/bookmarks/$bookmarkId/ '
+            '-> 404, already gone');
+        return false;
+      }
+      rethrow;
+    }
   }
 
   /// POST /api/v1/bookmarks/toggle/ — flips the server's saved state and
@@ -1563,14 +1625,15 @@ class ApiService {
       }
       final data = map['data'];
       if (data is Map && data['bookmarked'] is bool) {
+        debugPrint('[Bookmark] POST /api/v1/bookmarks/toggle/ '
+            'article_id=$articleId -> ${response.statusCode} '
+            'bookmarked=${data['bookmarked']}');
         return data['bookmarked'] as bool;
       }
     }
+    debugPrint('[Bookmark] POST /api/v1/bookmarks/toggle/ '
+        'article_id=$articleId -> ${response.statusCode}, no bookmarked field');
     return null;
-  }
-
-  Future<void> removeBookmark(String bookmarkId) async {
-    await _dio.delete('/api/v1/bookmarks/$bookmarkId/');
   }
 
   // --- Contributor / Reporter ---
@@ -1637,13 +1700,29 @@ class ApiService {
   }) async {
     final Map<String, dynamic> params = {
       'page_size': pageSize,
+      // Same language rule as every feed (backend contract): explicit
+      // te / en / all, never left to the backend's account default.
+      'lang': AppState.instance.feedLang,
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
-    if (state != null) params['state'] = state;
-    if (district != null) params['district'] = district;
-    if (subdistrict != null && subdistrict.isNotEmpty)
+    // Callers that pass nothing get the reader's chosen place; an empty
+    // string means "no location" and is never sent (backend: omitted
+    // location = broad feed).
+    // Local requests send exactly the level they ask for (a mandal request
+    // leaves the village out on purpose), so only main is filled in.
+    final place = scope == 'local'
+        ? (state: '', district: '', subdistrict: '', village: '')
+        : AppState.instance.feedPlace;
+    state ??= place.state;
+    district ??= place.district;
+    subdistrict ??= place.subdistrict;
+    village ??= place.village;
+    if (state.isNotEmpty) params['state'] = state;
+    if (district.isNotEmpty) params['district'] = district;
+    if (subdistrict.isNotEmpty) {
       params['subdistrict'] = subdistrict;
-    if (village != null && village.isNotEmpty) params['village'] = village;
+    }
+    if (village.isNotEmpty) params['village'] = village;
     if (scope != null) params['scope'] = scope;
 
     try {
@@ -1695,6 +1774,10 @@ class ApiService {
                 'share_url',
                 'uploader_name',
                 'author_name',
+                // {id, display_name, trust_level}: the uploader shown as
+                // the post's name (was dropped here, so Spotlight showed
+                // no name).
+                'uploader',
               ])
                 if (map[key] != null) key: map[key],
             },
@@ -1712,8 +1795,20 @@ class ApiService {
   /// `GET /api/v1/ugc/{submission_id}/` — one public citizen post (handover
   /// §11), with its engagement state (§17.4). Throws on 404: the post is
   /// missing, unapproved or no longer visible.
+  ///
+  /// The reader's place goes with it: the backend shows a village, mandal
+  /// or district post only to readers in that area, so without it the
+  /// detail call answered 404 for posts the feed had just shown.
   Future<NewsArticle> getUgcDetail(String submissionId) async {
-    final response = await _dio.get('/api/v1/ugc/$submissionId/');
+    final place = AppState.instance.feedPlace;
+    final response =
+        await _dio.get('/api/v1/ugc/$submissionId/', queryParameters: {
+      'lang': AppState.instance.feedLang,
+      if (place.state.isNotEmpty) 'state': place.state,
+      if (place.district.isNotEmpty) 'district': place.district,
+      if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+      if (place.village.isNotEmpty) 'village': place.village,
+    });
     final data = response.data is Map ? response.data['data'] : null;
     if (data is! Map) {
       throw ParsingException('Unexpected citizen post payload.');
@@ -1852,7 +1947,7 @@ class ApiService {
     return raw;
   }
 
-  static ReporterPost _reporterPostFromJson(Map json) {
+  static ReporterPost reporterPostFromJson(Map json) {
     // reporter_status (pending | published | rejected) is the
     // reporter-facing value; status (PENDING_REVIEW, APPROVED, …) is the
     // fallback for older payloads.
@@ -1879,13 +1974,15 @@ class ApiService {
           .map((v) => v?.toString() ?? '')
           .firstWhere((v) => v.isNotEmpty, orElse: () => ''),
       status: postStatus,
-      submittedAt:
-          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
-              DateTime.now(),
+      submittedAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.now(),
       rejectionReason:
           (json['review_note'] ?? json['rejection_reason'])?.toString(),
     );
   }
+
+  static ReporterPost _reporterPostFromJson(Map json) =>
+      reporterPostFromJson(json);
 
   Future<bool> reportUgcSubmission({
     required String submissionId,
@@ -1916,6 +2013,31 @@ class ApiService {
     final response = await _dio.get('/api/v1/rewards/payouts/',
         queryParameters: {'page_size': pageSize});
     return response.data['data'] as List<dynamic>? ?? [];
+  }
+
+  /// One cursor page of reward history: pass [nextUrl] (the previous page's
+  /// `meta.next`) to continue. Returns the items and the next page's URL,
+  /// null when there are no more (meta.count is the page size, not a total).
+  Future<({List<dynamic> items, String? next})> getRewardTransactionsPage(
+          {String? nextUrl, int pageSize = 20}) =>
+      _rewardPage('/api/v1/rewards/transactions/', nextUrl, pageSize);
+
+  /// Cursor page of the user's withdrawal requests; see
+  /// [getRewardTransactionsPage].
+  Future<({List<dynamic> items, String? next})> getRewardPayoutsPage(
+          {String? nextUrl, int pageSize = 20}) =>
+      _rewardPage('/api/v1/rewards/payouts/', nextUrl, pageSize);
+
+  Future<({List<dynamic> items, String? next})> _rewardPage(
+      String path, String? nextUrl, int pageSize) async {
+    final response = nextUrl != null && nextUrl.isNotEmpty
+        ? await _dio.get(nextUrl)
+        : await _dio.get(path, queryParameters: {'page_size': pageSize});
+    final body = response.data;
+    final items = body is Map ? body['data'] as List<dynamic>? ?? [] : [];
+    final meta = body is Map ? body['meta'] : null;
+    final next = meta is Map ? meta['next']?.toString() : null;
+    return (items: items, next: (next == null || next.isEmpty) ? null : next);
   }
 
   Future<Map<String, dynamic>> createRewardPayout(
@@ -1958,7 +2080,11 @@ class ApiService {
     final effectiveLang = lang;
     final Map<String, dynamic> params = {
       'page_size': pageSize,
-      if (effectiveLang != null && effectiveLang.isNotEmpty)
+      // Posters match `lang` literally: `all` finds nothing, so "all
+      // languages" means no parameter at all (backend confirmed).
+      if (effectiveLang != null &&
+          effectiveLang.isNotEmpty &&
+          effectiveLang.toLowerCase() != 'all')
         'lang': effectiveLang,
     };
     if (category != null) params['category'] = category;
@@ -2004,6 +2130,20 @@ class ApiService {
       'duration_days': durationDays,
     });
     return response.data['data'] as Map<String, dynamic>;
+  }
+
+  /// Every bookable package with its price —
+  /// `GET /api/v1/ads/pricing/options/`. The booking screen offers exactly
+  /// these (no app-side 7/14/30). Returns the raw `data` for
+  /// [AdPricingCatalog.parse]; null when the endpoint does not exist (404).
+  Future<dynamic> getAdPricingOptions() async {
+    try {
+      final response = await _dio.get('/api/v1/ads/pricing/options/');
+      return response.data is Map ? response.data['data'] : null;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 
   Future<Map<String, dynamic>> submitAdBooking(
@@ -2212,13 +2352,25 @@ class ApiService {
   }
 
   // --- CMS ---
-  Future<Map<String, dynamic>?> getCmsPage(String slug) async {
-    try {
-      final response = await _dio.get('/api/v1/cms/$slug/');
-      return response.data['data'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
-    }
+  /// Public CMS page: GET /api/v1/cms/{slug}/ (no login needed).
+  ///
+  /// Throws on failure (DioException carries the status: 404 = page missing
+  /// or inactive, 429 = throttled) so [CmsService] can tell those apart from
+  /// being offline. A reply without a data object is treated as not found.
+  Future<Map<String, dynamic>> fetchCmsPage(String slug) async {
+    final response = await _dio.get('/api/v1/cms/$slug/');
+    final body = response.data;
+    final data = body is Map ? body['data'] : null;
+    if (data is Map<String, dynamic>) return data;
+    throw DioException(
+      requestOptions: response.requestOptions,
+      response: Response(
+        requestOptions: response.requestOptions,
+        statusCode: 404,
+        data: body,
+      ),
+      type: DioExceptionType.badResponse,
+    );
   }
 
   // --- Quotes / Daily Cards ---

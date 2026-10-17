@@ -39,8 +39,9 @@ class VideoRepository {
         lang: effectiveLang,
       );
 
-      if (response.hasErrors)
+      if (response.hasErrors) {
         throw ApiException(response.errorMessage ?? 'Unable to load videos.');
+      }
       final raw = response.data ?? [];
       if (cursor == null) _seenIdsPerKey[key] = <String>{};
       final seen = _seenIdsPerKey.putIfAbsent(key, () => <String>{});
@@ -99,8 +100,9 @@ class VideoRepository {
         village: AppState.instance.village,
       );
 
-      if (response.hasErrors)
+      if (response.hasErrors) {
         throw ApiException(response.errorMessage ?? 'Unable to load videos.');
+      }
       final raw = response.data ?? [];
       if (cursor == null) _seenIdsPerKey[key] = <String>{};
       final seen = _seenIdsPerKey.putIfAbsent(key, () => <String>{});

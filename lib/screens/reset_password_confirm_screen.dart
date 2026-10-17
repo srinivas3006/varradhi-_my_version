@@ -15,10 +15,12 @@ class ResetPasswordConfirmScreen extends StatefulWidget {
   });
 
   @override
-  State<ResetPasswordConfirmScreen> createState() => _ResetPasswordConfirmScreenState();
+  State<ResetPasswordConfirmScreen> createState() =>
+      _ResetPasswordConfirmScreenState();
 }
 
-class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen> {
+class _ResetPasswordConfirmScreenState
+    extends State<ResetPasswordConfirmScreen> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
@@ -54,7 +56,9 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('పాస్‌వర్డ్ విజయవంతంగా రీసెట్ చేయబడింది. దయచేసి లాగిన్ అవ్వండి.')),
+        const SnackBar(
+            content: Text(
+                'పాస్‌వర్డ్ విజయవంతంగా రీసెట్ చేయబడింది. దయచేసి లాగిన్ అవ్వండి.')),
       );
 
       // Navigate back to LoginScreen
@@ -64,7 +68,8 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'పాస్‌వర్డ్ రీసెట్ చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
+        String errorMsg =
+            'పాస్‌వర్డ్ రీసెట్ చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException && e.response?.data is Map) {
           final resp = e.response!.data as Map;
           if (resp['errors'] is Map && resp['errors']['message'] != null) {
@@ -141,7 +146,8 @@ class _ResetPasswordConfirmScreenState extends State<ResetPasswordConfirmScreen>
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!,
-                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
+                    style: const TextStyle(
+                        color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 24),
               SizedBox(

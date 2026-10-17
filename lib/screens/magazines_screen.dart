@@ -38,7 +38,8 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
         children: [
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary))
                 : _magazines.isEmpty
                     ? const Center(
                         child: Padding(
@@ -46,17 +47,20 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.menu_book_rounded, size: 48, color: AppColors.textMuted),
+                              Icon(Icons.menu_book_rounded,
+                                  size: 48, color: AppColors.textMuted),
                               SizedBox(height: 12),
                               Text(
                                 'ప్రస్తుతానికి మ్యాగజైన్‌లు అందుబాటులో లేవు',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                               SizedBox(height: 6),
                               Text(
                                 'కొత్త సంచికలు మరియు ఈ-పేపర్లు ప్రచురించబడినప్పుడు ఇక్కడ కనిపిస్తాయి.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                style: TextStyle(
+                                    color: AppColors.textMuted, fontSize: 13),
                               ),
                             ],
                           ),
@@ -65,7 +69,8 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
                     : GridView.builder(
                         padding: const EdgeInsets.all(16),
                         itemCount: _magazines.length,
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           mainAxisSpacing: 14,
                           crossAxisSpacing: 14,
@@ -83,7 +88,8 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
                                     magazine.coverUrl,
                                     fit: BoxFit.cover,
                                     width: double.infinity,
-                                    errorBuilder: (_, __, ___) => Container(color: AppColors.chipBg),
+                                    errorBuilder: (_, __, ___) =>
+                                        Container(color: AppColors.chipBg),
                                   ),
                                 ),
                               ),
@@ -92,11 +98,14 @@ class _MagazinesScreenState extends State<MagazinesScreen> {
                                 magazine.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5),
                               ),
                               Text(
                                 magazine.issueDate,
-                                style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+                                style: const TextStyle(
+                                    fontSize: 11, color: AppColors.textMuted),
                               ),
                             ],
                           );

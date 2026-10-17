@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
+import '../core/errors/ugc_error.dart';
 import '../core/navigation/auth_guard.dart';
 import '../controllers/ugc_controller.dart';
 import '../models/reporter_post.dart';
@@ -8,11 +11,18 @@ import '../models/ugc_draft.dart';
 import '../core/utils/indian_mobile.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
+import '../widgets/auth/auth_ui.dart';
+import '../widgets/ugc_location_sheet.dart';
+import '../repositories/ugc_draft_repository.dart';
+import 'account_signup_screen.dart';
 import 'ugc_phone_verify_screen.dart';
 import 'submission_status_screen.dart';
 
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  /// For tests; the screen makes its own otherwise.
+  final UgcController? controller;
+
+  const CreatePostScreen({super.key, this.controller});
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -23,31 +33,29 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final _titleController = TextEditingController();
   final _captionController = TextEditingController();
   bool _verificationOpen = false;
+  bool _categoriesRequested = false;
+
+  /// True while asking whether this account is already verified.
+  bool _checkingVerification = false;
   UgcUploadStatus _lastStatus = UgcUploadStatus.idle;
-
-  static const _categories = [
-    'Local',
-    'Sports',
-    'Politics',
-    'Weather',
-    'Accident',
-    'Community'
-  ];
-
-  static const _categoryLabels = {
-    'Local': 'స్థానికం',
-    'Sports': 'క్రీడలు',
-    'Politics': 'రాజకీయాలు',
-    'Weather': 'వాతావరణం',
-    'Accident': 'ప్రమాదం',
-    'Community': 'సామాజికం',
-  };
 
   @override
   void initState() {
     super.initState();
-    _controller = UgcController();
+    _controller = widget.controller ?? UgcController();
     _controller.addListener(_onControllerStateChanged);
+    // An upload that stopped half-way (app closed after the submission was
+    // created) comes back, so retrying finishes it instead of duplicating.
+    _controller.resumeUnfinishedUpload().then((resumed) {
+      if (!resumed || !mounted) return;
+      _titleController.text = _controller.title;
+      _captionController.text = _controller.description;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+        content: Text(
+            'పూర్తికాని అప్‌లోడ్ తిరిగి తెరవబడింది — మీడియాను మళ్లీ అప్‌లోడ్ చేయండి.'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    });
     _gate = _currentGate;
     AppState.instance.addListener(_onAppStateChanged);
 
@@ -58,15 +66,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       _controller.setDescription(_captionController.text);
     });
 
-    // Check for any recoverable pending draft
-    _controller.checkForPendingDraft();
+    // Always start with a fresh clean slate so the screen never holds previous article data
+    _titleController.clear();
+    _captionController.clear();
+    _controller.reset();
+    unawaited(UgcDraftRepository.instance.clearDraft());
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || AppState.instance.isLoggedIn) return;
-      requireAuth(context, () {
-        if (mounted) setState(() {});
-      });
-    });
+    // A guest is not bounced to the login route on open: build() shows the
+    // "log in to post news" page, whose button starts login. Once logged in,
+    // _onAppStateChanged swaps in the form.
   }
 
   /// Which of the three screens [build] shows: login, join, or the form.
@@ -117,6 +125,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final title = _titleController.text.trim();
       _titleController.clear();
       _captionController.clear();
+      unawaited(_controller.reset());
+      _lastStatus = UgcUploadStatus.idle;
       // Media processes asynchronously (handover §9): open the status screen,
       // which polls until upload_status is READY or FAILED.
       if (submissionId != null && submissionId.isNotEmpty) {
@@ -145,7 +155,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('వార్తను రద్దు చేయాలా?'),
         content: const Text(
-            'మీరు రాసిన డ్రాఫ్ట్ భద్రపరచబడుతుంది, తర్వాత పూర్తి చేయవచ్చు. ఇప్పుడు నిష్క్రమించాలనుకుంటున్నారా?'),
+            'మీరు నమోదు చేసిన వివరాలు తొలగించబడతాయి. ఇప్పుడు నిష్క్రమించాలనుకుంటున్నారా?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -159,7 +169,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ],
       ),
     );
-    return discard == true;
+    if (discard == true) {
+      _titleController.clear();
+      _captionController.clear();
+      unawaited(_controller.reset());
+      unawaited(UgcDraftRepository.instance.clearDraft());
+      return true;
+    }
+    return false;
   }
 
   void _onSubmitPressed() {
@@ -199,6 +216,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   /// controller flips to [UgcUploadStatus.verificationRequired] and
   /// [_onControllerStateChanged] reopens verification and retries.
   Future<void> _verifyThenSubmit({String? notice}) async {
+    // Already verified for this account (earlier login on this phone, or the
+    // server says so): no OTP. Skipped when the backend has just rejected
+    // the mobile ([notice] set) — then only a fresh verification will do.
+    if (!AppState.instance.uploadVerified && notice == null) {
+      setState(() => _checkingVerification = true);
+      await AppState.instance.syncUgcVerificationFromServer();
+      if (!mounted) return;
+      setState(() => _checkingVerification = false);
+    }
     if (!AppState.instance.uploadVerified) {
       final verified = await _openVerification(notice: notice);
       if (verified == null || !mounted) return;
@@ -343,67 +369,102 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             : null,
       );
 
+  /// A guest on the Post tab. Same look as the login screen it leads to —
+  /// red brand header, a card lifted over it, a full-width login button and
+  /// the "new here?" sign-up action — so the two read as one flow.
   Widget _buildLoginRequired() {
     final telugu = AppState.instance.language == 'Telugu';
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: _plainAppBar(),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.edit_note_rounded,
-                      size: 52, color: AppColors.primary),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  telugu ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి' : 'Log in to post news',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.w800, height: 1.3),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  telugu
-                      ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
-                      : 'Share what is happening in your village and mandal.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 14.5, color: AppColors.textMuted, height: 1.5),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
-                    onPressed: () => requireAuth(context, () {
-                      if (mounted) setState(() {});
-                    }),
-                    icon: const Icon(Icons.login_rounded, size: 20),
-                    label: Text(telugu ? 'లాగిన్' : 'Log in',
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ],
+      backgroundColor: authBackground(context),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: Text(telugu ? 'పోస్ట్' : 'Post'),
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        // As the Post tab there is nothing to go back to; pushed as a
+        // route, the usual back arrow shows.
+        automaticallyImplyLeading: _isSecondaryRoute,
+      ),
+      body: SingleChildScrollView(
+        key: const Key('post_login_required'),
+        child: Column(
+          children: [
+            AuthBrandHeader(
+              icon: Icons.edit_note_rounded,
+              topPadding: 60,
+              title: telugu ? 'మీరే రిపోర్టర్' : 'Be the reporter',
+              subtitle: telugu
+                  ? 'మీ ప్రాంత వార్తను వారధిలో పంచుకోండి'
+                  : 'Share your local news on Vaaradhi',
             ),
-          ),
+            AuthCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AuthCardHeading(
+                    title: telugu
+                        ? 'వార్త పోస్ట్ చేయడానికి లాగిన్ అవ్వండి'
+                        : 'Log in to post news',
+                    note: telugu
+                        ? 'మీ గ్రామం, మండలంలో జరుగుతున్న వార్తలను అందరితో పంచుకోండి.'
+                        : 'Share what is happening in your village and mandal.',
+                  ),
+                  const SizedBox(height: 20),
+                  AuthInfoLine(
+                    icon: Icons.location_on_outlined,
+                    text: telugu
+                        ? 'మీ గ్రామం, మండలం వార్తలు నేరుగా పంపండి'
+                        : 'Send news from your village and mandal',
+                  ),
+                  AuthInfoLine(
+                    icon: Icons.photo_library_outlined,
+                    text: telugu
+                        ? 'ఫోటోలు, వీడియోలు జోడించండి'
+                        : 'Add photos and videos',
+                  ),
+                  AuthInfoLine(
+                    icon: Icons.verified_outlined,
+                    text: telugu
+                        ? 'పరిశీలన తర్వాత వారధిలో ప్రచురించబడుతుంది'
+                        : 'Published on Vaaradhi after review',
+                  ),
+                  const SizedBox(height: 12),
+                  AuthPrimaryButton(
+                    key: const Key('post_login_button'),
+                    label: telugu ? 'లాగిన్' : 'Log in',
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      requireAuth(context, () {
+                        if (mounted) setState(() {});
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -22),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
+                child: AuthSecondaryAction(
+                  buttonKey: const Key('post_signup_link'),
+                  prompt: telugu ? 'కొత్త వారా?' : 'New here?',
+                  label: telugu ? 'ఖాతాను సృష్టించండి' : 'Create an account',
+                  icon: Icons.person_add_alt_1_rounded,
+                  onPressed: () async {
+                    await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AccountSignupScreen()),
+                    );
+                    if (mounted) setState(() {});
+                  },
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -440,101 +501,101 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.campaign_rounded,
-                    size: 64, color: AppColors.primary),
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                'రిపోర్టర్‌గా చేరండి',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'మీ చుట్టూ జరుగుతున్న స్థానిక వార్తలు, సంఘటనలు మరియు విశేషాలను అందించి సమాజానికి తోడ్పడండి.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 15, color: AppColors.textMuted, height: 1.5),
-              ),
-              const SizedBox(height: 32),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color:
-                      isDark ? AppColors.cardDarkSlate : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                      color: isDark ? Colors.white24 : Colors.black12),
-                ),
-                child: Column(
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.monetization_on_rounded,
-                            color: Colors.amber, size: 24),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'ఆమోదించబడిన ప్రతి వార్తకు పాయింట్లు సంపాదించండి. వాటిని నగదుగా విత్‌డ్రా చేసుకోండి!',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Divider(color: isDark ? Colors.white12 : Colors.black12),
-                    const SizedBox(height: 16),
-                    const Row(
-                      children: [
-                        Icon(Icons.dashboard_customize_rounded,
-                            color: AppColors.primary, size: 24),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'మీ వార్తల స్థితిని రిపోర్టర్ డ్యాష్‌బోర్డ్‌లో ట్రాక్ చేయండి.',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 48),
-              SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                  onPressed: () {
-                    AppState.instance.registerAsReporter();
-                    setState(() {});
-                  },
-                  child: const Text('రిపోర్టింగ్‌ను ప్రారంభించండి',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  child: const Icon(Icons.campaign_rounded,
+                      size: 64, color: AppColors.primary),
                 ),
-              ),
-              const SizedBox(height: 24),
-            ],
-          ),
+                const SizedBox(height: 32),
+                const Text(
+                  'రిపోర్టర్‌గా చేరండి',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'మీ చుట్టూ జరుగుతున్న స్థానిక వార్తలు, సంఘటనలు మరియు విశేషాలను అందించి సమాజానికి తోడ్పడండి.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 15, color: AppColors.textMuted, height: 1.5),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color:
+                        isDark ? AppColors.cardDarkSlate : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: isDark ? Colors.white24 : Colors.black12),
+                  ),
+                  child: Column(
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.monetization_on_rounded,
+                              color: Colors.amber, size: 24),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'ఆమోదించబడిన ప్రతి వార్తకు పాయింట్లు సంపాదించండి. వాటిని నగదుగా విత్‌డ్రా చేసుకోండి!',
+                              style: TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Divider(color: isDark ? Colors.white12 : Colors.black12),
+                      const SizedBox(height: 16),
+                      const Row(
+                        children: [
+                          Icon(Icons.dashboard_customize_rounded,
+                              color: AppColors.primary, size: 24),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'మీ వార్తల స్థితిని రిపోర్టర్ డ్యాష్‌బోర్డ్‌లో ట్రాక్ చేయండి.',
+                              style: TextStyle(
+                                  fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed: () {
+                      AppState.instance.registerAsReporter();
+                      setState(() {});
+                    },
+                    child: const Text('రిపోర్టింగ్‌ను ప్రారంభించండి',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            ),
           ),
         ),
       ),
@@ -542,6 +603,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Widget _buildUploadForm() {
+    // Categories come from GET /api/v1/categories/ (sent as the slug) —
+    // fetched once the form is actually shown, not for the guest page.
+    if (!_categoriesRequested) {
+      _categoriesRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _controller.loadCategories();
+      });
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasMedia = (_controller.type == PostType.image &&
             _controller.selectedImagePaths.isNotEmpty) ||
@@ -606,48 +675,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pending Draft Recovery Banner
-              if (_controller.pendingDraft != null) ...[
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: Colors.amber.shade700.withValues(alpha: 0.4)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.restore_page_rounded,
-                          color: Colors.amber, size: 24),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'మీ వద్ద సేవ్ చేయని డ్రాఫ్ట్ ఉంది. దాన్ని పునరుద్ధరించాలా?',
-                          style: TextStyle(
-                              fontSize: 12.5, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          _controller.restorePendingDraft().then((_) {
-                            _titleController.text = _controller.title;
-                            _captionController.text = _controller.description;
-                          });
-                        },
-                        child: const Text('పునరుద్ధరించు',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: _controller.dismissPendingDraft,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-
               // Missing Local Files Warning
               if (_controller.missingFilesWarning.isNotEmpty) ...[
                 Container(
@@ -740,6 +767,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   child: hasMedia
                       ? Stack(
                           children: [
+                            // A real first-frame preview of the chosen video.
+                            if (_controller.type == PostType.video)
+                              Positioned.fill(
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(15),
+                                  child: _VideoFramePreview(
+                                      path: _controller.selectedVideoPath!),
+                                ),
+                              ),
                             Positioned(
                               top: 8,
                               right: 8,
@@ -808,45 +844,63 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               if (_controller.type == PostType.image &&
                   _controller.selectedImagePaths.length > 1) ...[
                 const SizedBox(height: 12),
+                Text(
+                  'క్రమం మార్చడానికి ఫోటోను పట్టుకొని లాగండి · మొదటిది కవర్',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 6),
                 SizedBox(
                   height: 64,
-                  child: ListView.builder(
+                  // Upload order follows this strip (long-press and drag).
+                  child: ReorderableListView.builder(
+                    key: const Key('ugc_photo_strip'),
                     scrollDirection: Axis.horizontal,
+                    buildDefaultDragHandles: false,
                     itemCount: _controller.selectedImagePaths.length,
+                    onReorderItem: (from, to) {
+                      if (_controller.isSubmittingOrUploading) return;
+                      _controller.moveImage(from, to);
+                    },
                     itemBuilder: (context, index) {
-                      return Stack(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 10),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                File(_controller.selectedImagePaths[index]),
-                                width: 64,
-                                height: 64,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 2,
-                            right: 12,
-                            child: GestureDetector(
-                              onTap: _controller.isSubmittingOrUploading
-                                  ? null
-                                  : () => _controller.removeImageAt(index),
-                              child: Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: const BoxDecoration(
-                                  color: Colors.black87,
-                                  shape: BoxShape.circle,
+                      final path = _controller.selectedImagePaths[index];
+                      return ReorderableDelayedDragStartListener(
+                        key: ValueKey(path),
+                        index: index,
+                        enabled: !_controller.isSubmittingOrUploading,
+                        child: Stack(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(_controller.selectedImagePaths[index]),
+                                  width: 64,
+                                  height: 64,
+                                  fit: BoxFit.cover,
                                 ),
-                                child: const Icon(Icons.close,
-                                    color: Colors.white, size: 12),
                               ),
                             ),
-                          ),
-                        ],
+                            Positioned(
+                              top: 2,
+                              right: 12,
+                              child: GestureDetector(
+                                onTap: _controller.isSubmittingOrUploading
+                                    ? null
+                                    : () => _controller.removeImageAt(index),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black87,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white, size: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       );
                     },
                   ),
@@ -854,44 +908,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ],
 
               const SizedBox(height: 14),
-              // Location Display / Selection Requirement
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                      color: isDark ? Colors.white24 : const Color(0xFFE7E9EE)),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('📍', style: TextStyle(fontSize: 12)),
-                    const SizedBox(width: 6),
-                    Text(
-                      AppState.instance.hasValidLocation
-                          ? '${AppState.instance.district}, ${AppState.instance.stateName}'
-                          : 'లొకేషన్ అవసరం (గుర్తించడానికి నొక్కండి)',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppState.instance.hasValidLocation
-                            ? Theme.of(context).textTheme.bodyLarge?.color
-                            : Colors.orange,
-                      ),
-                    ),
-                    if (!AppState.instance.hasValidLocation) ...[
-                      const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: () =>
-                            _controller.ensureLocationAvailable(context),
-                        child: const Icon(Icons.refresh,
-                            size: 14, color: AppColors.primary),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+              // Story location: GPS coordinates + place names the reporter
+              // can correct.
+              _buildLocationCard(isDark),
 
               const SizedBox(height: 20),
               const Text('శీర్షిక',
@@ -943,46 +962,67 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       fontSize: 12,
                       letterSpacing: 0.5)),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 10,
-                children: _categories.map((cat) {
-                  final selected = cat == _controller.category;
-                  return GestureDetector(
-                    onTap: _controller.isSubmittingOrUploading
-                        ? null
-                        : () => _controller.setCategory(cat),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? AppColors.primary
-                            : Theme.of(context).cardColor,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: selected
-                                ? AppColors.primary
-                                : (isDark
-                                    ? Colors.white24
-                                    : const Color(0xFFE7E9EE))),
-                      ),
-                      child: Text(
-                        _categoryLabels[cat] ?? cat,
-                        style: TextStyle(
-                          fontSize: 11.5,
+              if (_controller.categories.isEmpty)
+                _controller.categoriesLoading
+                    ? const SizedBox(
+                        height: 32,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      )
+                    : TextButton.icon(
+                        key: const Key('ugc_categories_retry'),
+                        onPressed: _controller.loadCategories,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text(
+                            'వర్గాలు లోడ్ కాలేదు — మళ్లీ ప్రయత్నించండి'),
+                      )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 10,
+                  children: _controller.categories.map((cat) {
+                    final selected = cat.slug == _controller.category;
+                    return GestureDetector(
+                      key: Key('ugc_category_${cat.slug}'),
+                      onTap: _controller.isSubmittingOrUploading
+                          ? null
+                          : () => _controller.setCategory(cat.slug),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
                           color: selected
-                              ? Colors.white
-                              : (isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF5C6273)),
-                          fontWeight: FontWeight.w600,
+                              ? AppColors.primary
+                              : Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: selected
+                                  ? AppColors.primary
+                                  : (isDark
+                                      ? Colors.white24
+                                      : const Color(0xFFE7E9EE))),
+                        ),
+                        child: Text(
+                          cat.name.isNotEmpty ? cat.name : cat.slug,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: selected
+                                ? Colors.white
+                                : (isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF5C6273)),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                }).toList(),
-              ),
+                    );
+                  }).toList(),
+                ),
 
               const SizedBox(height: 20),
               const Text('వివరణ',
@@ -1023,6 +1063,43 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         const BorderSide(color: AppColors.primary, width: 1.5),
                   ),
                 ),
+              ),
+
+              // News language: decides which readers see the story (feeds
+              // filter by lang). Pre-selected, the reporter can change it.
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Text('వార్త భాష',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          letterSpacing: 0.5)),
+                  const SizedBox(width: 12),
+                  for (final (code, label) in const [
+                    ('te', 'తెలుగు'),
+                    ('en', 'English'),
+                  ]) ...[
+                    ChoiceChip(
+                      key: Key('ugc_language_$code'),
+                      label: Text(label),
+                      selected: _controller.language == code,
+                      onSelected: _controller.isSubmittingOrUploading
+                          ? null
+                          : (_) => _controller.setLanguage(code),
+                      selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _controller.language == code
+                            ? AppColors.primary
+                            : null,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ],
               ),
 
               // Progress Bar & State Display
@@ -1126,33 +1203,57 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     elevation: 8,
                     shadowColor: AppColors.primary.withValues(alpha: 0.4),
                   ),
-                  onPressed: _controller.isSubmittingOrUploading ||
-                          _controller.isUploadRestricted
+                  onPressed: _checkingVerification ||
+                          _controller.isSubmittingOrUploading ||
+                          _controller.isUploadRestricted ||
+                          _controller.errorKind ==
+                              UgcErrorKind.submissionNotFound
                       ? null
                       : _onSubmitPressed,
-                  child: _controller.isSubmittingOrUploading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2))
-                      : Text(
-                          AppState.instance.isUgcUploaderBlocked
-                              ? 'అప్‌లోడ్ నిలిపివేయబడింది'
-                              : AppState.instance.isUgcDailyLimitActive
-                                  ? 'రేపు మళ్లీ పోస్ట్ చేయండి'
-                                  : _controller.submissionId != null &&
-                                          _controller.status ==
-                                              UgcUploadStatus.failed
-                                      ? 'మీడియా అప్‌లోడ్ మళ్లీ ప్రయత్నించండి'
-                                      : AppState.instance.uploadVerified
-                                          ? 'సమీక్ష కోసం సమర్పించండి'
-                                          : 'మొబైల్ ధృవీకరించి సమర్పించండి',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_controller.isSubmittingOrUploading) ...[
+                        const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2)),
+                        const SizedBox(width: 10),
+                      ],
+                      Flexible(
+                        child: Text(
+                          _submitLabel(),
+                          key: const Key('ugc_submit_label'),
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 14, fontWeight: FontWeight.w700),
                         ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              if (_controller.errorKind == UgcErrorKind.submissionNotFound &&
+                  !_controller.isSubmittingOrUploading) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    key: const Key('ugc_start_new_submission'),
+                    onPressed: _controller.startNewSubmission,
+                    icon: const Icon(Icons.add_circle_outline, size: 18),
+                    label: const Text('కొత్త సమర్పణగా పంపండి'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: const BorderSide(color: AppColors.primary),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 40),
             ],
           ),
@@ -1176,6 +1277,137 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
 
     return formScaffold;
+  }
+
+  /// Button text for each step of the handover's flow.
+  String _submitLabel() {
+    if (_checkingVerification) return 'ధృవీకరణ తనిఖీ చేస్తోంది…';
+    final c = _controller;
+    switch (c.status) {
+      case UgcUploadStatus.preparing:
+        return 'మీడియా సిద్ధం చేస్తోంది…';
+      case UgcUploadStatus.submitting:
+        return 'సమర్పణ సృష్టిస్తోంది…';
+      case UgcUploadStatus.uploading:
+        final pct = (c.uploadProgress * 100).clamp(0, 100).toInt();
+        // Every byte is sent; the server is now checking the media.
+        return pct >= 100
+            ? 'మీడియా ప్రాసెస్ అవుతోంది…'
+            : 'అప్‌లోడ్ అవుతోంది $pct%';
+      case UgcUploadStatus.completed:
+        return 'సమీక్షకు పంపబడింది';
+      default:
+        break;
+    }
+    if (AppState.instance.isUgcUploaderBlocked) {
+      return 'అప్‌లోడ్ నిలిపివేయబడింది';
+    }
+    if (AppState.instance.isUgcDailyLimitActive) {
+      return 'రేపు మళ్లీ పోస్ట్ చేయండి';
+    }
+    if (c.submissionId != null && c.status == UgcUploadStatus.failed) {
+      return 'మీడియా అప్‌లోడ్ మళ్లీ ప్రయత్నించండి';
+    }
+    return AppState.instance.uploadVerified
+        ? 'సమీక్ష కోసం సమర్పించండి'
+        : 'మొబైల్ నంబర్ ధృవీకరించండి';
+  }
+
+  /// Where the story happened: GPS fix + place names, with "Change".
+  Widget _buildLocationCard(bool isDark) {
+    final hasGps = _controller.hasGpsFix;
+    final label = _controller.locationLabel;
+    final busy = _controller.isSubmittingOrUploading;
+    return InkWell(
+      key: const Key('ugc_location_card'),
+      borderRadius: BorderRadius.circular(14),
+      onTap: busy ? null : _editLocation,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          border: Border.all(
+              color: hasGps
+                  ? (isDark ? Colors.white24 : const Color(0xFFE7E9EE))
+                  : Colors.orange.withValues(alpha: 0.6)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(hasGps ? Icons.place_rounded : Icons.location_off_outlined,
+                color: hasGps ? AppColors.primary : Colors.orange, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label.isNotEmpty ? label : 'ప్రాంతం ఎంచుకోండి',
+                    key: const Key('ugc_location_label'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    !hasGps
+                        ? 'GPS లొకేషన్ అవసరం — గుర్తించడానికి నొక్కండి'
+                        : _controller.locationEdited
+                            ? 'మీరు సరిచేసిన ప్రాంతం · GPS జతచేయబడింది'
+                            : 'GPS ద్వారా గుర్తించబడింది',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: hasGps ? AppColors.textMuted : Colors.orange),
+                  ),
+                ],
+              ),
+            ),
+            if (!hasGps)
+              IconButton(
+                key: const Key('ugc_location_detect'),
+                tooltip: 'GPS',
+                onPressed: busy
+                    ? null
+                    : () => _controller.ensureLocationAvailable(context),
+                icon: const Icon(Icons.my_location_rounded,
+                    size: 20, color: AppColors.primary),
+              ),
+            TextButton(
+              key: const Key('ugc_location_change'),
+              onPressed: busy ? null : _editLocation,
+              child: const Text('మార్చు',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editLocation() async {
+    final picked = await UgcLocationSheet.open(
+      context,
+      UgcPlace(
+        village: _controller.village,
+        subdistrict: _controller.subdistrict,
+        district: _controller.district,
+        stateName: _controller.stateName,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked.useGps) {
+      _controller.resetLocation();
+      // Refresh the fix (and the detected place) from the device.
+      await _controller.ensureLocationAvailable(context, refresh: true);
+      return;
+    }
+    _controller.setLocation(
+      village: picked.village,
+      subdistrict: picked.subdistrict,
+      district: picked.district,
+      stateName: picked.stateName,
+    );
   }
 
   Widget _typeCard({
@@ -1225,9 +1457,73 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   void dispose() {
     _controller.removeListener(_onControllerStateChanged);
     AppState.instance.removeListener(_onAppStateChanged);
-    _controller.dispose();
+    if (widget.controller == null) _controller.dispose();
     _titleController.dispose();
     _captionController.dispose();
     super.dispose();
+  }
+}
+
+/// First frame of the picked video, paused, so the reporter sees what
+/// they are sending rather than a black box.
+class _VideoFramePreview extends StatefulWidget {
+  final String path;
+  const _VideoFramePreview({required this.path});
+
+  @override
+  State<_VideoFramePreview> createState() => _VideoFramePreviewState();
+}
+
+class _VideoFramePreviewState extends State<_VideoFramePreview> {
+  VideoPlayerController? _video;
+
+  @override
+  void initState() {
+    super.initState();
+    _open();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoFramePreview old) {
+    super.didUpdateWidget(old);
+    if (old.path != widget.path) {
+      _video?.dispose();
+      _video = null;
+      _open();
+    }
+  }
+
+  Future<void> _open() async {
+    final c = VideoPlayerController.file(File(widget.path));
+    _video = c;
+    try {
+      await c.initialize();
+    } catch (_) {
+      return; // unreadable file: keep the plain play icon
+    }
+    if (mounted && _video == c) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _video?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _video;
+    if (c == null || !c.value.isInitialized) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: c.value.aspectRatio,
+          child: VideoPlayer(c),
+        ),
+      ),
+    );
   }
 }

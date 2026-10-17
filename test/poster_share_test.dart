@@ -55,11 +55,24 @@ void main() {
         File('lib/widgets/watermark/article_watermark_overlay.dart')
             .readAsStringSync();
 
-    test('the downloaded image carries no article text', () {
-      // Download is the picture plus the watermark; the text travels beside
-      // it in the share sheet, not burned into the pixels.
+    test('the floating overlay carries no article text', () {
       expect(card, isNot(contains('article.title')));
       expect(card, isNot(contains('article.summary')));
+    });
+
+    test('the shared image is the 1600x1200 news card', () {
+      // Category, date, headline and photo come from the article; the
+      // black logo strip is always drawn.
+      expect(source, contains('NewsShareCard('));
+      expect(source, contains('headline: article.title.trim()'));
+      expect(source, contains('meta: shareMeta(article)'));
+      final card =
+          File('lib/widgets/sharing/news_share_card.dart').readAsStringSync();
+      // Drawn on both the landscape (Share) and portrait (Download) card,
+      // never behind a condition.
+      expect(
+          RegExp(r'^\s*_BrandStrip\(', multiLine: true).hasMatch(card), isTrue);
+      expect(RegExp(r'if \([^)]*\)\s*_BrandStrip\(').hasMatch(card), isFalse);
     });
 
     test('the poster card embeds the logo asset', () {
@@ -84,7 +97,12 @@ void main() {
     });
 
     test('the generated file is a .jpg', () {
-      expect(source, contains("vaaradhi_\$safeId.jpg"));
+      // The news card is vaaradhi_<id>.jpg; the admin brand stamp writes
+      // <name>.jpg through the shared composer.
+      // vaaradhi_<id>.jpg (share) / vaaradhi_<id>_dl.jpg (download).
+      expect(source, contains("vaaradhi_\$safeId"));
+      expect(source, contains("_dl' : ''}.jpg"));
+      expect(source, contains("/\$fileName.jpg"));
       expect(source, contains("mimeType: 'image/jpeg'"));
     });
   });
@@ -113,4 +131,31 @@ void main() {
       expect(fn, contains('text: shareText'));
     });
   });
+  group('Download and Share use the same design', () {
+    final source = File('lib/utils/share_service.dart').readAsStringSync();
+
+    test('Download adds the start of the story', () {
+      final fn = source
+          .substring(source.indexOf('static Future<int> downloadPoster'));
+      expect(fn.substring(0, 400), contains('buildDownloadFile(article)'));
+      expect(source,
+          contains('generateArticleImage(article, forDownload: true)'));
+      expect(source,
+          contains("summary: forDownload ? shareSummary(source) : ''"));
+    });
+
+    test('Share uses the card without story text', () {
+      final fn = source
+          .substring(source.indexOf('static Future<File?> buildPosterFile'));
+      expect(fn.substring(0, 400), contains('generateArticleImage(article)'));
+      expect(fn.substring(0, 400), isNot(contains('forDownload: true')));
+    });
+
+    test('there is one card design, no red-banner card', () {
+      expect(source, isNot(contains('NewsDownloadCard')));
+      expect(File('lib/widgets/sharing/news_download_card.dart').existsSync(),
+          isFalse);
+    });
+  });
 }
+

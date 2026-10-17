@@ -1,7 +1,7 @@
 name: vaaradhi
 description: VAARADHI news, video, local updates, ads, and citizen journalism mobile app.
 publish_to: 'none'
-version: 1.7.5+14
+version: 1.8.0+19
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -16,6 +16,7 @@ dependencies:
   path_provider: ^2.1.6
   screenshot: ^3.0.0
   cached_network_image: ^3.4.1
+  flutter_cache_manager: ^3.4.1
   flutter_tts: ^4.0.2
   youtube_player_flutter: ^10.0.1
   webview_flutter: ^4.10.0
@@ -40,6 +41,8 @@ dependencies:
   image: ^4.5.4
   fluttertoast: ^10.0.0
   firebase_auth: ^6.7.0
+  youtube_player_iframe: ^6.0.2
+  flutter_widget_from_html_core: ^0.17.4
 
 dev_dependencies:
   flutter_test:
@@ -56,3 +59,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    # Ramabhadra (headlines) and Mandali (story text), bundled so every
+    # phone renders the same fonts, offline too; google_fonts finds them
+    # by file name.
+    - assets/fonts/

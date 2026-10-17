@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
-import '../theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../widgets/auth/auth_ui.dart';
 import 'reset_password_token_screen.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
@@ -19,7 +19,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _submit() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'దయచేసి మీ నమోదిత ఇమెయిల్ చిరునామా నమోదు చేయండి.');
+      setState(
+          () => _error = 'దయచేసి మీ నమోదిత ఇమెయిల్ చిరునామా నమోదు చేయండి.');
       return;
     }
 
@@ -39,7 +40,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       );
     } catch (e) {
       if (mounted) {
-        String errorMsg = 'పాస్‌వర్డ్ రీసెట్ అభ్యర్థన విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
+        String errorMsg =
+            'పాస్‌వర్డ్ రీసెట్ అభ్యర్థన విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.';
         if (e is DioException && e.response?.data is Map) {
           final resp = e.response!.data as Map;
           if (resp['errors'] is Map && resp['errors']['message'] != null) {
@@ -55,88 +57,86 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: const Text('పాస్‌వర్డ్ మర్చిపోయారా')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.lock_reset_rounded,
-                    color: AppColors.primary, size: 28),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                'పాస్‌వర్డ్ రీసెట్ చేయండి',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: Theme.of(context).textTheme.bodyLarge?.color,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'మీ ఇమెయిల్ చిరునామా నమోదు చేయండి, పాస్‌వర్డ్ రీసెట్ చేయడానికి మేము మీకు ధృవీకరణ కోడ్‌ను పంపుతాము.',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13.5),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                autofillHints: const [AutofillHints.email],
-                decoration: InputDecoration(
-                  labelText: 'ఇమెయిల్ చిరునామా',
-                  filled: true,
-                  fillColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+      backgroundColor: authBackground(context),
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      body: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: Column(
+          children: [
+            const AuthBrandHeader(
+              key: Key('forgot_brand_header'),
+              icon: Icons.lock_reset_rounded,
+              title: 'పాస్‌వర్డ్ మర్చిపోయారా?',
+              subtitle: 'చింతించకండి, కొన్ని క్షణాల్లో రీసెట్ చేయవచ్చు',
+            ),
+            AuthCard(
+              key: const Key('forgot_form_card'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const AuthCardHeading(
+                    title: 'పాస్‌వర్డ్ రీసెట్ చేయండి',
+                    note:
+                        'మీ ఇమెయిల్ చిరునామా నమోదు చేయండి, పాస్‌వర్డ్ రీసెట్ చేయడానికి మేము మీకు ధృవీకరణ కోడ్‌ను పంపుతాము.',
                   ),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!,
-                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
-              ],
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                    elevation: 0,
+                  const SizedBox(height: 22),
+                  TextField(
+                    key: const Key('forgot_email_field'),
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.send,
+                    autocorrect: false,
+                    autofillHints: const [AutofillHints.email],
+                    onSubmitted: (_) => _submit(),
+                    onChanged: (_) {
+                      if (_error != null) setState(() => _error = null);
+                    },
+                    decoration: authFieldDecoration(
+                      context,
+                      label: 'ఇమెయిల్ చిరునామా',
+                      icon: Icons.mail_outline_rounded,
+                    ),
                   ),
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('రీసెట్ కోడ్ పంపండి',
-                          style: TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 16),
+                  const AuthInfoLine(
+                    icon: Icons.mark_email_unread_outlined,
+                    text:
+                        'కోడ్ రాకపోతే మీ ఇమెయిల్ స్పామ్ ఫోల్డర్‌ను కూడా చూడండి.',
+                  ),
+                  const SizedBox(height: 8),
+                  if (_error != null)
+                    AuthErrorBox(_error!, key: const Key('forgot_error')),
+                  AuthPrimaryButton(
+                    key: const Key('forgot_submit'),
+                    label: 'రీసెట్ కోడ్ పంపండి',
+                    icon: Icons.send_rounded,
+                    busy: _submitting,
+                    onPressed: _submit,
+                  ),
+                ],
+              ),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -22),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: AuthSecondaryAction(
+                  buttonKey: const Key('forgot_back_to_login'),
+                  prompt: 'పాస్‌వర్డ్ గుర్తొచ్చిందా?',
+                  label: 'లాగిన్‌కు తిరిగి వెళ్ళండి',
+                  icon: Icons.login_rounded,
+                  onPressed: () => Navigator.of(context).maybePop(),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

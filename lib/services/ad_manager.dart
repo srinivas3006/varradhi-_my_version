@@ -228,12 +228,14 @@ class AdManager extends ChangeNotifier {
     required List<AdBanner> adsPool,
     int? overrideFrequency,
     String Function(T)? contentKey,
+    AdFrequencyPolicy policy = AdFrequencyPolicy.none,
   }) {
     return insertAdsIntoFeed(
       contentItems: contentItems,
       eligibleAds: adsPool,
       overrideFrequency: overrideFrequency,
       contentKey: contentKey,
+      policy: policy,
     );
   }
 

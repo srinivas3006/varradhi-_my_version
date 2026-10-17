@@ -189,7 +189,8 @@ class _PosterCardState extends State<PosterCard> {
             bottom: 0,
             child: Container(
               padding:
-                  EdgeInsets.fromLTRB(16, 28, 16, padding.bottom + 96),
+                  // Just clears Spotlight's 56pt bottom bar.
+                  EdgeInsets.fromLTRB(16, 28, 8, padding.bottom + 64),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
@@ -205,25 +206,33 @@ class _PosterCardState extends State<PosterCard> {
                     _Dots(count: _images.length, index: _index),
                     const SizedBox(height: 12),
                   ],
-                  if (widget.title.isNotEmpty) ...[
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        height: 1.4,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
+                  // Title left, a plain share icon bottom-right — the same as
+                  // the poster screen. No full-width button over the poster.
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.4,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  FilledButton.icon(
-                    onPressed: _share,
-                    icon: const Icon(Icons.share_rounded, size: 18),
-                    label: const Text('షేర్ చేయండి'),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        key: const Key('poster_share'),
+                        onPressed: _share,
+                        tooltip: 'షేర్ చేయండి',
+                        icon: const Icon(Icons.share_rounded,
+                            color: Colors.white, size: 26),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -27,8 +27,12 @@ class LiveNews {
     this.scheduledAt,
   });
 
-  bool get isLiveActive => (isActive || status.toLowerCase() == 'live') && status.toLowerCase() != 'ended';
-  bool get isUpcoming => status.toLowerCase() == 'upcoming' || (scheduledAt != null && scheduledAt!.isAfter(DateTime.now()));
+  bool get isLiveActive =>
+      (isActive || status.toLowerCase() == 'live') &&
+      status.toLowerCase() != 'ended';
+  bool get isUpcoming =>
+      status.toLowerCase() == 'upcoming' ||
+      (scheduledAt != null && scheduledAt!.isAfter(DateTime.now()));
 
   factory LiveNews.fromJson(Map<String, dynamic> json) {
     DateTime? parsedScheduled;
@@ -42,7 +46,12 @@ class LiveNews {
     final bool rawActive = json['is_active'] == true;
     final String resolvedStatus = rawStatus.isNotEmpty
         ? rawStatus
-        : (rawActive ? 'live' : (parsedScheduled != null && parsedScheduled.isAfter(DateTime.now()) ? 'upcoming' : 'ended'));
+        : (rawActive
+            ? 'live'
+            : (parsedScheduled != null &&
+                    parsedScheduled.isAfter(DateTime.now())
+                ? 'upcoming'
+                : 'ended'));
 
     return LiveNews(
       id: json['id']?.toString() ?? '',

@@ -6,7 +6,6 @@ import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import '../services/api_service.dart';
 
-
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/ad_manager.dart';
@@ -17,7 +16,6 @@ import '../core/media/media_resolver.dart';
 import '../core/media/media_source.dart';
 import '../core/media/network_video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
-
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -96,7 +94,6 @@ class _SplashScreenState extends State<SplashScreen>
       await _showSplashAd(ad);
     }
 
-
     if (!mounted || _navigated) return;
     _navigated = true;
 
@@ -114,7 +111,6 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 
-
   Future<void> _showSplashAd(AdBanner ad) async {
     if (ad.imageUrl.isNotEmpty && mounted) {
       precacheImage(NetworkImage(ad.imageUrl), context);
@@ -125,7 +121,8 @@ class _SplashScreenState extends State<SplashScreen>
       context: context,
       barrierDismissible: false,
       transitionDuration: const Duration(milliseconds: 500),
-      pageBuilder: (dialogContext, animation, secondaryAnimation) => FadeTransition(
+      pageBuilder: (dialogContext, animation, secondaryAnimation) =>
+          FadeTransition(
         opacity: animation,
         child: _SplashAdOverlay(
           ad: ad,
@@ -137,7 +134,9 @@ class _SplashScreenState extends State<SplashScreen>
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
               }
             }
-            if (mounted) Navigator.of(dialogContext).pop();
+            // The ad may have closed itself (countdown ended) while the link
+            // was opening; popping again would close the splash, not the ad.
+            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
           },
           onSkip: () {
             AdManager.instance.recordSkip(ad, placementZone: 'splash');
@@ -403,7 +402,8 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
                   if (widget.ad.isVideo)
                     const Padding(
                       padding: EdgeInsets.only(right: 5),
-                      child: Icon(Icons.videocam_rounded, color: Colors.amber, size: 14),
+                      child: Icon(Icons.videocam_rounded,
+                          color: Colors.amber, size: 14),
                     ),
                   const Text(
                     'SPONSORED',
@@ -476,7 +476,8 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
                   : null,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: _canSkip
                       ? Colors.white.withValues(alpha: 0.25)
@@ -490,7 +491,9 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _canSkip ? 'Skip Ad' : 'Skip Ad in $_secondsUntilSkippable',
+                      _canSkip
+                          ? 'Skip Ad'
+                          : 'Skip Ad in $_secondsUntilSkippable',
                       style: TextStyle(
                         color: _canSkip
                             ? Colors.white
@@ -608,4 +611,3 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
     return const SizedBox.shrink();
   }
 }
-

@@ -140,6 +140,35 @@ class LocationTranslations {
 
   static final RegExp _teluguRegex = RegExp(r'[\u0C00-\u0C7F]');
 
+  /// Telugu names the location API sent (`name_te`) for places the reader
+  /// picked or GPS matched. The table above covers states, districts and
+  /// big cities only \u2014 mandals and villages (Yousufguda, Khairatabad\u2026) are
+  /// known only from the API, so they are remembered here. AppState saves
+  /// and restores this across launches.
+  static final Map<String, String> _learned = {};
+  static const int _maxLearned = 300;
+
+  /// Records [telugu] as the Telugu name of [english]. Ignored unless the
+  /// Telugu name really is Telugu script.
+  static void learn(String? english, String? telugu) {
+    final en = english?.trim().toLowerCase() ?? '';
+    final te = telugu?.trim() ?? '';
+    if (en.isEmpty || te.isEmpty || !_teluguRegex.hasMatch(te)) return;
+    _learned.remove(en); // re-insert = most recent
+    _learned[en] = te;
+    while (_learned.length > _maxLearned) {
+      _learned.remove(_learned.keys.first);
+    }
+  }
+
+  static Map<String, String> get learnedNames => Map.unmodifiable(_learned);
+
+  static void restoreLearned(Map<String, String> names) {
+    _learned
+      ..clear()
+      ..addAll(names);
+  }
+
   /// Converts any English location name into its Telugu equivalent.
   /// If the input is already in Telugu or empty, it is returned directly.
   static String toTelugu(String? name) {
@@ -153,6 +182,9 @@ class LocationTranslations {
     }
 
     final key = trimmed.toLowerCase();
+    // The API's own Telugu name wins over the built-in table.
+    final learned = _learned[key];
+    if (learned != null) return learned;
     if (_districtsAndStates.containsKey(key)) {
       return _districtsAndStates[key]!;
     }

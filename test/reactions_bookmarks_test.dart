@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
@@ -38,7 +39,70 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     state.likedItemIds.clear();
     state.dislikedItemIds.clear();
-    state.bookmarkedItemIds.clear();
+    state.resetBookmarksForTest();
+    // Server calls are for accounts; a guest's bookmarks stay on the phone.
+    state.isLoggedIn = true;
+  });
+
+  tearDown(() => state.isLoggedIn = false);
+
+  group('every screen agrees on one bookmark state', () {
+    NewsArticle story({bool bookmarked = false}) => NewsArticle.fromJson(
+        {'id': 'a1', 'slug': 's1', 'is_bookmarked': bookmarked});
+
+    test('the server flag counts until the reader decides', () {
+      expect(state.isStoryBookmarked(story(bookmarked: true)), isTrue);
+      expect(state.isStoryBookmarked(story()), isFalse);
+    });
+
+    test('removing a bookmark wins over a stale copy that says saved', () {
+      // Regression: screens OR-ed their own copy's is_bookmarked with the
+      // shared state, so a bookmark removed on one screen still showed as
+      // saved on any screen holding an older copy of the story.
+      final staleCopy = story(bookmarked: true);
+      state.setBookmarked('a1', false);
+      expect(state.isStoryBookmarked(staleCopy), isFalse);
+    });
+
+    test('adding a bookmark wins over a stale copy that says not saved', () {
+      final staleCopy = story();
+      state.setBookmarked('a1', true);
+      expect(state.isStoryBookmarked(staleCopy), isTrue);
+    });
+
+    test('logging out forgets the account\'s bookmarks', () {
+      // Regression: only citizen-post bookmarks were cleared, so the next
+      // account on the phone saw the previous account's saved articles.
+      final src = File('lib/state/app_state.dart').readAsStringSync();
+      final fn = src.substring(src.indexOf('_clearLocalSession() async'));
+      final body = fn.substring(0, fn.indexOf('\n  }\n'));
+      expect(body, contains('bookmarkedItemIds.clear();'));
+      expect(body, contains('_bookmarkDecisions.clear();'));
+    });
+
+    test('there is one name for it, and no leftover duplicate calls', () {
+      final api = File('lib/services/api_service.dart').readAsStringSync();
+      expect(api, isNot(contains('removeBookmark(')));
+      final engagement =
+          File('lib/services/content_engagement_service.dart')
+              .readAsStringSync();
+      expect(engagement, isNot(contains('setSaved(')));
+    });
+
+    test('the Saved screen deletes server rows by bookmark id', () {
+      final screen =
+          File('lib/screens/bookmarks_screen.dart').readAsStringSync();
+      expect(screen, contains('deleteBookmark(item.id)'));
+      // Phone copies are only a guest's bookmarks now, never an account's.
+      expect(screen, contains('if (!item.onDevice)'));
+    });
+
+    test('a story with only a slug is keyed by its slug', () {
+      final slugOnly = NewsArticle.fromJson({'slug': 's9'});
+      expect(AppState.bookmarkKey(slugOnly), 's9');
+      state.setBookmarked('s9', true);
+      expect(state.isStoryBookmarked(slugOnly), isTrue);
+    });
   });
 
   void serve(Future<ResponseBody> Function(RequestOptions) h) {
@@ -191,35 +255,64 @@ void main() {
       expect(await ApiService.instance.toggleBookmark('a1'), isFalse);
     });
 
-    test('saving when the server already had it still ends saved', () async {
-      // Regression: the app showed "Saved" but the toggle had removed a
-      // bookmark the server already held, so the Saved screen lacked it.
-      var calls = 0;
-      var serverSaved = true; // stale app copy: server already has it
+    test('saving uses the safe add endpoint, never the toggle (§3)', () async {
+      // The toggle turned a save into an unsave whenever the server already
+      // held the bookmark. POST /bookmarks/ can only ever add.
+      final calls = <String>[];
+      Object? body;
       serve((o) async {
-        calls++;
-        serverSaved = !serverSaved;
-        return _json({'data': {'bookmarked': serverSaved}}, 200);
-      });
-      final story = NewsArticle.fromJson({'id': 'a1', 'title': 't'});
-      final saved = await ContentEngagementService.instance
-          .setSaved(story, nowSaved: true);
-      expect(saved, isTrue);
-      expect(serverSaved, isTrue, reason: 'server must end saved');
-      expect(calls, 2);
-    });
-
-    test('a normal save is a single toggle', () async {
-      var calls = 0;
-      serve((o) async {
-        calls++;
-        return _json({'data': {'bookmarked': true}}, 200);
+        calls.add('${o.method} ${o.path}');
+        body = o.data;
+        return _json({
+          'data': {'id': 'bm1', 'message': 'Bookmarked successfully.'}
+        }, 201);
       });
       final story = NewsArticle.fromJson({'id': 'a2', 'title': 't'});
       expect(
           await ContentEngagementService.instance
-              .setSaved(story, nowSaved: true),
+              .setBookmarked(story, nowBookmarked: true),
           isTrue);
+      expect(calls, ['POST /api/v1/bookmarks/']);
+      expect(body, {'article_id': 'a2'});
+    });
+
+    test('saving an article already saved still ends saved (200)', () async {
+      serve((o) async => _json(
+          {'data': {'message': 'Article already bookmarked.'}}, 200));
+      final story = NewsArticle.fromJson({'id': 'a2', 'title': 't'});
+      expect(
+          await ContentEngagementService.instance
+              .setBookmarked(story, nowBookmarked: true),
+          isTrue);
+    });
+
+    test('unsaving uses the toggle and follows data.bookmarked (§2)', () async {
+      final calls = <String>[];
+      serve((o) async {
+        calls.add('${o.method} ${o.path}');
+        return _json({
+          'data': {'bookmarked': false, 'message': 'Bookmark removed.'}
+        }, 200);
+      });
+      final story = NewsArticle.fromJson({'id': 'a1', 'title': 't'});
+      expect(
+          await ContentEngagementService.instance
+              .setBookmarked(story, nowBookmarked: false),
+          isFalse);
+      expect(calls, ['POST /api/v1/bookmarks/toggle/']);
+    });
+
+    test('a failed save is sent once, never retried', () async {
+      var calls = 0;
+      serve((o) async {
+        calls++;
+        return _json({'errors': {'message': 'down'}}, 503);
+      });
+      final story = NewsArticle.fromJson({'id': 'a1', 'title': 't'});
+      expect(
+          await ContentEngagementService.instance
+              .setBookmarked(story, nowBookmarked: true),
+          isNull);
       expect(calls, 1);
     });
 
@@ -257,11 +350,120 @@ void main() {
         }, 200);
       });
 
-      final articles = await ApiService.instance.getBookmarks();
-      expect(articles.length, 1);
-      expect(articles.first.id, 'art_1');
-      expect(articles.first.title, 'Saved Article 1');
-      expect(articles.first.isBookmarked, isTrue);
+      final items = await ApiService.instance.getBookmarks();
+      expect(items.length, 1);
+      expect(items.first.id, 'bm_1');
+      expect(items.first.story.id, 'art_1');
+      expect(items.first.story.title, 'Saved Article 1');
+      expect(items.first.story.isBookmarked, isTrue);
+    });
+
+    test('the combined list parses articles and citizen posts (§5)',
+        () async {
+      serve((o) async => _json({
+            'data': [
+              {
+                'id': 'bm-a',
+                'feed_item_type': 'article',
+                'content_id': 'art-9',
+                'article': {
+                  'id': 'art-9',
+                  'title': 'Article title',
+                  'slug': 'article-title',
+                },
+                'ugc': null,
+                'created_at': '2026-09-30T11:00:00+05:30',
+              },
+              {
+                'id': 'bm-u',
+                'feed_item_type': 'ugc',
+                'content_id': 'sub-9',
+                'article': null,
+                'ugc': {
+                  'id': 'sub-9',
+                  'type': 'ugc',
+                  'title': 'Road damage near Kesaram',
+                  'description': 'Citizen report description',
+                  'thumbnail_url': 'https://cdn.example.com/ugc.jpg',
+                  'is_bookmarked': true,
+                },
+                'created_at': '2026-09-30T10:30:00+05:30',
+              },
+            ],
+            'meta': {'count': 2, 'next': null, 'previous': null},
+            'errors': null,
+          }, 200));
+
+      final items = await ApiService.instance.getBookmarks();
+      expect(items.map((i) => i.id), ['bm-a', 'bm-u']);
+
+      final article = items[0];
+      expect(article.isUgc, isFalse);
+      expect(article.contentId, 'art-9');
+      expect(article.story.slug, 'article-title');
+
+      // Regression: a citizen row has article: null, and was parsed from the
+      // bookmark row itself — a blank card carrying the bookmark's id.
+      final ugc = items[1];
+      expect(ugc.isUgc, isTrue);
+      expect(ugc.contentId, 'sub-9');
+      expect(ugc.story.id, 'sub-9');
+      expect(ugc.story.isUgc, isTrue);
+      expect(ugc.story.title, 'Road damage near Kesaram');
+      expect(ugc.story.summary, 'Citizen report description');
+    });
+
+    test('pages follow meta.next exactly and de-duplicate by bookmark id (§6)',
+        () async {
+      final requested = <String>[];
+      serve((o) async {
+        requested.add(o.uri.toString());
+        if (o.uri.queryParameters['cursor'] == 'p2') {
+          return _json({
+            'data': [
+              {'id': 'bm1', 'feed_item_type': 'article', 'content_id': 'a1',
+                  'article': {'id': 'a1', 'title': 'one'}},
+              {'id': 'bm2', 'feed_item_type': 'article', 'content_id': 'a2',
+                  'article': {'id': 'a2', 'title': 'two'}},
+            ],
+            'meta': {'next': null},
+          }, 200);
+        }
+        return _json({
+          'data': [
+            {'id': 'bm1', 'feed_item_type': 'article', 'content_id': 'a1',
+                'article': {'id': 'a1', 'title': 'one'}},
+          ],
+          'meta': {
+            'next':
+                'https://api.vaaradhinews.com/api/v1/bookmarks/?cursor=p2&page_size=20'
+          },
+        }, 200);
+      });
+
+      final items = await ApiService.instance.getBookmarks();
+      expect(items.map((i) => i.id), ['bm1', 'bm2']);
+      expect(requested.last,
+          'https://api.vaaradhinews.com/api/v1/bookmarks/?cursor=p2&page_size=20');
+      expect(requested.first, contains('page_size=20'));
+      expect(requested.first, isNot(contains('page=')));
+    });
+
+    test('delete uses the bookmark id; 204 is success, 404 already gone (§7)',
+        () async {
+      String? path;
+      serve((o) async {
+        path = o.path;
+        return ResponseBody.fromString('', 204);
+      });
+      expect(await ApiService.instance.deleteBookmark('bm-u'), isTrue);
+      expect(path, '/api/v1/bookmarks/bm-u/');
+
+      serve((o) async => _json({
+            'data': null,
+            'errors': {'code': 404, 'message': 'Bookmark not found.'},
+          }, 404));
+      expect(await ApiService.instance.deleteBookmark('bm-x'), isFalse);
     });
 
     test('getBookmarks parses wrapped data envelope and preserves bookmarked flag', () async {
@@ -279,10 +481,10 @@ void main() {
         }, 200);
       });
 
-      final articles = await ApiService.instance.getBookmarks();
-      expect(articles.length, 1);
-      expect(articles.first.id, 'art_2');
-      expect(articles.first.isBookmarked, isTrue);
+      final items = await ApiService.instance.getBookmarks();
+      expect(items.length, 1);
+      expect(items.first.story.id, 'art_2');
+      expect(items.first.story.isBookmarked, isTrue);
     });
   });
 

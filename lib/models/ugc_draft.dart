@@ -28,6 +28,12 @@ class UgcDraft {
   final String? locationLon;
   final String? district;
   final String? stateName;
+  final String? village;
+  final String? subdistrict;
+
+  /// The reporter corrected the place by hand; restore it as typed rather
+  /// than taking the app location again.
+  final bool locationEdited;
   final String? mobile;
   final DateTime updatedAt;
 
@@ -43,6 +49,9 @@ class UgcDraft {
     this.locationLon,
     this.district,
     this.stateName,
+    this.village,
+    this.subdistrict,
+    this.locationEdited = false,
     this.mobile,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -79,6 +88,9 @@ class UgcDraft {
       locationLon: locationLon ?? this.locationLon,
       district: district ?? this.district,
       stateName: stateName ?? this.stateName,
+      village: village,
+      subdistrict: subdistrict,
+      locationEdited: locationEdited,
       mobile: mobile ?? this.mobile,
       updatedAt: updatedAt ?? DateTime.now(),
     );
@@ -97,6 +109,9 @@ class UgcDraft {
       'locationLon': locationLon,
       'district': district,
       'stateName': stateName,
+      'village': village,
+      'subdistrict': subdistrict,
+      'locationEdited': locationEdited,
       'mobile': mobile,
       'updatedAt': updatedAt.toIso8601String(),
     };
@@ -131,8 +146,12 @@ class UgcDraft {
       locationLon: json['locationLon']?.toString(),
       district: json['district']?.toString(),
       stateName: json['stateName']?.toString(),
+      village: json['village']?.toString(),
+      subdistrict: json['subdistrict']?.toString(),
+      locationEdited: json['locationEdited'] == true,
       mobile: json['mobile']?.toString(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 

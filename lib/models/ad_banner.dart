@@ -30,6 +30,10 @@ class AdBanner {
   final int dailyMaxImpressionsPerUser;
   final double ctr;
 
+  /// 3D ads: which 3D format to play (cube, prism, pillar, corner
+  /// billboard, showcase) when the backend names one; empty = take turns.
+  final String displayStyle;
+
   AdBanner({
     required this.id,
     this.title = 'Sponsored Promotion',
@@ -45,6 +49,7 @@ class AdBanner {
     this.durationSeconds = 0,
     this.dailyMaxImpressionsPerUser = 0,
     required this.ctr,
+    this.displayStyle = '',
   });
 
   int get displayDurationSeconds => durationSeconds;
@@ -98,6 +103,11 @@ class AdBanner {
       dailyMaxImpressionsPerUser:
           _toInt(json['daily_max_impressions_per_user'], 0),
       ctr: _toDouble(json['ctr'], 0.0),
+      displayStyle: (json['three_d_style'] ??
+              json['animation_style'] ??
+              json['display_style'] ??
+              '')
+          .toString(),
     );
   }
 
@@ -117,6 +127,7 @@ class AdBanner {
       'display_duration_seconds': durationSeconds,
       'daily_max_impressions_per_user': dailyMaxImpressionsPerUser,
       'ctr': ctr,
+      if (displayStyle.isNotEmpty) 'three_d_style': displayStyle,
     };
   }
 
@@ -135,6 +146,7 @@ class AdBanner {
     int? durationSeconds,
     int? dailyMaxImpressionsPerUser,
     double? ctr,
+    String? displayStyle,
   }) {
     return AdBanner(
       id: id ?? this.id,
@@ -152,6 +164,7 @@ class AdBanner {
       dailyMaxImpressionsPerUser:
           dailyMaxImpressionsPerUser ?? this.dailyMaxImpressionsPerUser,
       ctr: ctr ?? this.ctr,
+      displayStyle: displayStyle ?? this.displayStyle,
     );
   }
 }

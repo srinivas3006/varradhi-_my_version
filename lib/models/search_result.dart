@@ -30,10 +30,8 @@ class SearchResult {
         : const [];
 
     if (data is Map) {
-      results = articles(data['results'] ??
-          data['articles'] ??
-          data['items'] ??
-          data['data']);
+      results = articles(
+          data['results'] ?? data['articles'] ?? data['items'] ?? data['data']);
       final raw = data['suggestions'];
       if (raw is List) {
         suggestions = raw
@@ -46,7 +44,8 @@ class SearchResult {
             .toSet()
             .toList();
       }
-      final t = data['cache_ttl_seconds'] ?? (body is Map ? body['cache_ttl_seconds'] : null);
+      final t = data['cache_ttl_seconds'] ??
+          (body is Map ? body['cache_ttl_seconds'] : null);
       if (t is num) ttl = t.toInt();
     } else if (data is List) {
       results = articles(data);

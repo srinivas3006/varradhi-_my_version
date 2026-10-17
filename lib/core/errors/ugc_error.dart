@@ -49,6 +49,16 @@ enum UgcErrorKind {
   /// The request was cancelled by the user.
   cancelled,
 
+  /// 404 "Submission not found." on upload. The draft is kept and nothing
+  /// is recreated silently; the reporter chooses to start a new submission.
+  submissionNotFound,
+
+  /// 413 — the media is larger than the server accepts.
+  payloadTooLarge,
+
+  /// 429 — too many requests; wait before trying again.
+  rateLimited,
+
   unknown,
 }
 
@@ -159,6 +169,11 @@ class UgcApiError extends AppException {
     if (m.contains('otp')) {
       return UgcErrorKind.invalidOtp;
     }
+    if (m.contains('submission not found')) {
+      return UgcErrorKind.submissionNotFound;
+    }
+    if (status == 413) return UgcErrorKind.payloadTooLarge;
+    if (status == 429) return UgcErrorKind.rateLimited;
     if (status == 401) return UgcErrorKind.sessionExpired;
     if (status != null && status >= 500) return UgcErrorKind.server;
     return UgcErrorKind.unknown;
@@ -168,23 +183,60 @@ class UgcApiError extends AppException {
     if (data is! Map) return null;
     final errors = data['errors'];
     if (errors is Map) {
-      final msg = errors['message'] ?? errors['detail'];
-      if (msg != null) {
-        // "Media validation failed." carries the per-file reasons in
-        // errors.details.errors — show them, not just the headline.
-        final perFile = fileReasons(errors['details']);
-        return perFile.isEmpty
-            ? msg.toString()
-            : '$msg\n${perFile.join('\n')}';
-      }
+      final msg = (errors['message'] ?? errors['detail'])?.toString();
       final details = errors['details'];
+      // Serializer field errors ({"content_type": ["…not a valid choice."]})
+      // and "Media validation failed." per-file reasons live in
+      // errors.details — show them, not just the headline.
+      final lines = [...fieldErrors(details), ...fileReasons(details)];
+      final generic = msg == null ||
+          msg.trim().isEmpty ||
+          msg.trim().toLowerCase() == 'an error occurred.';
+      if (lines.isNotEmpty) {
+        return generic ? lines.join('\n') : '$msg\n${lines.join('\n')}';
+      }
       if (details is Map && details['detail'] != null) {
         return details['detail'].toString();
       }
+      if (details is List && details.isNotEmpty) {
+        return details.first.toString();
+      }
+      if (msg != null) return msg;
     } else if (errors is List && errors.isNotEmpty) {
       return errors.first.toString();
     }
     return (data['message'] ?? data['detail'])?.toString();
+  }
+
+  /// Field errors from `errors.details`, one line each, e.g.
+  /// "Content type: "image" is not a valid choice.". Skips the keys that
+  /// carry other things (`errors` = per-file, `detail`, `message`, `code`).
+  static List<String> fieldErrors(dynamic details) {
+    if (details is! Map) return const [];
+    const skip = {'errors', 'detail', 'message', 'code'};
+    String first(dynamic v) {
+      if (v is List) return v.isEmpty ? '' : first(v.first);
+      if (v is Map) return v.isEmpty ? '' : first(v.values.first);
+      return v?.toString() ?? '';
+    }
+
+    final out = <String>[];
+    details.forEach((key, value) {
+      final k = '$key';
+      if (skip.contains(k)) return;
+      final why = first(value).trim();
+      if (why.isEmpty) return;
+      out.add(k == 'non_field_errors' ? why : '${_fieldLabel(k)}: $why');
+    });
+    return out;
+  }
+
+  /// `location_lat` → "Location lat".
+  static String _fieldLabel(String key) {
+    final words = key.replaceAll('_', ' ').trim();
+    return words.isEmpty
+        ? key
+        : words[0].toUpperCase() + words.substring(1);
   }
 
   /// Per-file reasons from `errors.details.errors`, one line each, e.g.

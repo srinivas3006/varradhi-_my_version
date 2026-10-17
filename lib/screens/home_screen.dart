@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/navigation/app_navigator.dart';
-import '../core/navigation/auth_guard.dart';
 import '../core/navigation/notification_navigation_gate.dart';
 import '../widgets/bottom_nav_bar.dart';
-import '../widgets/ads/bottom_sticky_ad_banner.dart';
-import '../models/ad_banner.dart';
+import '../widgets/ads/paced_ads_overlay.dart';
 import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
-import 'profile_tab.dart';
+import '../features/reels/reels_screen.dart';
 import 'spotlight_screen.dart';
 import '../services/notification_service.dart';
-import '../services/ad_manager.dart';
 import '../state/app_state.dart';
 
 /// The navigation hub. Home, Post and Profile are tabs; Main News and Local
@@ -39,35 +36,11 @@ class _HomeScreenState extends State<HomeScreen> {
   late int _navIndex;
   late final Set<int> _activatedIndices;
   DateTime? _lastBackPressTime;
-  AdBanner? _homeBottomAd;
-  bool _stickyDismissed = false;
-  late String _adIdentity;
-  String get _currentAdIdentity => [
-        AppState.instance.contentLanguage,
-        AppState.instance.stateName,
-        AppState.instance.district,
-        AppState.instance.city,
-        AppState.instance.subdistrict,
-        AppState.instance.village
-      ].join('|');
-  void _onAdContextChanged() {
-    if (_adIdentity == _currentAdIdentity) return;
-    _adIdentity = _currentAdIdentity;
-    setState(() => _homeBottomAd = null);
-    if (!_stickyDismissed) _loadHomeBottomAd();
-  }
-
-  @override
-  void dispose() {
-    AppState.instance.removeListener(_onAdContextChanged);
-    super.dispose();
-  }
+  Key _postScreenKey = UniqueKey();
 
   @override
   void initState() {
     super.initState();
-    _adIdentity = _currentAdIdentity;
-    AppState.instance.addListener(_onAdContextChanged);
     _navIndex = widget.initialTabIndex;
     _activatedIndices = {widget.initialTabIndex};
     final hadPendingNotification =
@@ -79,34 +52,6 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) _openSpotlight(isLocal: false);
       });
     }
-
-    Future.microtask(_loadHomeBottomAd);
-  }
-
-  Future<void> _loadHomeBottomAd() async {
-    if (_stickyDismissed) return;
-    final identity = _adIdentity;
-    final ad = await _selectFirstAvailableAd(
-      zones: const ['feed'],
-      preferType: 'bottom_sticky',
-    );
-    if (!mounted || _stickyDismissed || identity != _adIdentity || ad == null)
-      return;
-    setState(() => _homeBottomAd = ad);
-  }
-
-  Future<AdBanner?> _selectFirstAvailableAd({
-    required List<String> zones,
-    required String preferType,
-  }) async {
-    for (final zone in zones) {
-      final ads = await AdManager.instance.getAdsForZone(zone, scope: 'main');
-      final selected = AdManager.instance.selectAd(
-        ads.where((ad) => ad.isBottomSticky).toList(),
-      );
-      if (selected != null) return selected;
-    }
-    return null;
   }
 
   void _handleBack(bool didPop) {
@@ -146,6 +91,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _switchTab(int index) {
     setState(() {
+      if (index == 2) {
+        _postScreenKey = UniqueKey();
+      }
       _activatedIndices.add(index);
       _navIndex = index;
     });
@@ -158,25 +106,23 @@ class _HomeScreenState extends State<HomeScreen> {
     AppNavigator.pushSafe(
       context,
       MaterialPageRoute(
-        settings: RouteSettings(
-            name: isLocal ? '/spotlight/local' : '/spotlight'),
+        settings:
+            RouteSettings(name: isLocal ? '/spotlight/local' : '/spotlight'),
         builder: (_) => SpotlightScreen(isLocal: isLocal),
       ),
     );
   }
 
-  void _handlePostTap() {
-    requireAuth(context, () {
-      if (!mounted) return;
-      _switchTab(2);
-    });
-  }
+  /// Always opens the Post tab. A guest sees its "log in to post news" page
+  /// with a Log in button, rather than the tap leading nowhere or jumping
+  /// straight into a login screen with no context.
+  void _handlePostTap() => _switchTab(2);
 
   @override
   Widget build(BuildContext context) {
     // Tabs are lazily mounted only when first activated, eliminating UI
     // thread starvation and duplicate network calls on cold launch. Indices
-    // line up with the nav bar's; 1 and 3 open Spotlight as a route, so
+    // line up with the nav bar's; 1 and 4 open Spotlight and 3 opens Reels as a route, so
     // their slots here are placeholders that are never shown.
     final tabs = [
       _activatedIndices.contains(0)
@@ -186,13 +132,14 @@ class _HomeScreenState extends State<HomeScreen> {
       // 2 — Post, keeping the centre slot the nav bar's floating button
       // renders a gap for.
       _activatedIndices.contains(2)
-          ? const CreatePostScreen()
+          ? CreatePostScreen(key: _postScreenKey)
           : const SizedBox.shrink(),
-      const SizedBox.shrink(), // 3 — Local News Spotlight (pushed route)
-      _activatedIndices.contains(4)
-          ? const ProfileTab()
-          : const SizedBox.shrink(),
+      // 3 — Reels opens full-screen over Home (ReelsScreen), with no
+      // bottom bar; back returns here.
+      const SizedBox.shrink(),
+      const SizedBox.shrink(), // 4 — Local News Spotlight (pushed route)
     ];
+    // Profile is not a tab: it opens from the Home header, top-left.
 
     return PopScope(
       canPop: false,
@@ -205,31 +152,27 @@ class _HomeScreenState extends State<HomeScreen> {
               index: _navIndex,
               children: tabs,
             ),
-            if (_navIndex == 0 && _homeBottomAd != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: MediaQuery.of(context).padding.bottom + 65,
-                child: BottomStickyAdBanner(
-                    key: ValueKey('home_bottom_${_homeBottomAd!.id}'),
-                    ad: _homeBottomAd!,
-                    placementZone: 'feed',
-                    onDismiss: () {
-                      if (mounted)
-                        setState(() {
-                          _stickyDismissed = true;
-                          _homeBottomAd = null;
-                        });
-                    },
-                  ),
+            // Banner and floating 3D ad come and go with active use
+            // (AdPacer) instead of staying over the feed all the time.
+            if (_navIndex == 0)
+              Positioned.fill(
+                child: PacedAdsOverlay(
+                  bottomInset: MediaQuery.of(context).padding.bottom + 65,
+                  // The 3D ad is the app-wide corner ad (main.dart).
+                  showFloating: false,
+                ),
               ),
           ],
         ),
         bottomNavigationBar: BottomNavBar(
           currentIndex: _navIndex,
           onTap: (index) {
-            if (index == 1 || index == 3) {
-              _openSpotlight(isLocal: index == 3);
+            if (index == 1 || index == 4) {
+              _openSpotlight(isLocal: index == 4);
+              return;
+            }
+            if (index == 3) {
+              ReelsScreen.open(context);
               return;
             }
             if (index == 2) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -15,7 +16,8 @@ class MyPostsScreen extends StatefulWidget {
 }
 
 class _MyPostsScreenState extends State<MyPostsScreen> {
-  String _selectedFilter = 'all'; // 'all', 'pending', 'approved', 'published', 'rejected'
+  String _selectedFilter =
+      'all'; // 'all', 'pending', 'approved', 'published', 'rejected'
   bool _isLoading = true;
   List<ReporterPost> _posts = [];
 
@@ -30,6 +32,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
   void initState() {
     super.initState();
     _fetchSubmissions();
+    AppState.instance.refreshReporterDashboard();
   }
 
   Future<void> _fetchSubmissions() async {
@@ -38,6 +41,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
       _isLoading = true;
       _loadingMore = false;
     });
+    unawaited(AppState.instance.refreshReporterDashboard());
     try {
       final page = await ApiService.instance.getReporterSubmissionsPage(
         status: _selectedFilter == 'all' ? null : _selectedFilter,
@@ -48,6 +52,9 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
           _nextCursor = page.nextCursor;
           _isLoading = false;
         });
+        if (_selectedFilter == 'all') {
+          AppState.instance.syncReporterPosts(page.posts);
+        }
       }
     } catch (_) {
       if (mounted && generation == _generation) {
@@ -131,9 +138,21 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
     final filters = [
       {'key': 'all', 'label': 'అన్నీ', 'color': AppColors.primary},
       {'key': 'pending', 'label': 'పెండింగ్', 'color': const Color(0xFFE8A312)},
-      {'key': 'approved', 'label': 'ఆమోదించబడినవి', 'color': const Color(0xFF10B981)},
-      {'key': 'published', 'label': 'ప్రచురించబడినవి', 'color': const Color(0xFF3B82F6)},
-      {'key': 'rejected', 'label': 'తిరస్కరించబడినవి', 'color': const Color(0xFFE8412B)},
+      {
+        'key': 'approved',
+        'label': 'ఆమోదించబడినవి',
+        'color': const Color(0xFF10B981)
+      },
+      {
+        'key': 'published',
+        'label': 'ప్రచురించబడినవి',
+        'color': const Color(0xFF3B82F6)
+      },
+      {
+        'key': 'rejected',
+        'label': 'తిరస్కరించబడినవి',
+        'color': const Color(0xFFE8412B)
+      },
     ];
 
     return Container(
@@ -166,10 +185,14 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
               decoration: BoxDecoration(
                 color: isSelected
                     ? color.withValues(alpha: isDark ? 0.25 : 0.15)
-                    : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04)),
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.04)),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: isSelected ? color : (isDark ? Colors.white12 : Colors.black12),
+                  color: isSelected
+                      ? color
+                      : (isDark ? Colors.white12 : Colors.black12),
                   width: isSelected ? 1.5 : 1,
                 ),
               ),
@@ -180,7 +203,8 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                     label,
                     style: TextStyle(
                       fontSize: 12.5,
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight:
+                          isSelected ? FontWeight.w700 : FontWeight.w500,
                       color: isSelected
                           ? color
                           : (isDark ? Colors.white70 : Colors.black87),
@@ -189,9 +213,12 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                   if (count > 0) ...[
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1.5),
                       decoration: BoxDecoration(
-                        color: isSelected ? color : (isDark ? Colors.white24 : Colors.black12),
+                        color: isSelected
+                            ? color
+                            : (isDark ? Colors.white24 : Colors.black12),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
@@ -199,7 +226,9 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black54),
+                          color: isSelected
+                              ? Colors.white
+                              : (isDark ? Colors.white70 : Colors.black54),
                         ),
                       ),
                     ),
@@ -220,18 +249,38 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
     return AnimatedBuilder(
       animation: AppState.instance,
       builder: (context, _) {
-        final sourcePosts = _posts.isNotEmpty ? _posts : AppState.instance.reporterPosts;
-        final displayPosts = _selectedFilter == 'all'
-            ? sourcePosts
-            : sourcePosts.where((p) => p.status.name == _selectedFilter).toList();
-
         int countFor(String filter) {
-          if (filter == 'all') return sourcePosts.length;
-          return sourcePosts.where((p) => p.status.name == filter).length;
+          switch (filter) {
+            case 'pending':
+              return AppState.instance.pendingCount;
+            case 'approved':
+              return AppState.instance.approvedCount;
+            case 'published':
+              return AppState.instance.publishedCount;
+            case 'rejected':
+              return AppState.instance.rejectedCount;
+            default:
+              return AppState.instance.totalSubmissionsCount;
+          }
+        }
+
+        final List<ReporterPost> displayPosts;
+        if (_posts.isNotEmpty) {
+          displayPosts = _selectedFilter == 'all'
+              ? _posts
+              : _posts.where((p) => p.status.name == _selectedFilter).toList();
+        } else {
+          final localPosts = AppState.instance.reporterPosts;
+          displayPosts = _selectedFilter == 'all'
+              ? localPosts
+              : localPosts
+                  .where((p) => p.status.name == _selectedFilter)
+                  .toList();
         }
 
         return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF121212) : AppColors.background,
+          backgroundColor:
+              isDark ? const Color(0xFF121212) : AppColors.background,
           appBar: AppBar(
             title: const Text('నా వార్తలు'),
             actions: [
@@ -245,25 +294,35 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
             children: [
               _buildFilterBar(isDark, countFor),
               Expanded(
-                child: _isLoading && sourcePosts.isEmpty
-                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                child: _isLoading &&
+                        _posts.isEmpty &&
+                        AppState.instance.reporterPosts.isEmpty
+                    ? const Center(
+                        child:
+                            CircularProgressIndicator(color: AppColors.primary))
                     : displayPosts.isEmpty
                         ? Center(
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 32),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 32),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(
-                                    _selectedFilter == 'rejected' ? Icons.check_circle_outline : Icons.inbox_outlined,
+                                    _selectedFilter == 'rejected'
+                                        ? Icons.check_circle_outline
+                                        : Icons.inbox_outlined,
                                     size: 48,
-                                    color: AppColors.textMuted.withValues(alpha: 0.5),
+                                    color: AppColors.textMuted
+                                        .withValues(alpha: 0.5),
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
                                     _emptyMessage(_selectedFilter),
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                                    style: const TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 14),
                                   ),
                                 ],
                               ),
@@ -280,161 +339,222 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
                                 return false;
                               },
                               child: ListView.separated(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(16),
-                        itemCount: displayPosts.length + (_loadingMore ? 1 : 0),
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          if (index >= displayPosts.length) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.primary),
-                                ),
-                              ),
-                            );
-                          }
-                          final post = displayPosts[index];
-                          // Tap → backend status, next action, review note.
-                          return GestureDetector(
-                            key: ValueKey('my_post_${post.id}'),
-                            behavior: HitTestBehavior.opaque,
-                            onTap: post.id.isEmpty
-                                ? null
-                                : () => Navigator.of(context)
-                                    .push(MaterialPageRoute(
-                                      builder: (_) => SubmissionStatusScreen(
-                                        submissionId: post.id,
-                                        initialTitle: post.caption,
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.all(16),
+                                itemCount: displayPosts.length +
+                                    (_loadingMore ? 1 : 0),
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 12),
+                                itemBuilder: (context, index) {
+                                  if (index >= displayPosts.length) {
+                                    return const Padding(
+                                      padding:
+                                          EdgeInsets.symmetric(vertical: 12),
+                                      child: Center(
+                                        child: SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: AppColors.primary),
+                                        ),
                                       ),
-                                    ))
-                                    .then((_) => _fetchSubmissions()),
-                            child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).brightness == Brightness.dark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Stack(
-                                    children: [
-                                      post.mediaUrl.isNotEmpty
-                                          ? CachedNetworkImage(
-                                              imageUrl: post.mediaUrl,
-                                              width: 72,
-                                              height: 72,
-                                              fit: BoxFit.cover,
-                                              errorWidget: (_, __, ___) => Container(
-                                                width: 72,
-                                                height: 72,
-                                                color: Colors.grey.shade300,
-                                                child: const Icon(Icons.image_not_supported, size: 24),
+                                    );
+                                  }
+                                  final post = displayPosts[index];
+                                  // Tap → backend status, next action, review note.
+                                  return GestureDetector(
+                                    key: ValueKey('my_post_${post.id}'),
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: post.id.isEmpty
+                                        ? null
+                                        : () => Navigator.of(context)
+                                            .push(MaterialPageRoute(
+                                              builder: (_) =>
+                                                  SubmissionStatusScreen(
+                                                submissionId: post.id,
+                                                initialTitle: post.caption,
                                               ),
-                                            )
-                                          : Container(
-                                              width: 72,
-                                              height: 72,
-                                              color: Colors.grey.shade300,
-                                              child: const Icon(Icons.article, size: 24),
+                                            ))
+                                            .then((_) => _fetchSubmissions()),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? Colors.white
+                                                .withValues(alpha: 0.05)
+                                            : Colors.white,
+                                        borderRadius: BorderRadius.circular(14),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black
+                                                .withValues(alpha: 0.05),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 3),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            child: Stack(
+                                              children: [
+                                                post.mediaUrl.isNotEmpty
+                                                    ? CachedNetworkImage(
+                                                        imageUrl: post.mediaUrl,
+                                                        width: 72,
+                                                        height: 72,
+                                                        fit: BoxFit.cover,
+                                                        errorWidget:
+                                                            (_, __, ___) =>
+                                                                Container(
+                                                          width: 72,
+                                                          height: 72,
+                                                          color: Colors
+                                                              .grey.shade300,
+                                                          child: const Icon(
+                                                              Icons
+                                                                  .image_not_supported,
+                                                              size: 24),
+                                                        ),
+                                                      )
+                                                    : Container(
+                                                        width: 72,
+                                                        height: 72,
+                                                        color: Colors
+                                                            .grey.shade300,
+                                                        child: const Icon(
+                                                            Icons.article,
+                                                            size: 24),
+                                                      ),
+                                                if (post.type == PostType.video)
+                                                  Container(
+                                                    width: 72,
+                                                    height: 72,
+                                                    color: Colors.black26,
+                                                    child: const Icon(
+                                                        Icons
+                                                            .play_arrow_rounded,
+                                                        color: Colors.white),
+                                                  ),
+                                              ],
                                             ),
-                                      if (post.type == PostType.video)
-                                        Container(
-                                          width: 72,
-                                          height: 72,
-                                          color: Colors.black26,
-                                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        post.caption,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '${post.category} · ${_timeAgo(post.submittedAt)}',
-                                        style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: _statusColor(post.status).withValues(alpha: 0.12),
-                                          borderRadius: BorderRadius.circular(20),
-                                        ),
-                                        child: Text(
-                                          _statusLabel(post.status),
-                                          style: TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: _statusColor(post.status),
                                           ),
-                                        ),
-                                      ),
-                                      if (post.status == PostStatus.rejected && post.rejectionReason != null && post.rejectionReason!.isNotEmpty) ...[
-                                        const SizedBox(height: 6),
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.red.withValues(alpha: 0.08),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              const Icon(Icons.info_outline, color: Colors.redAccent, size: 14),
-                                              const SizedBox(width: 6),
-                                              Expanded(
-                                                child: Text(
-                                                  'కారణం: ${post.rejectionReason}',
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  post.caption,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                   style: const TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Colors.redAccent,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      fontSize: 13.5),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  '${post.category} · ${_timeAgo(post.submittedAt)}',
+                                                  style: const TextStyle(
+                                                      fontSize: 11.5,
+                                                      color:
+                                                          AppColors.textMuted),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3),
+                                                  decoration: BoxDecoration(
+                                                    color: _statusColor(
+                                                            post.status)
+                                                        .withValues(
+                                                            alpha: 0.12),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            20),
+                                                  ),
+                                                  child: Text(
+                                                    _statusLabel(post.status),
+                                                    style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: _statusColor(
+                                                          post.status),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            ],
+                                                if (post.status ==
+                                                        PostStatus.rejected &&
+                                                    post.rejectionReason !=
+                                                        null &&
+                                                    post.rejectionReason!
+                                                        .isNotEmpty) ...[
+                                                  const SizedBox(height: 6),
+                                                  Container(
+                                                    padding:
+                                                        const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.red
+                                                          .withValues(
+                                                              alpha: 0.08),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              8),
+                                                      border: Border.all(
+                                                          color: Colors.red
+                                                              .withValues(
+                                                                  alpha: 0.2)),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(
+                                                            Icons.info_outline,
+                                                            color: Colors
+                                                                .redAccent,
+                                                            size: 14),
+                                                        const SizedBox(
+                                                            width: 6),
+                                                        Expanded(
+                                                          child: Text(
+                                                            'కారణం: ${post.rejectionReason}',
+                                                            style:
+                                                                const TextStyle(
+                                                              fontSize: 11,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: Colors
+                                                                  .redAccent,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
-                            ),
-                          );
-                        },
-                      ),
-                            ),
-                    ),
+                          ),
               ),
             ],
           ),

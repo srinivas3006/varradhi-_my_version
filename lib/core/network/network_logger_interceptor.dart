@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../utils/log_safe.dart';
 
 /// Development-only network logger interceptor.
 /// Records HTTP method, path, status code, duration, request ID, response size, and errors.
@@ -83,7 +84,7 @@ class NetworkLoggerInterceptor extends Interceptor {
 
     debugPrint(
       '❌ [ERR] ${err.requestOptions.method.toUpperCase()} ${err.requestOptions.path} '
-      '-> Status: $statusCode | Duration: $durationStr | Type: ${err.type} | Message: ${err.message}',
+      '-> Status: $statusCode | Duration: $durationStr | Type: ${err.type} | Message: ${LogSafe.scrub(err.message)}',
     );
 
     return handler.next(err);
@@ -94,7 +95,9 @@ class NetworkLoggerInterceptor extends Interceptor {
     for (final entry in map.entries) {
       final keyStr = entry.key.toString();
       final keyLower = keyStr.toLowerCase();
-      if (_sensitiveKeys.any((s) => keyLower.contains(s))) {
+      if (keyLower.contains('mobile') || keyLower.contains('phone')) {
+        sanitized[keyStr] = LogSafe.maskMobile(entry.value?.toString());
+      } else if (_sensitiveKeys.any((s) => keyLower.contains(s))) {
         sanitized[keyStr] = '***REDACTED***';
       } else if (entry.value is Map) {
         sanitized[keyStr] = _sanitizeMap(entry.value as Map);

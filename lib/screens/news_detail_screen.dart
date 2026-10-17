@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../core/navigation/auth_guard.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/news_article.dart';
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../theme/article_typography.dart';
 import '../utils/share_service.dart';
 import '../services/tts_service.dart';
 import '../repositories/news_article_repository.dart';
@@ -15,10 +15,12 @@ import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
 import '../widgets/article_media_carousel.dart';
 import 'comments_screen.dart';
-import '../widgets/watermark/watermark_banner.dart';
 import '../widgets/spotlight/story_options_sheet.dart';
+import '../widgets/spotlight/spotlight_news_card.dart'
+    show ReporterAttribution, VaaradhiLogoBadge, VaaradhiVerticalWatermark;
 import '../services/content_engagement_service.dart';
 import '../services/api_service.dart';
+import '../services/content_analytics.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
@@ -38,6 +40,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
   bool get _isUgc => article.isUgc;
 
+  /// The whole story is already on screen: the body, or for a citizen post
+  /// its description (the feed carries a post's full text). Then a detail
+  /// request that fails changes nothing the reader can see, so no error.
+  bool get _hasFullText =>
+      article.body.trim().isNotEmpty ||
+      (_isUgc && article.summary.trim().isNotEmpty);
+
   Future<void> _fetchFullArticleDetail() async {
     if (_isUgc) {
       await _fetchUgcDetail();
@@ -46,9 +55,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
 
     // Slug only: the detail API is /api/v1/articles/{slug}/, and an id there
     // is always a 404. Without a slug the feed copy already on screen stands.
-    final slugToFetch = (widget.slug?.isNotEmpty ?? false)
-        ? widget.slug!
-        : widget.article.slug;
+    final slugToFetch =
+        (widget.slug?.isNotEmpty ?? false) ? widget.slug! : widget.article.slug;
     if (slugToFetch.isEmpty) {
       debugPrint('Detail: no slug for article ${widget.article.id}; '
           'showing feed copy');
@@ -71,6 +79,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       if (mounted) {
         setState(() {
           article = fullArticle;
+          _reading.updateStory(fullArticle);
           _isLoadingDetail = false;
         });
       }
@@ -101,9 +110,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       if (!mounted) return;
       setState(() {
         // Keep whatever the detail payload leaves blank from the feed copy.
-        article = full.title.isEmpty && article.title.isNotEmpty
-            ? article
-            : full;
+        article =
+            full.title.isEmpty && article.title.isNotEmpty ? article : full;
         _isLoadingDetail = false;
       });
     } catch (e) {
@@ -158,7 +166,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         }
       } else if (nextReaction == 'dislike') {
         article.isDisliked = true;
-        article.dislikes = isCurrentlyDisliked ? prevDislikes : prevDislikes + 1;
+        article.dislikes =
+            isCurrentlyDisliked ? prevDislikes : prevDislikes + 1;
         if (isCurrentlyLiked) {
           article.isLiked = false;
           article.likes = prevLikes > 0 ? prevLikes - 1 : 0;
@@ -184,7 +193,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           if (l != null) {
             article.likes = (l as num).toInt();
           }
-          final d = res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
+          final d =
+              res['dislike_count'] ?? res['dislikes_count'] ?? res['dislikes'];
           if (d != null) {
             article.dislikes = (d as num).toInt();
           }
@@ -210,7 +220,6 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
-
   String _formatCount(int count) {
     if (count <= 0) return '';
     if (count >= 1000) return '${(count / 1000).toStringAsFixed(1)}k';
@@ -218,34 +227,40 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   }
 
   Future<void> _toggleBookmark() async {
-    if (!AppState.instance.isLoggedIn) {
-      requireAuth(context, () => _toggleBookmark());
-      return;
+    // Guests bookmark too (kept on the phone until they log in), so there
+    // is no login gate here.
+    final targetId = AppState.bookmarkKey(article);
+    if (targetId.isEmpty || _bookmarkInFlight) return;
+    _bookmarkInFlight = true;
+    try {
+      await _runBookmarkToggle(targetId);
+    } finally {
+      _bookmarkInFlight = false;
     }
-    final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    if (targetId.isEmpty) return;
+  }
 
+  /// One bookmark request at a time: a second tap while one is running is
+  /// ignored rather than sent (bookmark handover §10).
+  bool _bookmarkInFlight = false;
+
+  Future<void> _runBookmarkToggle(String targetId) async {
     HapticFeedback.lightImpact();
-    final wasBookmarked =
-        article.isBookmarked || AppState.instance.isBookmarked(targetId);
-    AppState.instance.toggleBookmark(targetId);
-    if (mounted) setState(() => article.isBookmarked = !wasBookmarked);
+    final wasBookmarked = AppState.instance.isStoryBookmarked(article);
+    final nowBookmarked = !wasBookmarked;
+    // Set, never flip: flipping the local copy inverted it whenever it
+    // disagreed with the story's own is_bookmarked, which left a removed
+    // bookmark stuck as "saved".
+    _applyBookmark(targetId, nowBookmarked);
 
     try {
       // Same call for desk and citizen stories.
-      final saved = await ContentEngagementService.instance
-          .setSaved(article, nowSaved: !wasBookmarked);
-      if (saved == null) throw Exception('bookmark not saved');
-      if (saved == wasBookmarked) {
-        // The server's toggle is the truth; adopt it.
-        AppState.instance.setBookmarked(targetId, saved);
-        if (mounted) setState(() => article.isBookmarked = saved);
-      }
+      final bookmarked = await ContentEngagementService.instance
+          .setBookmarked(article, nowBookmarked: nowBookmarked);
+      if (bookmarked == null) throw Exception('bookmark not saved');
+      // The server's answer is the truth; adopt it.
+      if (bookmarked != nowBookmarked) _applyBookmark(targetId, bookmarked);
     } catch (e) {
-      if (AppState.instance.isBookmarked(targetId) != wasBookmarked) {
-        AppState.instance.toggleBookmark(targetId);
-      }
-      if (mounted) setState(() => article.isBookmarked = wasBookmarked);
+      _applyBookmark(targetId, wasBookmarked);
       debugPrint('Error syncing article bookmark: $e');
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -266,7 +281,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         ..showSnackBar(
           SnackBar(
             content: Text(
-              AppState.instance.isBookmarked(targetId)
+              AppState.instance.isStoryBookmarked(article)
                   ? tr('saved_to_bookmarks')
                   : tr('removed_from_bookmarks'),
             ),
@@ -277,15 +292,25 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
+  /// Puts one bookmark state everywhere this screen can reach: the shared
+  /// state every screen reads, this screen's copy of the story, and the feed
+  /// copy it was opened from.
+  void _applyBookmark(String targetId, bool bookmarked) {
+    AppState.instance.setBookmarked(targetId, bookmarked);
+    widget.article.isBookmarked = bookmarked;
+    if (mounted) {
+      setState(() => article.isBookmarked = bookmarked);
+    } else {
+      article.isBookmarked = bookmarked;
+    }
+  }
+
   /// ⋮ in the header: the same Report Story / Bookmark sheet as Spotlight,
   /// for desk articles and citizen posts alike.
   Future<void> _showMoreSheet() async {
     HapticFeedback.selectionClick();
-    final targetId = article.id.isNotEmpty ? article.id : article.slug;
-    final isSaved =
-        article.isBookmarked || AppState.instance.isBookmarked(targetId);
-    final choice =
-        await StoryOptionsSheet.show(context, isBookmarked: isSaved);
+    final isSaved = AppState.instance.isStoryBookmarked(article);
+    final choice = await StoryOptionsSheet.show(context, isBookmarked: isSaved);
     if (!mounted || choice == null) return;
     switch (choice) {
       case StoryOption.bookmark:
@@ -303,6 +328,30 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     ShareService.shareArticle(article, fallback: widget.article);
   }
 
+  void _goBack() {
+    HapticFeedback.lightImpact();
+    // This screen is gone once popped, so the ad is shown from the
+    // navigator's context, which outlives it.
+    final navigator = Navigator.of(context);
+    final navContext = navigator.context;
+    navigator.pop();
+    if (AdManager.instance.canShowInterstitial()) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (navContext.mounted) showInterstitialAd(navContext);
+      });
+    }
+  }
+
+  void _openComments() {
+    HapticFeedback.lightImpact();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CommentsScreen(article: article)),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -311,491 +360,531 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (AppState.instance.isLiked(targetId)) {
       article.isLiked = true;
     }
+    _reading = ReadingTracker(article,
+        isOnTop: () => mounted && (ModalRoute.of(context)?.isCurrent ?? true));
+    // article_open once the screen is actually on screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reading.opened();
+    });
     _fetchFullArticleDetail();
+  }
+
+  /// Analytics: open, scroll milestones, read completion, reading time.
+  late final ReadingTracker _reading;
+
+  /// How far down the story the reader has scrolled, as a percentage of
+  /// everything there is to read (100 when it all fits on screen).
+  bool _onScrollMetrics(ScrollMetrics m) {
+    if (m.axis != Axis.vertical) return false;
+    final total = m.maxScrollExtent + m.viewportDimension;
+    if (total <= 0) return false;
+    final seen = (m.pixels.clamp(0.0, m.maxScrollExtent) + m.viewportDimension);
+    _reading.scrolledTo((seen * 100 / total).round());
+    return false;
   }
 
   @override
   void dispose() {
+    _reading.closed();
     AppTtsService.instance.stop();
     super.dispose();
   }
 
+  /// Layout, top to bottom: a black band under the status bar, then one
+  /// scrolling column — photo, meta, headline, listen, story, ad — with the
+  /// engagement bar pinned to the bottom. The photo scrolls with the story
+  /// instead of sitting fixed behind a draggable-looking sheet, and back / ⋮
+  /// float over everything so they are always reachable.
+  ///
+  /// The VAARADHI masthead is not shown here: it belongs on shared and
+  /// downloaded images (ShareService), not on the reading screen.
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBgColor = isDark ? AppColors.cardDarkNavy : Colors.white;
-    // Visible hero = the Spotlight frame shape (width / 1.22) instead of a
-    // fixed 310px, so the photo is framed the same on every screen size.
-    final heroVisible = (MediaQuery.sizeOf(context).width / 1.22)
-        .clamp(220.0, MediaQuery.sizeOf(context).height * 0.5);
-    final bodyColor =
-        isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
-    final mutedTextColor =
-        isDark ? AppColors.readingMetaDark : AppColors.readingMetaLight;
+    final pageBg = isDark ? AppColors.cardDarkNavy : Colors.white;
+    final size = MediaQuery.sizeOf(context);
+    final statusBarHeight = MediaQuery.paddingOf(context).top;
+    // Same frame as the Spotlight card (width / 1.22), so a story keeps its
+    // crop when it is opened.
+    final heroHeight = (size.width / 1.22).clamp(220.0, size.height * 0.5);
 
     return MediaQuery.withClampedTextScaling(
       minScaleFactor: 1.0,
       maxScaleFactor: _clampedTextScale(context),
       child: Scaffold(
-      backgroundColor: isDark ? AppColors.backgroundDark : const Color(0xFFF8FAFC),
-      body: Stack(
-        children: [
-          // 1. Full Hero Media Background (Top Section)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: heroVisible + 50, // 50 sits under the curved sheet
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ArticleMediaCarousel(
-                  article: article,
-                  showWatermark: false,
-                  onPageChanged: (index) =>
-                      setState(() => _currentImageIndex = index),
-                ),
-
-                // Top Gradient Overlay for readability of status bar & top buttons
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 120,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.65),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Non-intrusive Article Watermark Overlay (Vertical VAARADHI on left + bottom-right logo)
-                // Constrained to visible hero area (height 310) so it's not cut off by the curved sheet.
-                // No floating mark over the hero image: the masthead band
-                // above the headline is the watermark here.
-
-                // Multi-Image Index Indicator Pill (Positioned to the left of the Logo watermark so no overlap occurs)
-                if (article.imageUrls != null && article.imageUrls!.length > 1)
-                  Positioned(
-                    top: 272,
-                    right: 56,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${_currentImageIndex + 1}/${article.imageUrls!.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // 2. Frosted Header Action Bar (Top Floating Controls with Category & Desk)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 14,
-            right: 14,
-            child: Row(
-              children: [
-                // Back Button with Interstitial eligibility check
-                GestureDetector(
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    Navigator.pop(context);
-                    if (AdManager.instance.canShowInterstitial()) {
-                      Future.delayed(const Duration(milliseconds: 300), () {
-                        if (context.mounted) showInterstitialAd(context);
-                      });
-                    }
-                  },
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.2), width: 1),
-                    ),
-                    child: const Icon(Icons.arrow_back_ios_new_rounded,
-                        color: Colors.white, size: 18),
-                  ),
-                ),
-                const SizedBox(width: 10),
-
-                // Category & Desk Title (Vaaradhi style)
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Only what the API sends — no hard-coded "General"
-                      // or "VARADHI Desk" placeholders.
-                      if (article.category.isNotEmpty)
-                        Text(
-                          article.category,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      if (article.byline.isNotEmpty)
-                        Text(
-                          article.byline,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-
-                // More (⋮): Report Story + Bookmark — the same sheet as
-                // Spotlight, for every story (desk or citizen).
-                Semantics(
-                  button: true,
-                  label: AppState.instance.language == 'Telugu'
-                      ? 'మరిన్ని ఎంపికలు'
-                      : 'More options',
-                  child: GestureDetector(
-                    key: const Key('detail_more_btn'),
-                    onTap: _showMoreSheet,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            width: 1),
-                      ),
-                      child: const Icon(Icons.more_vert_rounded,
-                          color: Colors.white, size: 20),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // 3. Overlapping Curved Sheet Article Body (Bottom Section)
-          Positioned.fill(
-            top: heroVisible, // Overlaps top hero image
-            child: Container(
-              decoration: BoxDecoration(
-                color: cardBgColor,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(32)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 16,
-                    offset: const Offset(0, -4),
-                  ),
-                ],
+        backgroundColor: pageBg,
+        bottomNavigationBar: _buildReactionSection(isDark),
+        body: Column(
+          children: [
+            // Status bar band: the photo starts right below the clock and
+            // icons, never under them.
+            AnnotatedRegion<SystemUiOverlayStyle>(
+              value: const SystemUiOverlayStyle(
+                statusBarColor: Colors.black,
+                statusBarIconBrightness: Brightness.light,
+                statusBarBrightness: Brightness.dark,
               ),
-              child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(32)),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Centered Top Handle Indicator
-                      Center(
-                        child: Container(
-                          width: 36,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.white24 : Colors.black12,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Header Row: AUDIO LISTEN BUTTON (Replacing Channel Name) + Share Quick Icon
-                      Row(
-                        children: [
-                          // Audio Listen Pill Button (Orange Accent)
-                          AnimatedBuilder(
-                            animation: AppTtsService.instance,
-                            builder: (context, _) {
-                              final targetId = article.id.isNotEmpty
-                                  ? article.id
-                                  : article.slug;
-                              final isPlaying = AppTtsService.instance
-                                  .isArticlePlaying(targetId);
-                              final isLoading = AppTtsService.instance
-                                  .isArticleLoading(targetId);
-
-                              return Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      HapticFeedback.lightImpact();
-                                      AppTtsService.instance
-                                          .toggleArticleTts(article);
-                                    },
-                                    child: AnimatedContainer(
-                                      duration:
-                                          const Duration(milliseconds: 250),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 14, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: isPlaying
-                                            ? AppColors.primary
-                                            : AppColors.primary
-                                                .withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(24),
-                                        border: Border.all(
-                                          color: AppColors.primary.withValues(
-                                              alpha: isPlaying ? 1.0 : 0.3),
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (isLoading)
-                                            const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: AppColors.primary),
-                                            )
-                                          else
-                                            Icon(
-                                              isPlaying
-                                                  ? Icons.stop_circle_rounded
-                                                  : Icons.volume_up_rounded,
-                                              size: 20,
-                                              color: isPlaying
-                                                  ? Colors.white
-                                                  : AppColors.primary,
-                                            ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            isLoading
-                                                ? tr('loading')
-                                                : (isPlaying
-                                                    ? tr('stop_audio')
-                                                    : tr('listen_article')),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w700,
-                                              color: isPlaying
-                                                  ? Colors.white
-                                                  : AppColors.primary,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  if (isPlaying) ...[
-                                    const SizedBox(width: 8),
-                                    GestureDetector(
-                                      onTap: () {
-                                        HapticFeedback.selectionClick();
-                                        AppTtsService.instance.cycleSpeed();
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 7),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primary
-                                              .withValues(alpha: 0.15),
-                                          borderRadius:
-                                              BorderRadius.circular(18),
-                                          border: Border.all(
-                                              color: AppColors.primary
-                                                  .withValues(alpha: 0.4)),
-                                        ),
-                                        child: Text(
-                                          AppTtsService
-                                              .instance.playbackSpeedText,
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w800,
-                                            color: AppColors.primary,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              );
-                            },
-                          ),
-
-                          const Spacer(),
-
-                          // Share lives in the engagement bar below. This
-                          // screen had three of them — here, over the hero
-                          // image, and in the bar — all calling _share().
-                        ],
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      // Masthead band on the seam between the hero media
-                      // and the story, matching the spotlight card.
-                      const WatermarkBanner(height: 28),
-                      const SizedBox(height: 10),
-
-                      // Main Article Title (Headline)
-                      Text(
-                        article.title,
-                        style: GoogleFonts.notoSansTelugu(
-                          fontSize: 20.0,
-                          fontWeight: FontWeight.w700,
-                          height: 1.4,
-                          color: isDark
-                              ? AppColors.readingTitleDark
-                              : const Color(0xFF212121),
-                          letterSpacing: 0.0,
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Author & Timestamp Row
-                      Row(
-                        children: [
-                          Icon(Icons.access_time_rounded,
-                              size: 15, color: mutedTextColor),
-                          const SizedBox(width: 5),
-                          Text(
-                            article.timeAgo,
-                            style: TextStyle(
-                                fontSize: 13.5,
-                                color: mutedTextColor,
-                                fontWeight: FontWeight.w400),
-                          ),
-                          const SizedBox(width: 10),
-                          Text('•',
-                              style: TextStyle(
-                                  color: mutedTextColor, fontSize: 14)),
-                          const SizedBox(width: 10),
-                          Icon(Icons.menu_book_rounded,
-                              size: 15, color: mutedTextColor),
-                          const SizedBox(width: 5),
-                          Text(
-                            '${article.readTimeMinutes} నిమిషాల పఠనం',
-                            style: TextStyle(
-                                fontSize: 13.5,
-                                color: mutedTextColor,
-                                fontWeight: FontWeight.w400),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Article Content Body
-                      if (_isLoadingDetail && article.body.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 36.0),
-                          child: Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      else if (_detailError != null && article.body.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                tr('full_article_load_failed'),
-                                style: const TextStyle(
-                                    color: Colors.redAccent,
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton.icon(
-                                onPressed: _fetchFullArticleDetail,
-                                icon: const Icon(Icons.refresh, size: 16),
-                                label: Text(tr('retry')),
-                              ),
-                              const SizedBox(height: 12),
-                              if (article.summary.isNotEmpty)
-                                AnimatedBuilder(
-                                  animation: AppState.instance,
-                                  builder: (context, _) => Text(
-                                    article.summary,
-                                    style: GoogleFonts.notoSansTelugu(
-                                      fontSize: AppState.instance.readingFontSize > 0
-                                          ? (AppState.instance.readingFontSize * (18.5 / 19.0))
-                                          : 18.5,
-                                      height: 1.65,
-                                      letterSpacing: 0.2,
-                                      color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                  ),
+              child: SizedBox(
+                height: statusBarHeight,
+                width: double.infinity,
+                child: const ColoredBox(color: Colors.black),
+              ),
+            ),
+            Expanded(
+              child: MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                child: Stack(
+                  children: [
+                    Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerDown: (_) => _reading.activity(),
+                      child: NotificationListener<ScrollMetricsNotification>(
+                        onNotification: (n) => _onScrollMetrics(n.metrics),
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: (n) => _onScrollMetrics(n.metrics),
+                          child: CustomScrollView(
+                            slivers: [
+                              SliverToBoxAdapter(child: _buildHero(heroHeight)),
+                              SliverPadding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                                sliver: SliverToBoxAdapter(
+                                  child: _buildStory(isDark),
                                 ),
+                              ),
                             ],
                           ),
-                        )
-                      else
-                        AnimatedBuilder(
-                          animation: AppState.instance,
-                          builder: (context, _) => _buildArticleBodyText(
-                            article.body.isNotEmpty
-                                ? article.body
-                                : (article.summary.isNotEmpty
-                                    ? article.summary
-                                    : ''),
-                            bodyColor,
-                          ),
                         ),
+                      ),
+                    ),
+                    // Floating header controls, always reachable.
+                    Positioned(
+                      top: 10,
+                      left: 14,
+                      right: 14,
+                      child: Row(
+                        children: [
+                          _circleButton(
+                            icon: Icons.arrow_back_ios_new_rounded,
+                            iconSize: 18,
+                            onTap: _goBack,
+                          ),
+                          const Spacer(),
+                          // More (⋮): Report Story + Bookmark — the same
+                          // sheet as Spotlight, for every story.
+                          Semantics(
+                            button: true,
+                            label: AppState.instance.language == 'Telugu'
+                                ? 'మరిన్ని ఎంపికలు'
+                                : 'More options',
+                            child: _circleButton(
+                              key: const Key('detail_more_btn'),
+                              icon: Icons.more_vert_rounded,
+                              iconSize: 20,
+                              onTap: _showMoreSheet,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                      // Every story carries the same engagement bar and ad.
-                      _buildReactionSection(isDark),
-                      const SizedBox(height: 16),
+  Widget _circleButton({
+    Key? key,
+    required IconData icon,
+    required double iconSize,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      key: key,
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+        ),
+        child: Icon(icon, color: Colors.white, size: iconSize),
+      ),
+    );
+  }
 
-                      const BannerAdSlot(placementZone: 'article'),
-                      const SizedBox(height: 32),
-                      const SizedBox(height: 40),
+  /// The photo, edge to edge, with a light top shade so the floating
+  /// buttons stay legible over bright images — and, as on the Spotlight
+  /// card, the "VAARADHI" watermark and the uploader along the bottom.
+  Widget _buildHero(double height) {
+    final imageCount = article.imageUrls?.length ?? 0;
+    return SizedBox(
+      height: height,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ArticleMediaCarousel(
+            article: article,
+            showWatermark: false,
+            onPageChanged: (index) =>
+                setState(() => _currentImageIndex = index),
+          ),
+          IgnorePointer(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Container(
+                height: 90,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.45),
+                      Colors.transparent,
                     ],
                   ),
                 ),
               ),
+            ),
+          ),
+          // Bottom scrim so the uploader's name stays legible on any photo.
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 96,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Color(0xE6000000),
+                      Color(0x80000000),
+                      Color(0x00000000),
+                    ],
+                    stops: [0.0, 0.45, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const VaaradhiVerticalWatermark(),
+          // Logo badge on the right edge, below the back / ⋮ buttons.
+          const Positioned(
+              top: 64, right: 0, child: VaaradhiLogoBadge(inCorner: false)),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 10,
+            child: IgnorePointer(
+              child: ReporterAttribution(
+                key: const Key('detail_reporter_attribution'),
+                article: article,
+              ),
+            ),
+          ),
+          if (imageCount > 1)
+            Positioned(
+              right: 12,
+              // Above the uploader row.
+              bottom: 62,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentImageIndex + 1}/$imageCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStory(bool isDark) {
+    final bodyColor =
+        isDark ? AppColors.readingBodyDark : AppColors.readingBodyLight;
+    final mutedTextColor =
+        isDark ? AppColors.readingMetaDark : AppColors.readingMetaLight;
+    final metaStyle = TextStyle(
+        fontSize: 12.5, color: mutedTextColor, fontWeight: FontWeight.w500);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Category · time · read time. Only what the API sends — no
+        // hard-coded "General" placeholder.
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            if (article.category.isNotEmpty)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  article.category,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            Text(article.timeAgo, style: metaStyle),
+            Text('•', style: metaStyle),
+            Text('${article.readTimeMinutes} నిమిషాల పఠనం', style: metaStyle),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        Text(
+          article.title,
+          style: ArticleTypography.heading(
+            fontSize: 25.0,
+            fontWeight: FontWeight.w700,
+            height: 1.4,
+            color:
+                isDark ? AppColors.readingTitleDark : const Color(0xFF1A1A1A),
+          ),
+        ),
+
+        // Source always, author/uploader when known (Play News policy:
+        // every story names who published it).
+        const SizedBox(height: 6),
+        Text(
+          article.attributionLine(
+              telugu: AppState.instance.language == 'Telugu'),
+          key: const Key('article_source'),
+          style: metaStyle,
+        ),
+        // The exact publish date and time, always (Play News policy).
+        const SizedBox(height: 2),
+        Text(
+          publishedLine(article.publishedAt,
+              telugu: AppState.instance.language == 'Telugu'),
+          key: const Key('article_published'),
+          style: metaStyle,
+        ),
+        // A story from another outlet links to the original.
+        if (article.isExternal) ...[
+          const SizedBox(height: 6),
+          InkWell(
+            key: const Key('article_original_source'),
+            onTap: () async {
+              final uri = Uri.tryParse(article.sourceUrl);
+              if (uri == null) return;
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.open_in_new_rounded,
+                    size: 15, color: AppColors.primary),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    AppState.instance.language == 'Telugu'
+                        ? 'అసలు వార్త: ${article.externalSourceName}'
+                        : 'Original story: ${article.externalSourceName}',
+                    style: metaStyle.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
-      ),
-      ),
+
+        const SizedBox(height: 16),
+        _buildListenButton(),
+        const SizedBox(height: 18),
+        Divider(
+          height: 1,
+          color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.08),
+        ),
+        const SizedBox(height: 18),
+
+        // Article Content Body
+        if (_isLoadingDetail && !_hasFullText)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36.0),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_detailError != null && !_hasFullText)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tr('full_article_load_failed'),
+                  style: const TextStyle(
+                      color: Colors.redAccent, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  onPressed: _fetchFullArticleDetail,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: Text(tr('retry')),
+                ),
+                const SizedBox(height: 12),
+                if (article.summary.isNotEmpty)
+                  AnimatedBuilder(
+                    animation: AppState.instance,
+                    builder: (context, _) => Text(
+                      article.summary,
+                      style: ArticleTypography.body(
+                        fontSize: AppState.instance.readingFontSize > 0
+                            ? (AppState.instance.readingFontSize *
+                                (21.0 / 19.0))
+                            : 21.0,
+                        height: 1.65,
+                        letterSpacing: 0.2,
+                        color: isDark
+                            ? AppColors.readingBodyDark
+                            : const Color(0xFF424242),
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        else
+          AnimatedBuilder(
+            animation: AppState.instance,
+            builder: (context, _) => _buildArticleBodyText(
+              article.body.isNotEmpty
+                  ? article.body
+                  : (article.summary.isNotEmpty ? article.summary : ''),
+              bodyColor,
+            ),
+          ),
+
+        // Every story carries the same ad.
+        const BannerAdSlot(placementZone: 'article'),
+      ],
+    );
+  }
+
+  /// Listen pill, plus a speed chip while it plays.
+  Widget _buildListenButton() {
+    return AnimatedBuilder(
+      animation: AppTtsService.instance,
+      builder: (context, _) {
+        final targetId = article.id.isNotEmpty ? article.id : article.slug;
+        final isPlaying = AppTtsService.instance.isArticlePlaying(targetId);
+        final isLoading = AppTtsService.instance.isArticleLoading(targetId);
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                AppTtsService.instance.toggleArticleTts(article);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isPlaying
+                      ? AppColors.primary
+                      : AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isLoading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.primary),
+                      )
+                    else
+                      Icon(
+                        isPlaying
+                            ? Icons.stop_circle_rounded
+                            : Icons.headphones_rounded,
+                        size: 18,
+                        color: isPlaying ? Colors.white : AppColors.primary,
+                      ),
+                    const SizedBox(width: 8),
+                    Text(
+                      isLoading
+                          ? tr('loading')
+                          : (isPlaying
+                              ? tr('stop_audio')
+                              : tr('listen_article')),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: isPlaying ? Colors.white : AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (isPlaying) ...[
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  AppTtsService.instance.cycleSpeed();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    AppTtsService.instance.playbackSpeedText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -807,214 +896,117 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   double _clampedTextScale(BuildContext context) =>
       MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.3);
 
+  /// Engagement bar pinned to the bottom of the screen: four equal slots,
+  /// icon over label, so it never overflows the way the old inline row did
+  /// ("Share" was cut off on narrow phones).
   Widget _buildReactionSection(bool isDark) {
     final targetId = article.id.isNotEmpty ? article.id : article.slug;
     return AnimatedBuilder(
       animation: AppState.instance,
       builder: (context, _) {
+        final telugu = AppState.instance.language == 'Telugu';
         final isLiked = article.isLiked ||
             AppState.instance.isLiked(targetId) ||
             (article.id.isNotEmpty && AppState.instance.isLiked(article.id));
         final isDisliked = article.isDisliked ||
             AppState.instance.isDisliked(targetId) ||
-            (article.id.isNotEmpty &&
-                AppState.instance.isDisliked(article.id));
+            (article.id.isNotEmpty && AppState.instance.isDisliked(article.id));
+        final commentCount = AppState.instance
+            .getDisplayCommentCount(article.id, article.comments);
 
-        final cardBg = isDark ? AppColors.surfaceElevatedDark : const Color(0xFFF3F4F6);
         const activeColor = AppColors.primary;
         final inactiveColor =
             isDark ? AppColors.readingMetaDark : const Color(0xFF6B7280);
 
+        String countOr(int count, String label) =>
+            _formatCount(count).isNotEmpty ? _formatCount(count) : label;
+
         return Container(
-          margin: const EdgeInsets.symmetric(vertical: 20),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isDark
-                  ? AppColors.borderDark
-                  : Colors.black.withValues(alpha: 0.06),
+            color: isDark ? AppColors.cardDarkNavy : Colors.white,
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? AppColors.borderDark
+                    : Colors.black.withValues(alpha: 0.08),
+              ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              // Like Button
-              InkWell(
-                onTap: () => _toggleReaction('like'),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isLiked
-                            ? Icons.thumb_up_rounded
-                            : Icons.thumb_up_alt_outlined,
-                        color: isLiked ? activeColor : inactiveColor,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _formatCount(article.likes).isNotEmpty
-                            ? _formatCount(article.likes)
-                            : (AppState.instance.language == 'Telugu'
-                                ? 'లైక్'
-                                : 'Like'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isLiked ? activeColor : inactiveColor,
-                        ),
-                      ),
-                    ],
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              height: 58,
+              child: Row(
+                children: [
+                  _barAction(
+                    icon: isLiked
+                        ? Icons.thumb_up_rounded
+                        : Icons.thumb_up_alt_outlined,
+                    label: countOr(article.likes, telugu ? 'లైక్' : 'Like'),
+                    color: isLiked ? activeColor : inactiveColor,
+                    onTap: () => _toggleReaction('like'),
                   ),
-                ),
-              ),
-
-              // Divider
-              Container(
-                height: 24,
-                width: 1,
-                color: isDark ? Colors.white12 : Colors.black12,
-              ),
-
-              // Dislike Button
-              InkWell(
-                onTap: () => _toggleReaction('dislike'),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isDisliked
-                            ? Icons.thumb_down_rounded
-                            : Icons.thumb_down_alt_outlined,
-                        color: isDisliked ? Colors.redAccent : inactiveColor,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _formatCount(article.dislikes).isNotEmpty
-                            ? _formatCount(article.dislikes)
-                            : (AppState.instance.language == 'Telugu'
-                                ? 'డిస్‌లైక్'
-                                : 'Dislike'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isDisliked ? Colors.redAccent : inactiveColor,
-                        ),
-                      ),
-                    ],
+                  _barAction(
+                    icon: isDisliked
+                        ? Icons.thumb_down_rounded
+                        : Icons.thumb_down_alt_outlined,
+                    label: countOr(
+                        article.dislikes, telugu ? 'డిస్‌లైక్' : 'Dislike'),
+                    color: isDisliked ? Colors.redAccent : inactiveColor,
+                    onTap: () => _toggleReaction('dislike'),
                   ),
-                ),
-              ),
-
-              // Divider
-              Container(
-                height: 24,
-                width: 1,
-                color: isDark ? Colors.white12 : Colors.black12,
-              ),
-
-              // Comment Button
-              AnimatedBuilder(
-                animation: AppState.instance,
-                builder: (context, _) {
-                  final count = AppState.instance
-                      .getDisplayCommentCount(article.id, article.comments);
-                  return InkWell(
+                  _barAction(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label:
+                        countOr(commentCount, telugu ? 'కామెంట్' : 'Comment'),
+                    color: inactiveColor,
+                    onTap: _openComments,
+                  ),
+                  _barAction(
+                    icon: Icons.share_rounded,
+                    label: telugu ? 'షేర్' : 'Share',
+                    color: inactiveColor,
                     onTap: () {
                       HapticFeedback.lightImpact();
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CommentsScreen(article: article),
-                        ),
-                      ).then((_) {
-                        if (mounted) setState(() {});
-                      });
+                      _share();
                     },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 6),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            color: inactiveColor,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _formatCount(count).isNotEmpty
-                                ? _formatCount(count)
-                                : (AppState.instance.language == 'Telugu'
-                                    ? 'కామెంట్'
-                                    : 'Comment'),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: inactiveColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-              // Divider
-              Container(
-                height: 24,
-                width: 1,
-                color: isDark ? Colors.white12 : Colors.black12,
-              ),
-
-              // Share Button
-              InkWell(
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _share();
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.share_rounded,
-                        color: inactiveColor,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        AppState.instance.language == 'Telugu' ? 'షేర్' : 'Share',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: inactiveColor,
-                        ),
-                      ),
-                    ],
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
+    );
+  }
+
+  Widget _barAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1022,8 +1014,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     if (text.isEmpty) {
       return Text(
         tr('no_content'),
-        style: GoogleFonts.notoSansTelugu(
-          fontSize: AppState.instance.readingFontSize,
+        style: ArticleTypography.body(
+          fontSize: AppState.instance.readingFontSize * (21.0 / 19.0),
           color: bodyColor.withValues(alpha: 0.7),
         ),
       );
@@ -1053,11 +1045,11 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
 
     final effectiveFontSize = AppState.instance.readingFontSize > 0
-        ? (AppState.instance.readingFontSize * (18.5 / 19.0))
-        : 18.5; // larger for easy reading (was 16)
+        ? (AppState.instance.readingFontSize * (21.0 / 19.0))
+        : 21.0; // Comfortable size: Mandali sets small (was 18.5)
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final paragraphStyle = GoogleFonts.notoSansTelugu(
+    final paragraphStyle = ArticleTypography.body(
       fontSize: effectiveFontSize,
       height: 1.65,
       color: isDark ? AppColors.readingBodyDark : const Color(0xFF424242),
@@ -1094,4 +1086,46 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       ],
     );
   }
+}
+
+/// "ప్రచురణ: 12 అక్టోబర్ 2026, 3:55 PM" — the story's exact publish date and
+/// time in the reader's time zone (Play News policy: show when it was
+/// published, not only "2 hours ago").
+@visibleForTesting
+String publishedLine(DateTime published, {required bool telugu}) {
+  const te = [
+    'జనవరి',
+    'ఫిబ్రవరి',
+    'మార్చి',
+    'ఏప్రిల్',
+    'మే',
+    'జూన్',
+    'జూలై',
+    'ఆగస్టు',
+    'సెప్టెంబర్',
+    'అక్టోబర్',
+    'నవంబర్',
+    'డిసెంబర్'
+  ];
+  const en = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ];
+  final d = published.toLocal();
+  final h12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
+  final mm = d.minute.toString().padLeft(2, '0');
+  final ampm = d.hour < 12 ? 'AM' : 'PM';
+  final month = (telugu ? te : en)[d.month - 1];
+  final date = '${d.day} $month ${d.year}, $h12:$mm $ampm';
+  return telugu ? 'ప్రచురణ: $date' : 'Published: $date';
 }

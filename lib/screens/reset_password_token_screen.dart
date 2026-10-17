@@ -9,7 +9,8 @@ class ResetPasswordTokenScreen extends StatefulWidget {
   const ResetPasswordTokenScreen({super.key, required this.email});
 
   @override
-  State<ResetPasswordTokenScreen> createState() => _ResetPasswordTokenScreenState();
+  State<ResetPasswordTokenScreen> createState() =>
+      _ResetPasswordTokenScreenState();
 }
 
 class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
@@ -20,7 +21,8 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
   Future<void> _verifyToken() async {
     final token = _tokenController.text.trim();
     if (token.isEmpty) {
-      setState(() => _error = 'దయచేసి మీ ఇమెయిల్‌కు పంపిన రీసెట్ కోడ్‌ను నమోదు చేయండి.');
+      setState(() =>
+          _error = 'దయచేసి మీ ఇమెయిల్‌కు పంపిన రీసెట్ కోడ్‌ను నమోదు చేయండి.');
       return;
     }
 
@@ -80,7 +82,8 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
               const SizedBox(height: 6),
               Text(
                 'మేము ${widget.email} కి రీసెట్ కోడ్‌ను పంపాము. కొనసాగడానికి దాన్ని కింద నమోదు చేయండి.',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
+                style:
+                    const TextStyle(color: AppColors.textMuted, fontSize: 13.5),
               ),
               const SizedBox(height: 24),
               TextField(
@@ -99,7 +102,8 @@ class _ResetPasswordTokenScreenState extends State<ResetPasswordTokenScreen> {
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!,
-                    style: const TextStyle(color: AppColors.primary, fontSize: 12.5)),
+                    style: const TextStyle(
+                        color: AppColors.primary, fontSize: 12.5)),
               ],
               const SizedBox(height: 24),
               SizedBox(

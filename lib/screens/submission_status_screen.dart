@@ -8,9 +8,9 @@ import '../core/errors/ugc_error.dart';
 import '../core/utils/media_picker_helper.dart';
 import '../core/utils/media_validator.dart';
 import '../models/news_article.dart';
-import '../models/submission_status.dart';
 import '../repositories/ugc_repository.dart';
 import '../services/api_service.dart';
+import '../models/reporter_post.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'create_post_screen.dart';
@@ -48,10 +48,10 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
   Timer? _poll;
   int _pollCount = 0;
 
-  /// Poll every 5s while media processes, for at most ~2 minutes; after that
+  /// Poll every 5s while media processes, for at most 1 minute; after that
   /// the reader refreshes by pulling down.
   static const _pollEvery = Duration(seconds: 5);
-  static const _maxPolls = 24;
+  static const _maxPolls = 12;
 
   static bool get _te => AppState.instance.language == 'Telugu';
   static String _t(String te, String en) => _te ? te : en;
@@ -96,6 +96,17 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
         _error = null;
         _loading = false;
       });
+      final postStatus = switch (status.reporterStatus.toLowerCase()) {
+        'approved' => PostStatus.approved,
+        'published' => PostStatus.published,
+        'rejected' => PostStatus.rejected,
+        _ => PostStatus.pending,
+      };
+      AppState.instance.onPostStatusChanged(
+        status.id,
+        postStatus,
+        status.reviewNote.isNotEmpty ? status.reviewNote : null,
+      );
       _schedulePoll(status);
     } catch (e) {
       if (!mounted) return;
@@ -142,8 +153,12 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
   }
 
   void _createNew() {
-    Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const CreatePostScreen()));
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const CreatePostScreen()));
+    }
   }
 
   /// `upload_failed_retry_media`: re-upload to the same submission. Needs
@@ -152,6 +167,11 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
     final status = _status;
     if (status == null || !status.canUploadMedia || _uploading) return;
 
+    // Already verified for this account? Then no OTP.
+    if (!AppState.instance.uploadVerified) {
+      await AppState.instance.syncUgcVerificationFromServer();
+      if (!mounted) return;
+    }
     if (!AppState.instance.uploadVerified) {
       final mobile = await UgcPhoneVerifyScreen.open(context);
       if (mobile == null || !mounted) return;
@@ -175,7 +195,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
         : await MediaValidator.validateImagesBatch(paths);
     if (!mounted) return;
     if (!validation.isValid) {
-      _toast(validation.errorMessage ?? _t('మీడియా చెల్లదు.', 'Invalid media.'));
+      _toast(
+          validation.errorMessage ?? _t('మీడియా చెల్లదు.', 'Invalid media.'));
       return;
     }
 
@@ -325,7 +346,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
               Wrap(spacing: 8, runSpacing: 6, children: [
                 _chip(label, color),
                 if (s.uploadStatus.isNotEmpty)
-                  _chip(_uploadLabel(s.uploadStatus),
+                  _chip(
+                      _uploadLabel(s.uploadStatus),
                       s.uploadStatus == 'FAILED'
                           ? AppColors.primary
                           : AppColors.textMuted),
@@ -394,7 +416,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
       SubmissionStatus.waitMedia => (
           Icons.hourglass_top_rounded,
           _pollCount >= _maxPolls
-              ? _t('ఇంకా ప్రాసెస్ అవుతోంది. రిఫ్రెష్ చేయడానికి క్రిందికి లాగండి.',
+              ? _t(
+                  'ఇంకా ప్రాసెస్ అవుతోంది. రిఫ్రెష్ చేయడానికి క్రిందికి లాగండి.',
                   'Still processing. Pull down to refresh.')
               : _t('మీడియా ప్రాసెస్ అవుతోంది…', 'Processing your media…'),
           null,
@@ -404,7 +427,11 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
           _t('ఎడిటర్ సమీక్ష కోసం వేచి ఉంది.', 'Waiting for editor review.'),
           null,
         ),
-      _ => (Icons.info_outline_rounded, _t('చర్య అవసరం లేదు.', 'Nothing to do right now.'), null),
+      _ => (
+          Icons.info_outline_rounded,
+          _t('చర్య అవసరం లేదు.', 'Nothing to do right now.'),
+          null
+        ),
     };
 
     return Container(
@@ -450,8 +477,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(_t('ఎడిటర్ గమనిక', 'Editor note'),
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w800)),
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text(note, style: const TextStyle(fontSize: 13.5, height: 1.4)),
           ],
@@ -459,9 +486,8 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
       );
 
   Widget _timelineRow(TimelineEntry e) {
-    final when = e.at == null
-        ? ''
-        : DateFormat('d MMM, h:mm a').format(e.at!.toLocal());
+    final when =
+        e.at == null ? '' : DateFormat('d MMM, h:mm a').format(e.at!.toLocal());
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -487,8 +513,7 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
             ),
           ),
           Text(when,
-              style:
-                  const TextStyle(fontSize: 11, color: AppColors.textMuted)),
+              style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
         ],
       ),
     );

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../core/errors/app_exception.dart';
 import '../core/network/api_response.dart';
 import '../core/network/dio_client.dart';
+import '../core/utils/log_safe.dart';
 import '../models/news_article.dart';
 import '../models/unified_feed_item.dart';
 import '../services/api_service.dart';
@@ -57,7 +58,7 @@ class UgcRepository {
     } on AppException {
       rethrow;
     } catch (e) {
-      debugPrint('[UgcRepository] Error fetching UGC feed: $e');
+      debugPrint('[UgcRepository] Error fetching UGC feed: ${LogSafe.scrub(e)}');
       throw ApiException('UGC డేటాను లోడ్ చేయడం విఫలమైంది.');
     }
   }
@@ -78,7 +79,7 @@ class UgcRepository {
     } on AppException {
       rethrow;
     } catch (e) {
-      debugPrint('[UgcRepository] Error submitting UGC post: $e');
+      debugPrint('[UgcRepository] Error submitting UGC post: ${LogSafe.scrub(e)}');
       throw ApiException(
           'వార్తను సమర్పించడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }
@@ -131,7 +132,7 @@ class UgcRepository {
     } on AppException {
       rethrow;
     } catch (e) {
-      debugPrint('[UgcRepository] Error uploading media: $e');
+      debugPrint('[UgcRepository] Error uploading media: ${LogSafe.scrub(e)}');
       throw ApiException(
           'మీడియాను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }
@@ -160,7 +161,7 @@ class UgcRepository {
     } on AppException {
       rethrow;
     } catch (e) {
-      debugPrint('[UgcRepository] Error uploading media batch: $e');
+      debugPrint('[UgcRepository] Error uploading media batch: ${LogSafe.scrub(e)}');
       throw ApiException(
           'మీడియా ఫైళ్లను అప్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.');
     }

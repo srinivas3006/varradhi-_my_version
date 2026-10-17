@@ -38,7 +38,9 @@ class AppNotification {
 
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     NotificationType nType = NotificationType.announcement;
-    final rawType = (json['type'] ?? json['notification_type'] ?? '').toString().toLowerCase();
+    final rawType = (json['type'] ?? json['notification_type'] ?? '')
+        .toString()
+        .toLowerCase();
     if (rawType.contains('approv')) {
       nType = NotificationType.approved;
     } else if (rawType.contains('reject')) {
@@ -47,7 +49,9 @@ class AppNotification {
       nType = NotificationType.pending;
     }
 
-    final createdAtStr = json['notification_created_at'] ?? json['created_at'] ?? json['timestamp'];
+    final createdAtStr = json['notification_created_at'] ??
+        json['created_at'] ??
+        json['timestamp'];
     DateTime dt = DateTime.now();
     if (createdAtStr != null) {
       dt = DateTime.tryParse(createdAtStr.toString()) ?? DateTime.now();
@@ -64,10 +68,40 @@ class AppNotification {
       contentId: json['content_id']?.toString(),
       contentSlug: json['content_slug']?.toString(),
       notificationType: (json['notification_type'] ?? json['type'])?.toString(),
-      imageUrl: json['image_url']?.toString(),
+      imageUrl: imageFrom(json),
       deepLink: json['deep_link']?.toString(),
       isRead: json['is_read'] == true,
     );
+  }
+
+  static const _imageKeys = [
+    'image_url',
+    'image',
+    'imageUrl',
+    'thumbnail_url',
+    'thumbnail',
+    'cover_image_url',
+    'cover_image',
+    'featured_image',
+    'featured_image_url',
+    'media_url',
+  ];
+
+  /// The picture's URL under any key the inbox API or a push payload uses,
+  /// including a nested `data` / `payload` / `content` map; null if none.
+  static String? imageFrom(Map<String, dynamic> json) {
+    for (final k in _imageKeys) {
+      final v = json[k]?.toString().trim() ?? '';
+      if (v.startsWith('http')) return v;
+    }
+    for (final nest in const ['data', 'payload', 'content', 'extra_data']) {
+      final m = json[nest];
+      if (m is Map) {
+        final found = imageFrom(Map<String, dynamic>.from(m));
+        if (found != null) return found;
+      }
+    }
+    return null;
   }
 
   /// Round-trips through [AppNotification.fromJson]; used for the on-device
@@ -87,4 +121,3 @@ class AppNotification {
         'is_read': isRead,
       };
 }
-

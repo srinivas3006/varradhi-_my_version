@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../localization/app_translations.dart';
+import '../localization/location_translations.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 
@@ -26,9 +27,31 @@ class BottomNavBar extends StatelessWidget {
     // Row renders a gap here and the label below comes from _items[2], so
     // nothing else may take this position.
     (icon: Icons.add, key: 'nav_post'),
+    (icon: Icons.play_circle_outline_rounded, key: 'nav_reels'),
+    // Local opens the local Spotlight feed and is labelled with the
+    // reader's own place (see _localLabel). Profile lives in the Home
+    // header now, top-left.
     (icon: Icons.location_on_rounded, key: 'nav_local'),
-    (icon: Icons.person_rounded, key: 'nav_profile'),
   ];
+
+  /// The reader's nearest named place for the Local tab — village, then
+  /// mandal, district, city — or the plain "Local" label when none is set.
+  /// In Telugu, the place's Telugu name (from the location API, else the
+  /// built-in table); a name neither knows stays as it is.
+  static String _localLabel() {
+    final s = AppState.instance;
+    for (final place in [s.village, s.subdistrict, s.district, s.city]) {
+      if (place.trim().isNotEmpty) {
+        return s.showsTeluguPlaceNames
+            ? LocationTranslations.toTelugu(place)
+            : place.trim();
+      }
+    }
+    return tr('nav_local');
+  }
+
+  /// How far the floating Post button rises above the bar.
+  static const double _postRise = 20;
 
   @override
   Widget build(BuildContext context) {
@@ -38,15 +61,25 @@ class BottomNavBar extends StatelessWidget {
         : Colors.white.withValues(alpha: 0.9);
 
     return AnimatedBuilder(
-      animation: AppState.instance.themeAndLocaleNotifier,
+      // AppState too, so the Local tab's place name follows a location
+      // change.
+      animation: Listenable.merge(
+          [AppState.instance.themeAndLocaleNotifier, AppState.instance]),
       builder: (context, _) {
         final postLabel = tr(_items[2].key);
 
+        // The Post button rises _postRise above the bar. Flutter only
+        // delivers taps inside a widget's own bounds, so when the button hung
+        // outside the Stack its upper part silently ignored taps. The Stack
+        // now includes that strip; its empty sides have no child and let
+        // taps through to the page behind.
         return Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.bottomCenter,
           children: [
-            ClipRRect(
+            Padding(
+              padding: const EdgeInsets.only(top: _postRise),
+              child: ClipRRect(
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                 child: Container(
@@ -72,7 +105,9 @@ class BottomNavBar extends StatelessWidget {
 
                           final item = _items[index];
                           final isActive = index == currentIndex;
-                          final itemLabel = tr(item.key);
+                          final itemLabel = item.key == 'nav_local'
+                              ? _localLabel()
+                              : tr(item.key);
 
                           return Expanded(
                             child: Semantics(
@@ -132,8 +167,9 @@ class BottomNavBar extends StatelessWidget {
                 ),
               ),
             ),
+            ),
             Positioned(
-              top: -20,
+              top: 0,
               child: Semantics(
                 button: true,
                 selected: currentIndex == 2,
@@ -141,6 +177,8 @@ class BottomNavBar extends StatelessWidget {
                 child: Tooltip(
                   message: postLabel,
                   child: GestureDetector(
+                    key: const Key('nav_post_button'),
+                    behavior: HitTestBehavior.opaque,
                     onTap: () {
                       HapticFeedback.lightImpact();
                       onTap(2);

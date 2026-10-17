@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../core/errors/ugc_error.dart';
 import '../core/utils/indian_mobile.dart';
+import '../core/utils/log_safe.dart';
 import '../services/api_service.dart';
 import '../services/firebase_phone_auth_gateway.dart';
 import '../state/app_state.dart';
@@ -37,7 +38,16 @@ enum UgcVerifyMode {
   backendSms,
 }
 
-enum UgcVerifyBusy { none, sendingCode, verifyingCode, linkingAccount }
+enum UgcVerifyBusy {
+  none,
+  sendingCode,
+  verifyingCode,
+  linkingAccount,
+
+  /// Asking the backend whether this account is already verified, before
+  /// any OTP is sent.
+  checkingExisting,
+}
 
 /// Drives UGC phone verification:
 ///
@@ -52,8 +62,14 @@ class UgcPhoneVerificationController extends ChangeNotifier {
     UgcVerificationApi? api,
     String? initialMobile,
     this.resendCooldown = const Duration(seconds: 30),
+    // Firebase sends the OTP; /ugc/send-otp/ is only the explicit fallback.
+    UgcVerifyMode initialMode = UgcVerifyMode.firebase,
   })  : _gateway = gateway ?? FirebasePhoneAuthGateway.instance,
-        _api = api ?? const _ApiServiceVerificationApi() {
+        _api = api ?? const _ApiServiceVerificationApi(),
+        // Firebase already failed for a setup reason this session: SMS.
+        mode = _firebaseUnusable && initialMode == UgcVerifyMode.firebase
+            ? UgcVerifyMode.backendSms
+            : initialMode {
     mobile = IndianMobile.normalize(initialMobile) ?? '';
   }
 
@@ -64,7 +80,7 @@ class UgcPhoneVerificationController extends ChangeNotifier {
   static const int codeLength = 6;
 
   UgcVerifyStep step = UgcVerifyStep.enterPhone;
-  UgcVerifyMode mode = UgcVerifyMode.firebase;
+  UgcVerifyMode mode;
   UgcVerifyBusy busy = UgcVerifyBusy.none;
 
   /// 10-digit number being verified.
@@ -108,9 +124,75 @@ class UgcPhoneVerificationController extends ChangeNotifier {
     _notify();
   }
 
+  bool _existingChecked = false;
+
+  /// Before any OTP: is this account already verified?
+  ///
+  /// 1. Already verified in app state → done.
+  /// 2. A Firebase phone session kept from this account's earlier
+  ///    verification → fresh ID token → POST verify-firebase-phone/. Only
+  ///    `verified: true` with the 10-digit mobile counts ("Mobile verified.").
+  /// 3. Otherwise false: the normal OTP flow follows. A session from another
+  ///    account, or one the backend rejects, is signed out first.
+  ///
+  /// Silent: a failed check never shows an error, it just means "send OTP".
+  /// Runs once per screen.
+  Future<bool> checkExistingVerification() async {
+    if (_existingChecked || _disposed) return step == UgcVerifyStep.verified;
+    _existingChecked = true;
+    final app = AppState.instance;
+    if (app.uploadVerified) {
+      verifiedMobile = app.ugcVerifiedMobile;
+      step = UgcVerifyStep.verified;
+      _notify();
+      return true;
+    }
+    if (mode != UgcVerifyMode.firebase || !await _gateway.ensureAvailable()) {
+      return false;
+    }
+
+    busy = UgcVerifyBusy.checkingExisting;
+    _notify();
+    var signOutAfter = false;
+    try {
+      final token = await _gateway.existingPhoneIdToken();
+      if (token == null) return false;
+      final owner = await app.readUgcFirebaseOwner();
+      final account = app.userId;
+      if (account == null || account.isEmpty || owner != account) {
+        // Another account's (or an untagged) session: never reuse it.
+        signOutAfter = true;
+        return false;
+      }
+      final data = await _api.verifyFirebasePhone(token);
+      final backendMobile = IndianMobile.normalize(data['mobile']?.toString());
+      debugPrint('[UgcVerify] existing session check verified='
+          '${data['verified']} mobile=${backendMobile != null}');
+      if (data['verified'] != true || backendMobile == null) {
+        signOutAfter = true;
+        return false;
+      }
+      await _complete(backendMobile);
+      return true;
+    } catch (e) {
+      // Rejected / expired / offline: fall back to a normal OTP.
+      debugPrint('[UgcVerify] existing session check: ${LogSafe.scrub(e)}');
+      signOutAfter = true;
+      return false;
+    } finally {
+      if (signOutAfter) await _gateway.signOut();
+      if (busy == UgcVerifyBusy.checkingExisting) {
+        busy = UgcVerifyBusy.none;
+        _notify();
+      }
+    }
+  }
+
   /// Sends the OTP to [mobile] via the active mode.
   Future<void> sendCode() async {
     if (isBusy) return;
+    // Ask the backend first: an account already verified needs no OTP.
+    if (!_existingChecked && await checkExistingVerification()) return;
     final normalized = IndianMobile.normalize(mobile);
     if (normalized == null) {
       _setError(
@@ -208,7 +290,7 @@ class UgcPhoneVerificationController extends ChangeNotifier {
       busy = UgcVerifyBusy.none;
       _handleFirebaseError(e);
     } catch (e) {
-      debugPrint('[UgcVerify] verifyPhoneNumber threw: $e');
+      debugPrint('[UgcVerify] verifyPhoneNumber threw: ${LogSafe.scrub(e)}');
       busy = UgcVerifyBusy.none;
       canUseFallback = true;
       _setError(
@@ -220,7 +302,15 @@ class UgcPhoneVerificationController extends ChangeNotifier {
 
   Future<void> _sendBackendOtp() async {
     try {
-      await _api.sendOtp(mobile);
+      final success = await _api.sendOtp(mobile);
+      if (!success) {
+        busy = UgcVerifyBusy.none;
+        _setError(
+            UgcErrorKind.unknown,
+            _t('OTP పంపడం సాధ్యం కాలేదు. మళ్లీ ప్రయత్నించండి.',
+                'Could not send the OTP. Please try again.'));
+        return;
+      }
       busy = UgcVerifyBusy.none;
       step = UgcVerifyStep.enterCode;
       _startResendTimer();
@@ -292,7 +382,7 @@ class UgcPhoneVerificationController extends ChangeNotifier {
       busy = UgcVerifyBusy.none;
       _handleFirebaseError(e);
     } catch (e) {
-      debugPrint('[UgcVerify] sign-in failed: $e');
+      debugPrint('[UgcVerify] sign-in failed: ${LogSafe.scrub(e)}');
       busy = UgcVerifyBusy.none;
       _setError(
           UgcErrorKind.unknown,
@@ -335,13 +425,24 @@ class UgcPhoneVerificationController extends ChangeNotifier {
     _notify();
     try {
       final data = await _api.verifyFirebasePhone(idToken);
-      if (data['verified'] == false) {
-        throw UgcApiError(UgcErrorKind.tokenMissingPhone,
-            data['message']?.toString() ?? 'Mobile not verified.');
+      // Only `verified: true` with the bound mobile means the backend saved
+      // it to ugc_user_profiles. Anything else — an empty body, a missing
+      // flag, no mobile — is NOT verified: never fall back to the typed
+      // number, or submit later fails with "Mobile number is not verified."
+      final backendMobile = IndianMobile.normalize(data['mobile']?.toString());
+      debugPrint('[UgcVerify] bridge verified=${data['verified']} '
+          'mobile=${backendMobile != null}');
+      if (data['verified'] != true || backendMobile == null) {
+        if (data['verified'] == false) {
+          throw UgcApiError(UgcErrorKind.tokenMissingPhone,
+              data['message']?.toString() ?? 'Mobile not verified.');
+        }
+        // Firebase user is still signed in: keep the OTP screen and let the
+        // reporter retry the bridge call.
+        throw UgcApiError(UgcErrorKind.server,
+            'Backend did not confirm the verification.');
       }
       // Backend's mobile wins: it is what UGC submit will be checked against.
-      final backendMobile =
-          IndianMobile.normalize(data['mobile']?.toString()) ?? mobile;
       await _complete(backendMobile);
     } catch (e) {
       final error = UgcApiError.from(e);
@@ -369,8 +470,10 @@ class UgcPhoneVerificationController extends ChangeNotifier {
 
   Future<void> _complete(String verified) async {
     await AppState.instance.markUgcMobileVerified(verified);
-    // The Firebase user existed only to mint the ID token.
-    await _gateway.signOut();
+    // Keep the Firebase phone session, tagged with this account: next time
+    // verify-firebase-phone/ can confirm it without a new OTP. (Firebase
+    // sessions are per phone; another account never reuses it.)
+    await AppState.instance.writeUgcFirebaseOwner(AppState.instance.userId);
     _resendTimer?.cancel();
     verifiedMobile = verified;
     busy = UgcVerifyBusy.none;
@@ -383,7 +486,7 @@ class UgcPhoneVerificationController extends ChangeNotifier {
   // --- Error handling ------------------------------------------------------
 
   void _handleFirebaseError(FirebaseAuthException e) {
-    debugPrint('[UgcVerify] Firebase error ${e.code}: ${e.message}');
+    debugPrint('[UgcVerify] Firebase error ${e.code}: ${LogSafe.scrub(e.message)}');
     switch (e.code) {
       case 'invalid-phone-number':
         _restart(
@@ -405,6 +508,17 @@ class UgcPhoneVerificationController extends ChangeNotifier {
             UgcErrorKind.invalidOtp,
             _t('OTP గడువు ముగిసింది. దయచేసి కొత్త OTP పొందండి.',
                 'This OTP has expired. Please request a new one.'));
+        return;
+      case 'user-missing':
+      case 'phone-missing':
+      case 'token-missing':
+        // Firebase accepted the code but gave no verified phone / token:
+        // restart phone auth (handover). The backend is not called.
+        unawaited(_gateway.signOut());
+        _restart(
+            UgcErrorKind.tokenMissingPhone,
+            _t('ఫోన్ ధృవీకరణ పూర్తి కాలేదు. దయచేసి మళ్లీ ప్రారంభించండి.',
+                'Phone verification did not complete. Please start again.'));
         return;
       case 'network-request-failed':
         _setError(
@@ -433,17 +547,59 @@ class UgcPhoneVerificationController extends ChangeNotifier {
         // operation-not-allowed, internal-error, …: Firebase cannot serve
         // this install. The backend SMS flow does not depend on it.
         canUseFallback = true;
-        // The code is shown so support can tell a console problem
-        // (CONFIGURATION_NOT_FOUND = Authentication never set up,
-        // BILLING_NOT_ENABLED, app-not-authorized = missing SHA) from a
-        // device one without needing a USB log.
+        // The code goes to the log for support (CONFIGURATION_NOT_FOUND =
+        // Authentication never set up, BILLING_NOT_ENABLED = no Blaze plan,
+        // app-not-authorized = missing SHA) — never to the reader's screen.
+        debugPrint('[UgcVerify] Firebase send failed: ${firebaseErrorDetail(e)}');
+        if (mode == UgcVerifyMode.firebase && isFirebaseSetupError(e)) {
+          // A project/console problem: no retry on this phone will help.
+          // Send the OTP by backend SMS straight away instead of asking the
+          // reader to work that out — and skip Firebase for this session.
+          _firebaseUnusable = true;
+          busy = UgcVerifyBusy.none;
+          unawaited(useFallback());
+          return;
+        }
         _setError(
             UgcErrorKind.unknown,
-            '${_t('ప్రస్తుతం ఈ విధానంలో OTP పంపడం సాధ్యం కాలేదు. SMS ద్వారా OTP పొందండి.',
-                'We could not send the OTP this way right now. Get it by SMS instead.')}'
-            ' (${firebaseErrorDetail(e)})');
+            _t('ప్రస్తుతం ఈ విధానంలో OTP పంపడం సాధ్యం కాలేదు. SMS ద్వారా OTP పొందండి.',
+                'We could not send the OTP this way right now. Get it by SMS instead.'));
     }
   }
+
+  /// Firebase refused because of how the project / app is set up (billing,
+  /// configuration, SHA, disabled provider) — not because of this reader,
+  /// their number or their network.
+  @visibleForTesting
+  static bool isFirebaseSetupError(FirebaseAuthException e) {
+    const codes = {
+      'app-not-authorized',
+      'missing-client-identifier',
+      'invalid-app-credential',
+      'missing-app-credential',
+      'operation-not-allowed',
+      'project-not-found',
+      'invalid-api-key',
+      'api-key-not-valid',
+    };
+    if (codes.contains(e.code)) return true;
+    final m = (e.message ?? '').toUpperCase();
+    return const [
+      'BILLING_NOT_ENABLED',
+      'CONFIGURATION_NOT_FOUND',
+      'OPERATION_NOT_ALLOWED',
+      'PROJECT_NOT_FOUND',
+      'API_KEY',
+      'APP_NOT_AUTHORIZED',
+    ].any(m.contains);
+  }
+
+  /// Set once Firebase has failed for a setup reason: later verifications in
+  /// this app session go straight to the backend SMS OTP.
+  static bool _firebaseUnusable = false;
+
+  @visibleForTesting
+  static void resetSessionState() => _firebaseUnusable = false;
 
   /// Short, support-readable form of a Firebase error: its code plus the
   /// server reason when Firebase buries it in the message (e.g.
@@ -455,7 +611,7 @@ class UgcPhoneVerificationController extends ChangeNotifier {
   }
 
   void _handleBackendError(UgcApiError e, {bool afterFirebaseSignIn = false}) {
-    debugPrint('[UgcVerify] backend error ${e.kind}: ${e.message}');
+    debugPrint('[UgcVerify] backend error ${e.kind}: ${LogSafe.scrub(e.message)}');
     switch (e.kind) {
       case UgcErrorKind.invalidFirebaseToken:
         unawaited(_gateway.signOut());

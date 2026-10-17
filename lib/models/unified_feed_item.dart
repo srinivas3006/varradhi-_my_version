@@ -65,6 +65,8 @@ class UnifiedFeedItem {
       'is_disliked_by_user',
       'is_bookmarked',
       'share_url',
+      // Citizen news: who uploaded it (shown as the story's byline).
+      'uploader',
     ]) {
       if (json[key] != null) parsedMeta[key] = json[key];
     }

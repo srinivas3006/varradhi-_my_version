@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,10 +10,14 @@ import '../models/redeem_request.dart';
 import '../models/reporter_post.dart';
 import '../models/app_notification.dart';
 import '../services/api_service.dart';
+import '../services/content_engagement_service.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 import '../repositories/ad_repository.dart';
 import '../localization/location_translations.dart';
+import '../core/utils/indian_mobile.dart';
+import '../core/utils/log_safe.dart';
+import '../core/utils/url_normalizer.dart';
 
 /// Simple app-wide state singleton. Scalar fields (onboarding completion,
 /// language, location, coins, login, reporter status) survive app restarts
@@ -77,6 +82,13 @@ class AppState extends ChangeNotifier {
   /// 'en' | 'te', or null for all languages.
   String? get contentLanguage => _contentLanguage;
 
+  /// The `lang` every feed request sends: the news language, or `all`.
+  ///
+  /// Always explicit. With no `lang` the backend picks its own default —
+  /// `en` for a guest, the account's language once logged in — so the same
+  /// reader saw different Home / Spotlight stories before and after login.
+  String get feedLang => _contentLanguage ?? 'all';
+
   /// Whether the reader has been asked yet.
   ///
   /// Separate from [_contentLanguage] being null, because null is also the
@@ -100,6 +112,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await _persist();
   }
+
+  /// The place every feed request is filtered by (backend contract, Oct
+  /// 2026): the reader's chosen or detected location — state, district,
+  /// subdistrict and village, whichever are known — or all empty when no
+  /// location has been set, which the backend treats as a broad feed.
+  ///
+  /// The placeholder Telangana / Hyderabad below is only a starting value;
+  /// sending it before the reader picked a place would hide other states'
+  /// news from a reader in Andhra Pradesh.
+  ({String state, String district, String subdistrict, String village})
+      get feedPlace => hasValidLocation
+          ? (
+              state: stateName.trim(),
+              district: district.trim(),
+              subdistrict: subdistrict.trim(),
+              village: village.trim(),
+            )
+          : (state: '', district: '', subdistrict: '', village: '');
 
   String stateName = 'Telangana';
   String district = 'Hyderabad';
@@ -277,6 +307,10 @@ class AppState extends ChangeNotifier {
   /// Every UGC submit / upload-media call must send exactly this.
   String ugcVerifiedMobile = '';
 
+  /// The account's verified mobile from GET /auth/me/ (only when
+  /// mobile_verified is true) — what the profile shows as "+91 …".
+  String profileVerifiedMobile = '';
+
   /// Set when the backend answers "Daily upload limit reached."; uploads stay
   /// disabled until this moment (local midnight).
   DateTime? ugcUploadLockedUntil;
@@ -290,6 +324,8 @@ class AppState extends ChangeNotifier {
   static const _ugcBlockCooldown = Duration(hours: 24);
 
   /// True when the account has a usable verified UGC mobile.
+  /// Only the backend bridge (verify-firebase-phone / verify-otp) sets it,
+  /// via [markUgcMobileVerified] — never the login/profile phone.
   bool get uploadVerified =>
       ugcMobileVerified && ugcVerifiedMobile.length == 10;
 
@@ -306,6 +342,21 @@ class AppState extends ChangeNotifier {
 
   final List<ReporterPost> reporterPosts = [];
   final List<RedeemRequest> redeemRequests = [];
+
+  // ---- Reporter Dashboard Counts ----
+  int? reporterPendingCount;
+  int? reporterApprovedCount;
+  int? reporterPublishedCount;
+  int? reporterRejectedCount;
+  int? reporterTotalSubmissions;
+
+  // Dashboard counts exactly as GET /ugc/reporter/dashboard/ sends them —
+  // never calculated on the phone (backend contract). 0 until loaded.
+  int get pendingCount => reporterPendingCount ?? 0;
+  int get approvedCount => reporterApprovedCount ?? 0;
+  int get publishedCount => reporterPublishedCount ?? 0;
+  int get rejectedCount => reporterRejectedCount ?? 0;
+  int get totalSubmissionsCount => reporterTotalSubmissions ?? 0;
 
   static const int rupeesPerToken = 5;
   static const int tokensNeededToRedeem = 100;
@@ -455,6 +506,14 @@ class AppState extends ChangeNotifier {
     dislikedItemIds = (prefs.getStringList('dislikedItemIds') ?? []).toSet();
     bookmarkedItemIds =
         (prefs.getStringList('bookmarkedItemIds') ?? []).toSet();
+    // Telugu names of the reader's places, as the location API sent them.
+    try {
+      final raw = prefs.getString(_locationNamesTeKey);
+      if (raw != null && raw.isNotEmpty) {
+        LocationTranslations.restoreLearned(
+            Map<String, String>.from(jsonDecode(raw) as Map));
+      }
+    } catch (_) {}
     blockedUserIds = (prefs.getStringList('blockedUserIds') ?? []).toSet();
   }
 
@@ -533,6 +592,8 @@ class AppState extends ChangeNotifier {
     await prefs.setStringList('likedItemIds', likedItemIds.toList());
     await prefs.setStringList('dislikedItemIds', dislikedItemIds.toList());
     await prefs.setStringList('bookmarkedItemIds', bookmarkedItemIds.toList());
+    await prefs.setString(
+        _locationNamesTeKey, jsonEncode(LocationTranslations.learnedNames));
     await prefs.setBool('locationPrompted', locationPrompted);
     await prefs.setInt('locationPromptShownCount', locationPromptShownCount);
     if (locationPromptLastShownAtMs != null) {
@@ -578,6 +639,10 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     await _persist();
+    // Bookmarks made as a guest move into the account that just logged in.
+    unawaited(ContentEngagementService.instance
+        .syncGuestBookmarks()
+        .catchError((Object e) => debugPrint('[Bookmark] guest copy: $e')));
   }
 
   /// Called by the Dio interceptor after a successful silent token refresh.
@@ -633,12 +698,41 @@ class AppState extends ChangeNotifier {
               me['profileImage'] ??
               (me['profile'] is Map ? me['profile']['profile_image'] : null))
           ?.toString();
-      if (serverImage != null && serverImage.startsWith('http')) {
-        profileImageUrl = serverImage;
+      if (serverImage != null && serverImage.trim().isNotEmpty) {
+        final url = UrlNormalizer.normalize(serverImage);
+        if (url.startsWith('http')) profileImageUrl = url;
       }
 
-      if (me['phone'] != null) userPhone = me['phone'].toString();
+      final phone = IndianMobile.normalize(
+          me['phone']?.toString() ?? me['mobile']?.toString());
+      // The login phone is NOT the UGC verified mobile: that is set only by
+      // the backend verification bridge.
+      if (phone != null && phone.length == 10) {
+        userPhone = phone;
+      } else if (me['phone'] != null) {
+        userPhone = me['phone'].toString();
+      }
       if (me['id'] != null) userId = me['id'].toString();
+      // Only UGC-specific fields here: me's own `mobile` is the login phone,
+      // which is never the verified UGC mobile.
+      // GET /auth/me/: verified_mobile + mobile_verified (backend contract).
+      // Shown on the profile only when mobile_verified is true.
+      final meMobile = me['mobile_verified'] == true
+          ? IndianMobile.normalize(me['verified_mobile']?.toString())
+          : null;
+      profileVerifiedMobile =
+          (meMobile != null && meMobile.length == 10) ? meMobile : '';
+      final ugcProfile = me['ugc_profile'];
+      final serverMobile = profileVerifiedMobile.isNotEmpty
+          ? profileVerifiedMobile
+          : ugcProfile is Map
+              ? serverVerifiedMobile(ugcProfile)
+              : IndianMobile.normalize(me['ugc_verified_mobile']?.toString());
+      if (!uploadVerified &&
+          serverMobile != null &&
+          serverMobile.length == 10) {
+        await markUgcMobileVerified(serverMobile);
+      }
       // Apply the account's saved interface language. Without this the
       // field was write-only: a returning reader on a new device got the
       // default language regardless of what they had chosen.
@@ -658,20 +752,10 @@ class AppState extends ChangeNotifier {
         }
       }
 
-      // Theme and reading size are profile fields too; reading them back
-      // makes the account's preferences follow the reader to a new device.
-      final serverTheme = me['theme']?.toString().toLowerCase().trim();
-      if (serverTheme != null && serverTheme.isNotEmpty) {
-        final resolved = switch (serverTheme) {
-          'light' => ThemeMode.light,
-          'dark' => ThemeMode.dark,
-          _ => ThemeMode.system,
-        };
-        if (resolved != themeMode) {
-          themeMode = resolved;
-          themeAndLocaleNotifier.notify();
-        }
-      }
+      // Maintain the active UI theme choice across login and guest states.
+      // Do not let server defaults overwrite the active theme from light to dark.
+      // Instead, keep the current theme and sync it to the backend profile.
+      unawaited(_syncProfileToBackend(theme: themeMode.name));
 
       final serverFont = me['font_size'];
       if (serverFont != null) {
@@ -827,8 +911,14 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
+  static const _locationNamesTeKey = 'location_names_te_v1';
+
+  /// Place names are shown in Telugu when the app is in Telugu.
+  bool get showsTeluguPlaceNames =>
+      uiLanguageCode == 'te' || language.toLowerCase().contains('telugu');
+
   String get displayLocation {
-    if (uiLanguageCode == 'te' || language.toLowerCase().contains('telugu')) {
+    if (showsTeluguPlaceNames) {
       return LocationTranslations.formatDisplayLocation(
         state: stateName,
         district: district,
@@ -1019,13 +1109,7 @@ class AppState extends ChangeNotifier {
 
   void toggleBookmark(String itemId) {
     if (itemId.isEmpty) return;
-    if (bookmarkedItemIds.contains(itemId)) {
-      bookmarkedItemIds.remove(itemId);
-    } else {
-      bookmarkedItemIds.add(itemId);
-    }
-    notifyListeners();
-    _persist();
+    setBookmarked(itemId, !bookmarkedItemIds.contains(itemId));
   }
 
   /// Sets liked state explicitly.
@@ -1043,14 +1127,47 @@ class AppState extends ChangeNotifier {
   }
 
   /// Sets bookmarked state explicitly. See [setLiked].
+  ///
+  /// Also records it as the reader's latest decision for [itemId], which
+  /// [isStoryBookmarked] trusts over any `is_bookmarked` a screen still holds
+  /// from an earlier fetch.
   void setBookmarked(String itemId, bool bookmarked) {
     if (itemId.isEmpty) return;
+    final decisionChanged = _bookmarkDecisions[itemId] != bookmarked;
+    _bookmarkDecisions[itemId] = bookmarked;
     final changed = bookmarked
         ? bookmarkedItemIds.add(itemId)
         : bookmarkedItemIds.remove(itemId);
-    if (!changed) return;
+    if (!changed && !decisionChanged) return;
     notifyListeners();
-    _persist();
+    if (changed) _persist();
+  }
+
+  /// Bookmark state set this session, by the reader or from the server's
+  /// bookmark list. Each screen keeps its own copy of a story, so the copy's
+  /// `is_bookmarked` goes stale the moment the story is bookmarked or removed
+  /// somewhere else; this map is what keeps every screen in agreement.
+  final Map<String, bool> _bookmarkDecisions = {};
+
+  @visibleForTesting
+  void resetBookmarksForTest() {
+    bookmarkedItemIds.clear();
+    _bookmarkDecisions.clear();
+    _deviceSavedStories.clear();
+  }
+
+  /// The id the bookmark API and the local state are keyed by.
+  static String bookmarkKey(NewsArticle story) =>
+      story.id.isNotEmpty ? story.id : story.slug;
+
+  /// Whether [story] is bookmarked — the one question every save icon and
+  /// menu asks.
+  bool isStoryBookmarked(NewsArticle story) {
+    final id = bookmarkKey(story);
+    if (id.isEmpty) return story.isBookmarked;
+    final decided = _bookmarkDecisions[id];
+    if (decided != null) return decided;
+    return story.isBookmarked || bookmarkedItemIds.contains(id);
   }
 
   bool isLiked(String itemId) {
@@ -1100,10 +1217,12 @@ class AppState extends ChangeNotifier {
     _persist();
   }
 
-  // ---- Saved citizen posts kept on the device ----
+  // ---- Guest bookmarks kept on the device ----
   //
-  // Until the backend can bookmark UGC, a saved citizen post is stored here
-  // (whole story, so the Bookmarks screen can show and open it offline).
+  // The server has no guest bookmarks, so a guest's are stored here (whole
+  // story, so the Saved screen can show and open it). On login they are
+  // copied into the account and removed from here
+  // (ContentEngagementService.syncGuestBookmarks).
 
   static const _deviceSavedKey = 'device_saved_stories_v1';
   final Map<String, Map<String, dynamic>> _deviceSavedStories = {};
@@ -1204,6 +1323,7 @@ class AppState extends ChangeNotifier {
     String? title,
     String? body,
     String? messageId,
+    String? imageUrl,
   }) async {
     final notificationId = data['notification_id']?.toString();
     final id = notificationId ??
@@ -1216,6 +1336,10 @@ class AppState extends ChangeNotifier {
       'body': body ?? data['body']?.toString() ?? '',
       'created_at':
           data['created_at']?.toString() ?? DateTime.now().toIso8601String(),
+      // FCM's notification image is not in `data`; keep it for the inbox.
+      if (AppNotification.imageFrom(data) == null &&
+          (imageUrl?.startsWith('http') ?? false))
+        'image_url': imageUrl,
       'is_read': false,
     });
     if (incoming.title.isEmpty && incoming.message.isEmpty) return;
@@ -1294,6 +1418,31 @@ class AppState extends ChangeNotifier {
   /// the device — see the report accompanying this change.
   String? profileImageUrl;
 
+  /// The server avatar as an absolute URL, or null when none is set.
+  String? get profilePhotoUrl {
+    final raw = profileImageUrl;
+    if (raw == null || raw.trim().isEmpty) return null;
+    final url = UrlNormalizer.normalize(raw);
+    return url.startsWith('http') ? url : null;
+  }
+
+  /// The image every avatar in the app draws: the reader's fresh local pick
+  /// first (shown while it uploads), otherwise the server photo.
+  ///
+  /// After a successful upload [profileImagePath] is cleared, so screens
+  /// that only looked at the local path fell back to the initial — the
+  /// photo appeared not to have been saved.
+  ImageProvider? get profileAvatar {
+    final path = profileImagePath;
+    if (path != null && path.isNotEmpty) {
+      if (path.startsWith('http')) return CachedNetworkImageProvider(path);
+      final file = File(path);
+      if (file.existsSync()) return FileImage(file);
+    }
+    final url = profilePhotoUrl;
+    return url == null ? null : CachedNetworkImageProvider(url);
+  }
+
   /// Saves the profile, uploading the avatar through the existing
   /// PATCH /api/v1/auth/me/ when [imagePath] is a local file.
   ///
@@ -1328,8 +1477,11 @@ class AppState extends ChangeNotifier {
         imageFile: isLocalFile ? File(imagePath) : null,
       );
 
-      final serverImage =
+      final rawImage =
           (updated['profile_image'] ?? updated['profileImage'])?.toString();
+      final serverImage = rawImage == null || rawImage.trim().isEmpty
+          ? null
+          : UrlNormalizer.normalize(rawImage);
       if (serverImage != null && serverImage.startsWith('http')) {
         profileImageUrl = serverImage;
         // The local copy has served its purpose; the server URL is canonical
@@ -1363,15 +1515,24 @@ class AppState extends ChangeNotifier {
     userId = null;
     userName = 'Guest User';
     userPhone = '';
-    // Device-kept saves belong to the account that made them.
-    for (final id in _deviceSavedStories.keys) {
-      bookmarkedItemIds.remove(id);
-    }
+    profileVerifiedMobile = '';
+    // Bookmarks belong to the account that made them — both the server ones
+    // and citizen posts kept on the device. Leaving the ids behind showed the
+    // previous account's bookmarks to whoever logged in next; the next
+    // account's own are restored from the server.
+    bookmarkedItemIds.clear();
+    _bookmarkDecisions.clear();
     _deviceSavedStories.clear();
     unawaited(_persistDeviceSavedStories());
     // The reporter role belongs to the account too; it is restored per
     // account on the next login (see _restoreReporterStatus).
     isReporter = false;
+    reporterPosts.clear();
+    reporterPendingCount = null;
+    reporterApprovedCount = null;
+    reporterPublishedCount = null;
+    reporterRejectedCount = null;
+    reporterTotalSubmissions = null;
     // UGC verification belongs to the account, not the device.
     ugcMobileVerified = false;
     ugcVerifiedMobile = '';
@@ -1445,8 +1606,32 @@ class AppState extends ChangeNotifier {
     }).toList();
   }
 
+  /// The server count last shown for each story, and the one in effect when
+  /// this reader added a comment.
+  final Map<String, int> _commentBaseSeen = {};
+  final Map<String, int> _commentBaseAtAdd = {};
+
+  /// Count to show: the server's, plus this reader's own new comments only
+  /// until the server count includes them. It used to add them on top of a
+  /// server count that already had them — one comment showed as 2.
   int getDisplayCommentCount(String articleId, int baseCount) {
-    return baseCount + (userAddedComments[articleId] ?? 0);
+    final added = userAddedComments[articleId] ?? 0;
+    if (added == 0) {
+      _commentBaseSeen[articleId] = baseCount;
+      return baseCount;
+    }
+    final before = _commentBaseAtAdd[articleId] ??
+        _commentBaseSeen[articleId] ??
+        baseCount;
+    final optimistic = before + added;
+    return baseCount > optimistic ? baseCount : optimistic;
+  }
+
+  /// This reader posted a comment (or reply) on [articleId].
+  void recordUserComment(String articleId) {
+    _commentBaseAtAdd.putIfAbsent(
+        articleId, () => _commentBaseSeen[articleId] ?? 0);
+    userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
   }
 
   int getCommentCount(String articleId) {
@@ -1461,14 +1646,14 @@ class AppState extends ChangeNotifier {
     final newComment = Comment(
       id: 'c_${DateTime.now().millisecondsSinceEpoch}',
       username: isLoggedIn ? userName : 'Guest User',
-      avatarUrl: profileImagePath ?? '',
+      avatarUrl: profilePhotoUrl ?? '',
       text: text,
       postedAt: DateTime.now(),
       likes: 0,
     );
 
     articleComments[articleId]!.insert(0, newComment);
-    userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
+    recordUserComment(articleId);
     notifyListeners();
   }
 
@@ -1489,11 +1674,11 @@ class AppState extends ChangeNotifier {
         comment.replies.add(Comment(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           username: userName.isNotEmpty ? userName : 'Guest User',
-          avatarUrl: profileImagePath ?? '',
+          avatarUrl: profilePhotoUrl ?? '',
           text: text,
           postedAt: DateTime.now(),
         ));
-        userAddedComments[articleId] = (userAddedComments[articleId] ?? 0) + 1;
+        recordUserComment(articleId);
         break;
       }
     }
@@ -1571,8 +1756,9 @@ class AppState extends ChangeNotifier {
     if (!joined) {
       try {
         final dash = await ApiService.instance.getReporterDashboard();
-        final total = int.tryParse('${dash['total_submissions'] ?? 0}') ?? 0;
-        joined = total > 0;
+        final total = _applyDashboardCounts(dash) ?? 0;
+        final recent = dash['recent_submissions'];
+        joined = total > 0 || (recent is List && recent.isNotEmpty);
       } catch (e) {
         // No reporter profile yet, or offline: leave the flag as it is.
         debugPrint('[AppState] reporter dashboard probe: $e');
@@ -1593,6 +1779,83 @@ class AppState extends ChangeNotifier {
     await _persist();
   }
 
+  /// The verified mobile the backend reports for this account, if its reply
+  /// carries one: `verified_mobile` / `mobile` (top level, or under
+  /// `profile` / `ugc_profile`), with `mobile_verified` not false.
+  @visibleForTesting
+  static String? serverVerifiedMobile(Map<dynamic, dynamic> body) {
+    String? from(Map<dynamic, dynamic> m) {
+      if (m['mobile_verified'] == false || m['is_mobile_verified'] == false) {
+        return null;
+      }
+      final raw = m['verified_mobile'] ?? m['ugc_verified_mobile'];
+      final flagged =
+          m['mobile_verified'] == true || m['is_mobile_verified'] == true;
+      final mobile = IndianMobile.normalize(
+          (raw ?? (flagged ? m['mobile'] : null))?.toString());
+      return (mobile != null && mobile.length == 10) ? mobile : null;
+    }
+
+    final top = from(body);
+    if (top != null) return top;
+    for (final k in ['ugc_profile', 'profile', 'reporter']) {
+      final nested = body[k];
+      if (nested is Map) {
+        final v = from(nested);
+        if (v != null) return v;
+      }
+    }
+    return null;
+  }
+
+  // --- Whose Firebase phone session is kept on this phone ----------------
+  //
+  // After a successful verification the Firebase phone session is kept (not
+  // signed out) so the next time this account needs verifying, a fresh ID
+  // token can be sent to verify-firebase-phone/ BEFORE any OTP is sent. The
+  // session is tagged with the VARADHI account that made it, and only that
+  // account may reuse it — another account gets a new OTP.
+
+  static const _ugcFirebaseOwnerKey = 'ugc_firebase_session_owner';
+
+  Future<String?> readUgcFirebaseOwner() async {
+    try {
+      return await _secureStorage.read(key: _ugcFirebaseOwnerKey);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> writeUgcFirebaseOwner(String? accountId) async {
+    try {
+      if (accountId == null || accountId.isEmpty) {
+        await _secureStorage.delete(key: _ugcFirebaseOwnerKey);
+      } else {
+        await _secureStorage.write(key: _ugcFirebaseOwnerKey, value: accountId);
+      }
+    } catch (e) {
+      debugPrint('[AppState] Firebase session owner write failed: $e');
+    }
+  }
+
+  /// Is this account already verified on the server? Checked before asking
+  /// for an OTP (new phone, reinstall). True when it is — nothing to ask.
+  Future<bool> syncUgcVerificationFromServer() async {
+    if (uploadVerified) return true;
+    if (!isLoggedIn) return false;
+    try {
+      final dash = await ApiService.instance.getReporterDashboard();
+      final mobile = serverVerifiedMobile(dash);
+      if (mobile != null) {
+        await markUgcMobileVerified(mobile);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[AppState] verification check: ${LogSafe.scrub(e)}');
+    }
+    return false;
+  }
+
   /// Forgets the cached verification, e.g. after the backend says the
   /// mobile is not (or no longer) verified.
   Future<void> clearUgcVerification() async {
@@ -1600,6 +1863,11 @@ class AppState extends ChangeNotifier {
     ugcVerifiedMobile = '';
     notifyListeners();
     await _writeUgcMobile(null);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('ugc_verified_mobile');
+      await prefs.setBool('ugc_mobile_verified', false);
+    } catch (_) {}
     await _persist();
   }
 
@@ -1639,43 +1907,181 @@ class AppState extends ChangeNotifier {
     await _persist();
   }
 
-  /// Creates a new post in "pending review" state. Call only after
-  /// confirming `uploadVerified` is true (verify the phone first if not).
+  /// One count from GET /ugc/reporter/dashboard/, or null when the backend
+  /// does not send it. Accepts the names seen across backend versions
+  /// (`pending_count`, `pending`, `pending_submissions`…) at the top level or
+  /// inside `counts` / `status_counts` / `totals` / `stats` / `summary`.
+  ///
+  /// Null is deliberate: a missing field must not become 0 — that wiped the
+  /// +1 a fresh upload had just added and hid the locally loaded posts the
+  /// counters otherwise fall back to.
+  @visibleForTesting
+  static int? dashboardCount(Map<dynamic, dynamic> dash, String status) {
+    final names = [
+      '${status}_count',
+      status,
+      '${status}_submissions',
+      'total_$status',
+      '${status}_total',
+    ];
+    int? read(Map<dynamic, dynamic> m) {
+      for (final n in names) {
+        final v = m[n];
+        if (v is num) return v.toInt();
+        if (v is String && int.tryParse(v.trim()) != null) {
+          return int.parse(v.trim());
+        }
+      }
+      return null;
+    }
+
+    final top = read(dash);
+    if (top != null) return top;
+    for (final k in ['counts', 'status_counts', 'totals', 'stats', 'summary']) {
+      final nested = dash[k];
+      if (nested is Map) {
+        final v = read(nested);
+        if (v != null) return v;
+      }
+    }
+    return null;
+  }
+
+  /// Applies dashboard counts; returns the total (null when not sent).
+  int? _applyDashboardCounts(Map<dynamic, dynamic> dash) {
+    reporterPendingCount = dashboardCount(dash, 'pending');
+    reporterApprovedCount = dashboardCount(dash, 'approved');
+    reporterPublishedCount = dashboardCount(dash, 'published');
+    reporterRejectedCount = dashboardCount(dash, 'rejected');
+    // total_submissions / total / total_count / submissions_count.
+    final total =
+        dashboardCount(dash, 'total') ?? dashboardCount(dash, 'submissions');
+    reporterTotalSubmissions = total;
+    return total;
+  }
+
+  bool _isRefreshingReporterDashboard = false;
+
+  /// Fetches latest reporter dashboard counts and updates in-memory stats.
+  Future<void> refreshReporterDashboard() async {
+    if (!isLoggedIn) return;
+    if (_isRefreshingReporterDashboard) return;
+    _isRefreshingReporterDashboard = true;
+    try {
+      final dash = await ApiService.instance.getReporterDashboard();
+      final total = _applyDashboardCounts(dash);
+      // The dashboard may report the account's verified mobile.
+      final serverMobile = serverVerifiedMobile(dash);
+      if (!uploadVerified && serverMobile != null) {
+        await markUgcMobileVerified(serverMobile);
+      }
+      debugPrint('[AppState] reporter dashboard keys=${dash.keys.join(',')} '
+          'total=$total pending=$reporterPendingCount');
+      if ((total ?? 0) > 0) {
+        isReporter = true;
+        final id = userId;
+        if (id != null && id.isNotEmpty) _reporterAccountIds.add(id);
+      }
+      if (dash['recent_submissions'] is List) {
+        final recents = dash['recent_submissions'] as List;
+        for (final item in recents) {
+          if (item is Map) {
+            final p = ApiService.reporterPostFromJson(item);
+            final idx =
+                reporterPosts.indexWhere((existing) => existing.id == p.id);
+            if (idx >= 0) {
+              reporterPosts[idx] = p;
+            } else {
+              reporterPosts.add(p);
+            }
+          }
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[AppState] refreshReporterDashboard error: $e');
+    } finally {
+      _isRefreshingReporterDashboard = false;
+    }
+  }
+
+  void syncReporterPosts(List<ReporterPost> posts) {
+    for (final p in posts) {
+      final idx = reporterPosts.indexWhere((existing) => existing.id == p.id);
+      if (idx >= 0) {
+        reporterPosts[idx] = p;
+      } else {
+        reporterPosts.add(p);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Creates a new post in "pending review" state and updates dashboard counts.
   ReporterPost submitReporterPost({
+    String? id,
     required PostType type,
     required String caption,
     required String category,
     required String mediaUrl,
   }) {
+    final postId = id != null && id.isNotEmpty
+        ? id
+        : 'post_${DateTime.now().millisecondsSinceEpoch}';
     final post = ReporterPost(
-      id: 'post_${DateTime.now().millisecondsSinceEpoch}',
+      id: postId,
       reporterName: userName,
       type: type,
       caption: caption,
       category: category,
       mediaUrl: mediaUrl,
       submittedAt: DateTime.now(),
+      status: PostStatus.pending,
     );
+    reporterPosts.removeWhere((p) => p.id == postId);
     reporterPosts.insert(0, post);
+
+    // Counts come only from the dashboard (backend contract: refresh after
+    // every successful upload, never calculate locally).
     notifyListeners();
+    unawaited(refreshReporterDashboard());
     return post;
   }
 
-  /// Demo admin action: approves a pending post and credits 1 token.
-  void adminApprovePost(String postId) {
-    final post = reporterPosts.firstWhere((p) => p.id == postId);
-    post.status = PostStatus.approved;
-    reporterTokens += 1;
+  void onPostStatusChanged(String postId, PostStatus newStatus,
+      [String? rejectionReason]) {
+    final idx = reporterPosts.indexWhere((p) => p.id == postId);
+    if (idx >= 0) {
+      reporterPosts[idx].status = newStatus;
+      if (rejectionReason != null) {
+        reporterPosts[idx].rejectionReason = rejectionReason;
+      }
+    }
+
+    // Counts are the backend's (never calculated here): re-read them.
     notifyListeners();
+    unawaited(refreshReporterDashboard());
+  }
+
+  void onPostsBulkAction(List<String> postIds, PostStatus newStatus) {
+    for (final id in postIds) {
+      final idx = reporterPosts.indexWhere((p) => p.id == id);
+      if (idx >= 0) reporterPosts[idx].status = newStatus;
+    }
+    notifyListeners();
+    unawaited(refreshReporterDashboard());
+  }
+
+  /// Admin action: approves a pending post and credits 1 token.
+  void adminApprovePost(String postId) {
+    onPostStatusChanged(postId, PostStatus.approved);
+    reporterTokens += 1;
     _persist();
   }
 
-  /// Demo admin action: rejects a pending post — no token awarded.
+  /// Admin action: rejects a pending post — no token awarded.
   void adminRejectPost(String postId, [String? reason]) {
-    final post = reporterPosts.firstWhere((p) => p.id == postId);
-    post.status = PostStatus.rejected;
-    post.rejectionReason = reason;
-    notifyListeners();
+    onPostStatusChanged(postId, PostStatus.rejected, reason);
   }
 
   /// Requests a payout once the reporter has at least 100 tokens. Deducts

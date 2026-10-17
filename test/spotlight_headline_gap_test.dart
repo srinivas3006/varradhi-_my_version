@@ -1,0 +1,51 @@
+import 'dart:io';
+
+import 'package:flutter/painting.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:vaaradhi/widgets/spotlight/spotlight_news_card.dart';
+
+void main() {
+  group('headline sits tight on the story', () {
+    test('line height is applied to the first and last lines too', () {
+      const b = SpotlightNewsCard.tightLeading;
+      expect(b.applyHeightToFirstAscent, isTrue,
+          reason: "otherwise Mandali's tall ascent opens a gap above the "
+              'first line of the story');
+      expect(b.applyHeightToLastDescent, isTrue,
+          reason: "otherwise Ramabhadra's descent opens a gap under the "
+              'headline');
+      expect(b.leadingDistribution, TextLeadingDistribution.even);
+    });
+
+    test('a small fixed gap between headline and story', () {
+      expect(SpotlightNewsCard.headlineGap, lessThanOrEqualTo(6));
+    });
+
+    final src = File('lib/widgets/spotlight/spotlight_news_card.dart')
+        .readAsStringSync();
+
+    test('headline, story and the fit measurement all use it', () {
+      // Headline, story text, the TextPainter that measures the story (so
+      // Read more still lands on its own line) and the one that fits its
+      // size to the room.
+      expect(
+          RegExp(r'textHeightBehavior:\s*SpotlightNewsCard\.tightLeading')
+              .allMatches(src)
+              .length,
+          4);
+      expect(src, isNot(contains('applyHeightToFirstAscent: false')));
+    });
+
+    test('measured with the same text scale it is painted at', () {
+      // Card text is fixed-size on every phone: the measuring TextPainter
+      // and the painted headline and story all use no scaling.
+      expect(
+          RegExp(r'textScaler:\s*TextScaler\.noScaling').allMatches(src).length,
+          greaterThanOrEqualTo(3));
+      expect(
+          RegExp(r'textScaler:\s*MediaQuery\.textScalerOf\(context\)')
+              .hasMatch(src),
+          isFalse);
+    });
+  });
+}

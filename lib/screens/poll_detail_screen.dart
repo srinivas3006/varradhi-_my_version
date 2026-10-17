@@ -19,7 +19,7 @@ class PollDetailScreen extends StatelessWidget {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: PollCard(poll: poll),
+          child: PollCard(poll: poll, trackExposure: false),
         ),
       ),
     );

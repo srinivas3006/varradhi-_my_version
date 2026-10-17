@@ -85,7 +85,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
               'మీకు ఆసక్తి ఉన్న అంశాలను ఎంచుకోండి. మేము మీ ఫీడ్‌ను అనుకూలీకరిస్తాము.',
               style: TextStyle(
                 fontSize: 15,
-                color: isDark ? AppColors.textMuted : Theme.of(context).textTheme.bodyMedium?.color,
+                color: isDark
+                    ? AppColors.textMuted
+                    : Theme.of(context).textTheme.bodyMedium?.color,
               ),
             ),
           ),
@@ -101,19 +103,23 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                     label: Text(categoryLabel(cat)),
                     selected: selected,
                     onSelected: (_) => _toggleCategory(cat),
-                    selectedColor: AppColors.primary.withAlpha(50), // Replaced withOpacity
+                    selectedColor:
+                        AppColors.primary.withAlpha(50), // Replaced withOpacity
                     checkmarkColor: AppColors.primary,
                     labelStyle: TextStyle(
                       color: selected
                           ? AppColors.primary
                           : (isDark ? AppColors.textLight : AppColors.textDark),
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal,
                     ),
-                    backgroundColor: isDark ? AppColors.chipBgDark : AppColors.chipBg,
+                    backgroundColor:
+                        isDark ? AppColors.chipBgDark : AppColors.chipBg,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                       side: BorderSide(
-                        color: selected ? AppColors.primary : Colors.transparent,
+                        color:
+                            selected ? AppColors.primary : Colors.transparent,
                       ),
                     ),
                   );
@@ -140,11 +146,13 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
                         )
                       : const Text(
                           'సేవ్ చేయండి',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                 ),
               ),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'news_detail_screen.dart';
@@ -72,10 +73,14 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     ++_queryGeneration;
     if (query.trim().length < 2) {
-      setState(() { _results = []; _isLoading = false; });
+      setState(() {
+        _results = [];
+        _isLoading = false;
+      });
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 300), () => _runSearch(query));
+    _debounce =
+        Timer(const Duration(milliseconds: 300), () => _runSearch(query));
   }
 
   void _runSearch(String query) async {
@@ -83,13 +88,17 @@ class _SearchScreenState extends State<SearchScreen> {
     final generation = ++_queryGeneration;
     final trimmed = query.trim();
     if (trimmed.length < 2) {
-      setState(() { _results = []; _isLoading = false; });
+      setState(() {
+        _results = [];
+        _isLoading = false;
+      });
       return;
     }
     setState(() => _isLoading = true);
 
     final futureResponse = ApiService.instance.search(
-      trimmed, lang: AppState.instance.contentLanguage,
+      trimmed,
+      lang: AppState.instance.contentLanguage,
     );
     final futureAds = AdManager.instance.getAdsForZone('search');
 
@@ -135,7 +144,8 @@ class _SearchScreenState extends State<SearchScreen> {
       backgroundColor: isDark ? AppColors.backgroundDark : AppColors.background,
       appBar: AppBar(
         titleSpacing: 0,
-        backgroundColor: isDark ? AppColors.backgroundDark : AppColors.background,
+        backgroundColor:
+            isDark ? AppColors.backgroundDark : AppColors.background,
         elevation: 0,
         scrolledUnderElevation: 0,
         iconTheme: IconThemeData(
@@ -168,7 +178,8 @@ class _SearchScreenState extends State<SearchScreen> {
             decoration: InputDecoration(
               hintText: tr('search_hint'),
               hintStyle: TextStyle(
-                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                color:
+                    isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
                 fontSize: 13,
               ),
               prefixIcon: Icon(
@@ -180,7 +191,9 @@ class _SearchScreenState extends State<SearchScreen> {
                   ? IconButton(
                       icon: Icon(
                         Icons.clear_rounded,
-                        color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                        color: isDark
+                            ? AppColors.iconMutedDark
+                            : AppColors.textMuted,
                         size: 18,
                       ),
                       onPressed: () {
@@ -214,10 +227,10 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       body: _controller.text.isEmpty
           ? _buildSuggestions(isDark, telugu)
-          : _isLoading 
+          : _isLoading
               ? const Center(
                   child: CircularProgressIndicator(color: AppColors.primary),
-                ) 
+                )
               : _buildResults(isDark),
     );
   }
@@ -274,7 +287,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   icon: Icon(
                     Icons.close_rounded,
                     size: 18,
-                    color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                    color:
+                        isDark ? AppColors.iconMutedDark : AppColors.textMuted,
                   ),
                   onPressed: () {
                     setState(() => _recent.remove(q));
@@ -343,8 +357,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildResults(bool isDark) {
     if (_results.isEmpty) {
       final telugu = AppState.instance.language == 'Telugu';
-      final muted =
-          isDark ? AppColors.textSecondaryDark : AppColors.textMuted;
+      final muted = isDark ? AppColors.textSecondaryDark : AppColors.textMuted;
       return Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -367,9 +380,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                telugu
-                    ? 'మరో పదంతో ప్రయత్నించండి'
-                    : 'Try another keyword',
+                telugu ? 'మరో పదంతో ప్రయత్నించండి' : 'Try another keyword',
                 style: TextStyle(color: muted, fontSize: 13),
               ),
               if (_suggestions.isNotEmpty) ...[
@@ -396,8 +407,8 @@ class _SearchScreenState extends State<SearchScreen> {
                         label: Text(s),
                         onPressed: () {
                           _controller.text = s;
-                          _controller.selection = TextSelection.collapsed(
-                              offset: s.length);
+                          _controller.selection =
+                              TextSelection.collapsed(offset: s.length);
                           _runSearch(s);
                         },
                       ),
@@ -425,7 +436,7 @@ class _SearchScreenState extends State<SearchScreen> {
             exposureKey: item.stableKey,
           );
         }
-        
+
         final article = item.content!;
         return ListTile(
           contentPadding: EdgeInsets.zero,
@@ -442,12 +453,16 @@ class _SearchScreenState extends State<SearchScreen> {
                     placeholder: (_, __) => Container(
                       width: 60,
                       height: 60,
-                      color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
+                      color: isDark
+                          ? AppColors.surfaceElevatedDark
+                          : Colors.black12,
                     ),
                     errorWidget: (_, __, ___) => Container(
                       width: 60,
                       height: 60,
-                      color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
+                      color: isDark
+                          ? AppColors.surfaceElevatedDark
+                          : Colors.black12,
                       child: Icon(
                         Icons.broken_image_rounded,
                         size: 20,
@@ -458,7 +473,8 @@ class _SearchScreenState extends State<SearchScreen> {
                 : Container(
                     width: 60,
                     height: 60,
-                    color: isDark ? AppColors.surfaceElevatedDark : Colors.black12,
+                    color:
+                        isDark ? AppColors.surfaceElevatedDark : Colors.black12,
                     child: Icon(
                       Icons.newspaper_rounded,
                       size: 20,
@@ -470,9 +486,8 @@ class _SearchScreenState extends State<SearchScreen> {
             article.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
+            style: ArticleTypography.heading(
               fontSize: 14.5,
-              fontWeight: FontWeight.w600,
               height: 1.3,
               color: isDark ? AppColors.textLight : AppColors.textDark,
             ),
@@ -483,7 +498,8 @@ class _SearchScreenState extends State<SearchScreen> {
               '${article.source} · ${article.timeAgo}',
               style: TextStyle(
                 fontSize: 11.5,
-                color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                color:
+                    isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
               ),
             ),
           ),

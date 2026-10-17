@@ -1,8 +1,9 @@
+import '../services/content_analytics.dart';
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../core/navigation/auth_guard.dart';
+import '../core/navigation/app_navigator.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
@@ -31,6 +32,7 @@ import '../services/tts_service.dart';
 import 'spotlight_controller.dart';
 import 'spotlight_state.dart';
 import 'spotlight_media_coordinator.dart';
+import '../widgets/ads/paced_ads_overlay.dart';
 
 class SpotlightScreenView extends StatefulWidget {
   final String? initialStoryId;
@@ -64,6 +66,9 @@ class SpotlightScreenView extends StatefulWidget {
 
 class _SpotlightScreenViewState extends State<SpotlightScreenView>
     with WidgetsBindingObserver {
+  /// This Spotlight session's impressions: each story once (analytics).
+  final ImpressionLog _impressions = ImpressionLog();
+
   late final SpotlightController _controller;
   // A real PageController: the feed rides Flutter's own scroll physics
   // (momentum, fling, settle) instead of the hand-rolled vertical drag
@@ -264,8 +269,42 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     }
   }
 
-  void _shareArticle(NewsArticle article) {
-    ShareService.shareArticle(article);
+  /// Instant feedback: the share image takes a moment to make, so a
+  /// "preparing" note shows at once and goes when the share sheet opens.
+  Future<void> _shareArticle(NewsArticle article) async {
+    HapticFeedback.selectionClick();
+    // The card prepares the share image while the story is on screen, so
+    // usually it is ready and the share sheet opens at once, no note.
+    if (ShareService.isShareReady(article)) {
+      await ShareService.shareArticle(article);
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final preparing = messenger?.showSnackBar(
+      const SnackBar(
+        key: Key('share_preparing'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 20),
+        content: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white),
+            ),
+            SizedBox(width: 14),
+            Expanded(child: Text('షేర్ కోసం సిద్ధం చేస్తోంది…')),
+          ],
+        ),
+      ),
+    );
+    void hide() => preparing?.close();
+    try {
+      await ShareService.shareArticle(article, onReady: hide);
+    } finally {
+      hide();
+    }
   }
 
   void _openArticle(NewsArticle article) {
@@ -315,7 +354,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
           articles: trending,
           onOpen: _openArticle,
         ),
-        SizedBox(height: MediaQuery.paddingOf(context).bottom + 76),
+        SizedBox(
+            height:
+                MediaQuery.paddingOf(context).bottom + _bottomBarHeight + 8),
       ],
     );
   }
@@ -328,14 +369,15 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     final state = _controller.state;
     return EdgeInsets.fromLTRB(
       16,
-      padding.top + (state.isLocalNews ? 124 : 76),
+      padding.top +
+          (state.isLocalNews ? _topBarHeight + 46 : _topBarHeight + 8),
       16,
       // When a trending strip sits below, it already owns the bottom of the
       // page. Reserving the chrome height here too double-counted it and
       // squeezed the card enough to give its FitOrScroll real scroll extent
       // — and a vertical scrollable inside a vertical pager wins the drag,
       // which is exactly how a page ends up refusing to advance.
-      reserveBottomChrome ? padding.bottom + 88 : 8,
+      reserveBottomChrome ? padding.bottom + _bottomBarHeight + 12 : 8,
     );
   }
 
@@ -653,23 +695,38 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     );
   }
 
+  /// Height of the top bar below the status bar: one 48pt row (Android's
+  /// minimum touch target) plus 4pt
+  /// above and below. Kept slim so it covers as little of the photo as it
+  /// can while every control stays easy to hit.
+  static const double _topBarHeight = 56;
+
+  /// Height of the bottom bar above the system gesture area.
+  static const double _bottomBarHeight = 52;
+
   Widget _buildTopOverlay(SpotlightState state) {
     return ClipRRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: Container(
-          color: Colors.black.withValues(alpha: 0.50),
+          // Lighter than before (0.50) so the photo reads through; the blur
+          // keeps the white controls legible on any image.
+          color: Colors.black.withValues(alpha: 0.32),
           padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 6,
-            bottom: 12,
-            left: 16,
-            right: 16,
+            top: MediaQuery.of(context).padding.top + 4,
+            bottom: 4,
+            left: 8,
+            right: 10,
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               // 1. Profile Icon on Left -> Opens Profile screen
               IconButton(
+                key: const Key('spotlight_profile_btn'),
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 48, height: 48),
                 onPressed: () {
                   HapticFeedback.lightImpact();
                   _controller.resetOverlayTimer();
@@ -693,17 +750,18 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   );
                 },
                 icon: const Icon(Icons.person_outline_rounded,
-                    color: Colors.white, size: 28),
+                    color: Colors.white, size: 24),
                 tooltip: 'ప్రొఫైల్',
               ),
 
               // 2. Animated Sliding Toggle Pill: [ ప్రధాన వార్తలు | స్థానికం ]
               Container(
-                width: 200,
-                height: 42,
+                key: const Key('spotlight_mode_toggle'),
+                width: 192,
+                height: 36,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(21),
+                  borderRadius: BorderRadius.circular(18),
                   border:
                       Border.all(color: Colors.white.withValues(alpha: 0.18)),
                 ),
@@ -721,7 +779,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                           margin: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(18),
+                            borderRadius: BorderRadius.circular(15),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.25),
@@ -799,42 +857,52 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 ),
               ),
 
-              // 3. Create Post Action Button (+) in Red Circle
-              Container(
-                width: 44,
-                height: 44,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFF3B30),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0x66FF3B30),
-                      blurRadius: 8,
-                      offset: Offset(0, 2),
+              // 3. Create Post Action Button (+) in Red Circle — a 36pt disc
+              // inside a 48pt touch target.
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: Container(
+                    key: const Key('spotlight_post_btn'),
+                    width: 36,
+                    height: 36,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFF3B30),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x40FF3B30),
+                          blurRadius: 6,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  tooltip: 'వార్తను పోస్ట్ చేయండి',
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    _controller.resetOverlayTimer();
-                    if (widget.embedded && widget.onOpenPost != null) {
-                      widget.onOpenPost!();
-                      return;
-                    }
-                    requireAuth(
-                      context,
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const CreatePostScreen()),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.add_rounded,
-                      color: Colors.white, size: 28),
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      // The whole 48pt square is the target, not just the disc.
+                      constraints:
+                          const BoxConstraints.tightFor(width: 48, height: 48),
+                      tooltip: 'వార్తను పోస్ట్ చేయండి',
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        _controller.resetOverlayTimer();
+                        if (widget.embedded && widget.onOpenPost != null) {
+                          widget.onOpenPost!();
+                          return;
+                        }
+                        // Opens for guests too: the Post screen shows its own
+                        // "log in to post news" page. pushSafe drops a double tap.
+                        AppNavigator.pushSafe(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const CreatePostScreen()),
+                        );
+                      },
+                      icon: const Icon(Icons.add_rounded,
+                          color: Colors.white, size: 24),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -896,14 +964,17 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
         child: Container(
+          key: const Key('spotlight_bottom_bar'),
+          // One 48pt row with 2pt above and below, then the system gesture
+          // area (or 4pt on phones without one).
           padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 8,
-            bottom: bottomPadding > 0 ? bottomPadding : 12,
+            left: 10,
+            right: 10,
+            top: 2,
+            bottom: (bottomPadding > 0 ? bottomPadding : 4) + 2,
           ),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.50),
+            color: Colors.black.withValues(alpha: 0.32),
             border: Border(
               top: BorderSide(
                 color: Colors.white.withValues(alpha: 0.15),
@@ -921,22 +992,29 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               if (!widget.embedded)
                 IconButton(
                   key: const Key('spotlight_home_btn'),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 48, height: 48),
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     _closeSpotlight();
                   },
                   icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white, size: 22),
+                      color: Colors.white, size: 20),
                   tooltip: 'వెనుకకు',
                 ),
               IconButton(
+                key: const Key('spotlight_refresh_btn'),
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 48, height: 48),
                 onPressed: () {
                   HapticFeedback.mediumImpact();
                   _controller.resetOverlayTimer();
                   _controller.refreshFeed();
                 },
                 icon: const Icon(Icons.refresh_rounded,
-                    color: Colors.white, size: 26),
+                    color: Colors.white, size: 22),
                 tooltip: 'తాజాకరించండి',
               ),
             ],
@@ -949,123 +1027,170 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   @override
   Widget build(BuildContext context) {
     final content = AnimatedBuilder(
-        animation: _controller,
-        builder: (context, _) {
-          final state = _controller.state;
+      animation: _controller,
+      builder: (context, _) {
+        final state = _controller.state;
+        final statusBarHeight = MediaQuery.paddingOf(context).top;
 
-          return Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            body: Stack(
-              children: [
-                // 1. Swiping Fullscreen Feed
-                GestureDetector(
-                  onTap: _controller.toggleOverlay,
-                  behavior: HitTestBehavior.opaque,
-                  child: state.isLoading && state.feed.isEmpty
-                      ? const SpotlightShimmerCard()
-                      : state.feed.isEmpty
-                          ? state.isLocalNews &&
-                                  !AppState.instance.hasValidLocation &&
-                                  state.errorMessage == null
-                              ? _buildLocationFallback()
-                              : _buildEmptyFeedState(state.isLocalNews)
-                          : ScrollConfiguration(
-                              // Android 12+ stretch overscroll swallows the
-                              // overscroll notification RefreshIndicator
-                              // needs, so the pull did nothing on device
-                              // while passing in tests. Drop the indicator
-                              // here; the refresh spinner is the feedback.
-                              behavior: const MaterialScrollBehavior()
-                                  .copyWith(overscroll: false),
-                              child: RefreshIndicator(
-                                // refreshFeed() is the same call the
-                                // bottom-bar button already makes.
-                                onRefresh: _controller.refreshFeed,
-                                edgeOffset: MediaQuery.paddingOf(context).top,
-                                child: FlipPageView(
-                                  key: ValueKey(
-                                      'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
-                                  controller: _pageController,
-                                  itemCount: state.feed.length,
-                                  onPageChanged: _handlePageChanged,
-                                  itemBuilder: _buildItem,
+        return Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Stack(
+            children: [
+              // 0. Status bar band — one fixed black strip under the clock
+              // and icons. It lives here, not in each card: a band baked
+              // into a card showed as a black strip above the image of
+              // every card sliding in during a swipe.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: statusBarHeight,
+                child: const AnnotatedRegion<SystemUiOverlayStyle>(
+                  // Light icons on the black band, in both themes.
+                  value: SystemUiOverlayStyle(
+                    statusBarColor: Colors.black,
+                    statusBarIconBrightness: Brightness.light,
+                    statusBarBrightness: Brightness.dark,
+                  ),
+                  child: ColoredBox(color: Colors.black),
+                ),
+              ),
+
+              // 1. Swiping Feed — starts exactly below the status bar. Top
+              // padding is removed for the pages so they lay out from their
+              // own top edge; anything that offset itself by padding.top
+              // lands in the same place on screen as before.
+              Positioned.fill(
+                top: statusBarHeight,
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeTop: true,
+                  child: GestureDetector(
+                    onTap: _controller.toggleOverlay,
+                    behavior: HitTestBehavior.opaque,
+                    child: state.isLoading && state.feed.isEmpty
+                        ? const SpotlightShimmerCard()
+                        : state.feed.isEmpty
+                            ? state.isLocalNews &&
+                                    !AppState.instance.hasValidLocation &&
+                                    state.errorMessage == null
+                                ? _buildLocationFallback()
+                                : _buildEmptyFeedState(state.isLocalNews)
+                            : ScrollConfiguration(
+                                // Android 12+ stretch overscroll swallows the
+                                // overscroll notification RefreshIndicator
+                                // needs, so the pull did nothing on device
+                                // while passing in tests. Drop the indicator
+                                // here; the refresh spinner is the feedback.
+                                behavior: const MaterialScrollBehavior()
+                                    .copyWith(overscroll: false),
+                                child: RefreshIndicator(
+                                  // refreshFeed() is the same call the
+                                  // bottom-bar button already makes.
+                                  onRefresh: _controller.refreshFeed,
+                                  child: FlipPageView(
+                                    key: ValueKey(
+                                        'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                                    controller: _pageController,
+                                    itemCount: state.feed.length,
+                                    onPageChanged: _handlePageChanged,
+                                    itemBuilder: _buildItem,
+                                  ),
                                 ),
                               ),
-                            ),
-                ),
-
-                // 2-4. Chrome. Listens to overlayVisible rather than the
-                // controller, so showing or hiding it repaints only these
-                // bars and never rebuilds the feed underneath.
-                ValueListenableBuilder<bool>(
-                  valueListenable: _controller.overlayVisible,
-                  builder: (context, showOverlays, _) => Stack(
-                    children: [
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeOutCubic,
-                        top: showOverlays ? 0 : -140,
-                        left: 0,
-                        right: 0,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          opacity: showOverlays ? 1.0 : 0.0,
-                          child: IgnorePointer(
-                            ignoring: !showOverlays,
-                            child: _keepChromeAlive(_buildTopOverlay(state)),
-                          ),
-                        ),
-                      ),
-
-                      // 3. Local Location Strip (Only visible when Local mode is active and overlays shown)
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeOutCubic,
-                        top: (showOverlays && state.isLocalNews)
-                            ? MediaQuery.of(context).padding.top + 70
-                            : -100,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 220),
-                            curve: Curves.easeOutCubic,
-                            opacity:
-                                (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
-                            child: IgnorePointer(
-                              ignoring: !(showOverlays && state.isLocalNews),
-                              child: _keepChromeAlive(_buildLocationStrip()),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 4. Bottom Docked Control Bar Overlay (< Back on left, Refresh on right)
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeOutCubic,
-                        bottom: showOverlays ? 0 : -140,
-                        left: 0,
-                        right: 0,
-                        child: AnimatedOpacity(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          opacity: showOverlays ? 1.0 : 0.0,
-                          child: IgnorePointer(
-                            ignoring: !showOverlays,
-                            child: _keepChromeAlive(_buildBottomOverlay()),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
-              ],
-            ),
-          );
-        },
-      );
+              ),
+
+              // Small floating 3D ad that comes and goes with active use
+              // (AdPacer). Above the story's action row, under the chrome.
+              // Spotlight has full-page ads already, so no bottom banner.
+              Positioned.fill(
+                child: PacedAdsOverlay(
+                  bottomInset: MediaQuery.paddingOf(context).bottom +
+                      _bottomBarHeight +
+                      96,
+                  showSticky: false,
+                  // The 3D ad is the app-wide corner ad (main.dart).
+                  showFloating: false,
+                  floatingSize: 104,
+                ),
+              ),
+
+              // 2-4. Chrome. Listens to overlayVisible rather than the
+              // controller, so showing or hiding it repaints only these
+              // bars and never rebuilds the feed underneath.
+              ValueListenableBuilder<bool>(
+                valueListenable: _controller.overlayVisible,
+                builder: (context, showOverlays, _) => Stack(
+                  children: [
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      top: showOverlays ? 0 : -140,
+                      left: 0,
+                      right: 0,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        opacity: showOverlays ? 1.0 : 0.0,
+                        child: IgnorePointer(
+                          ignoring: !showOverlays,
+                          child: _keepChromeAlive(_buildTopOverlay(state)),
+                        ),
+                      ),
+                    ),
+
+                    // 3. Local Location Strip (Only visible when Local mode is active and overlays shown)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      top: (showOverlays && state.isLocalNews)
+                          ? MediaQuery.of(context).padding.top +
+                              _topBarHeight +
+                              4
+                          : -100,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          opacity:
+                              (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
+                          child: IgnorePointer(
+                            ignoring: !(showOverlays && state.isLocalNews),
+                            child: _keepChromeAlive(_buildLocationStrip()),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // 4. Bottom Docked Control Bar Overlay (< Back on left, Refresh on right)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      bottom: showOverlays ? 0 : -140,
+                      left: 0,
+                      right: 0,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        opacity: showOverlays ? 1.0 : 0.0,
+                        child: IgnorePointer(
+                          ignoring: !showOverlays,
+                          child: _keepChromeAlive(_buildBottomOverlay()),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
 
     // Embedded as Home's own tab content, back navigation belongs to
     // HomeScreen's PopScope — a second one here would fire alongside it on
@@ -1075,15 +1200,17 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     }
 
     final canPop = Navigator.of(context).canPop();
-    return PopScope(
-      canPop: canPop,
-      onPopInvokedWithResult: (didPop, _) {
-        AppTtsService.instance.stop();
-        if (!didPop) {
-          _closeSpotlight();
-        }
-      },
-      child: content,
-    );
+    return ImpressionScope(
+        log: _impressions,
+        child: PopScope(
+          canPop: canPop,
+          onPopInvokedWithResult: (didPop, _) {
+            AppTtsService.instance.stop();
+            if (!didPop) {
+              _closeSpotlight();
+            }
+          },
+          child: content,
+        ));
   }
 }

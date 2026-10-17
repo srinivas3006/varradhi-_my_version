@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:ui' as dart_ui;
 import 'package:flutter/material.dart';
 import '../core/navigation/app_navigator.dart';
-import '../core/network/api_response.dart';
 import '../models/news_article.dart';
+import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import '../localization/app_translations.dart';
 import '../state/app_state.dart';
 import 'news_detail_screen.dart';
@@ -23,36 +24,19 @@ import '../widgets/feed/daily_greeting_widget.dart';
 import '../models/category.dart';
 import '../models/poll.dart';
 import '../widgets/poll_card.dart';
-import '../models/live_news.dart';
-import '../core/errors/app_exception.dart';
-import '../repositories/feed_repository.dart';
-import '../repositories/ugc_repository.dart';
+import '../services/poll_exposure.dart';
 import '../repositories/home_feed_repository.dart';
+import '../core/ads/home_ads.dart';
+import '../core/ads/ad_insertion.dart' show AdFrequencyPolicy;
 import '../services/analytics_queue.dart';
-import '../core/state/feed_state.dart';
-import 'location_selection_screen.dart';
+import '../services/content_analytics.dart';
+import 'profile_tab.dart';
 import 'poster_detail_screen.dart';
 import '../models/poster_images.dart';
 import '../models/video_item.dart';
 import '../repositories/video_repository.dart';
 import 'video_player_screen.dart';
 import 'notifications_screen.dart';
-
-enum HeroCardKind { liveStream, breakingArticle }
-
-class HeroCardItem {
-  final HeroCardKind kind;
-  final LiveNews? liveStream;
-  final NewsArticle? article;
-
-  const HeroCardItem.live(this.liveStream)
-      : kind = HeroCardKind.liveStream,
-        article = null;
-
-  const HeroCardItem.article(this.article)
-      : kind = HeroCardKind.breakingArticle,
-        liveStream = null;
-}
 
 class NewsFeedTab extends StatefulWidget {
   const NewsFeedTab({super.key});
@@ -62,49 +46,75 @@ class NewsFeedTab extends StatefulWidget {
 }
 
 class _NewsFeedTabState extends State<NewsFeedTab> {
-  late List<NewsArticle> _articles;
-  List<NewsArticle> _featuredArticles = [];
-  List<NewsArticle> _recommendedArticles = [];
+  // Home loads news from exactly two endpoints:
+  //   GET /api/v1/feed/home/  — For You, Near You, and the hero's source
+  //   GET /api/v1/feed/       — the Latest list, paged by meta.next
+  // Everything else on the screen is a widget with its own API: categories,
+  // ads (one request, shared through HomeAds), polls, posters, videos and
+  // the daily quote. A widget that fails hides itself; Home stays up.
+
+  /// From `/feed/home/`: `personalized` → For You, `local` → Near You.
+  List<NewsArticle> _forYou = [];
+  List<NewsArticle> _nearYou = [];
+  bool _bootstrapLite = false;
+
+  /// True once a Home response — cached or fresh — has been applied.
+  bool _homeLoaded = false;
+
+  /// The last `/feed/home/` refresh failed; what is shown is the cached copy.
+  bool _homeFailed = false;
+  Timer? _homeRetryTimer;
+
+  /// From `/feed/`: the Latest list and the exact `meta.next` of its last
+  /// page (null = no more).
+  List<NewsArticle> _latest = [];
+  String? _latestNext;
+  bool _latestHasMore = true;
+  bool _latestLoading = false;
+  bool _latestLoaded = false;
+  bool _latestFailed = false;
+
   List<Category> _categories = [];
-  List<LiveNews> _liveNewsList = [];
   String? _selectedCategory;
+
+  /// This Home screen's impressions: each story once (analytics).
+  final ImpressionLog _impressions = ImpressionLog();
   Poll? _poll;
   List<dynamic> _posters = [];
 
   /// Regular videos for the Home carousel, from /articles/video-feed/.
   /// Thumbnails only — nothing here creates a player or autoplays.
-  /// Shorts live in the Video tab, which reads /shorts-feed/.
+  /// Shorts live in the Reels tab, which reads /shorts-feed/.
   List<VideoItem> _homeVideos = [];
   List<AdBanner> _feedAds = [];
 
   /// The ticker strip's own pool. It holds a fixed place above the feed and
   /// rotates through these, so they are kept out of the in-feed ad pool.
-  List<AdBanner> get _breakingStripAds =>
-      _feedAds.where((ad) => ad.isBreakingStrip).toList();
+  List<AdBanner> get _breakingStripAds => HomeAds.breakingStrip(_feedAds);
   Map<String, dynamic>? _dailyQuote;
-  bool _isLoadingMore = false;
-  String? _nextCursor;
-  bool _hasMore = true;
-  FeedStatus _feedStatus = FeedStatus.initial;
-  String? _feedError;
   String? get _feedLang => AppState.instance.contentLanguage;
-  /// From `GET /api/v1/feed/home/` — the first paint. `personalized` feeds
-  /// the For You rail, `local` the Near You section.
-  List<NewsArticle> _forYou = [];
-  List<NewsArticle> _nearYou = [];
-  bool _bootstrapLite = false;
-  Future<void>? _bootstrapFuture;
-  List<NewsArticle> _villageSection = [];
-  List<NewsArticle> _mandalSection = [];
-  List<NewsArticle> _districtUgc = [];
-  List<NewsArticle> _stateUgc = [];
-  bool _locationSectionsLoaded = false;
   bool _isProgressivelyHydrated = false;
-  int _sectionGeneration = 0;
-  int _feedGeneration = 0;
-  String get _feedLocationKey => [
+
+  /// Bumped when the reader, language or location changes. A response is
+  /// applied only if it was requested under the current generation, so a
+  /// slow answer for the old place can never land on the new one.
+  int _generation = 0;
+
+  /// Bumped whenever the Latest list restarts (refresh, category), so an
+  /// older page still in flight is dropped.
+  int _latestGeneration = 0;
+
+  /// Who is reading: the personalized Home belongs to one account.
+  String get _viewer {
+    final app = AppState.instance;
+    if (!app.isLoggedIn) return 'guest';
+    final id = app.userId;
+    return (id != null && id.isNotEmpty) ? 'user:$id' : 'user';
+  }
+
+  String get _homeIdentity => [
+        _viewer,
         AppState.instance.contentLanguage,
-        AppState.instance.city,
         AppState.instance.stateName,
         AppState.instance.district,
         AppState.instance.subdistrict,
@@ -114,120 +124,217 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   final PageController _breakingNewsController = PageController();
   int _currentBreakingIndex = 0;
 
-  late String _preferencesIdentity;
+  late String _identity;
 
-  void _onPreferencesChanged() {
-    final identity = _feedLocationKey;
-    if (identity == _preferencesIdentity) return;
-    _preferencesIdentity = identity;
-    ++_sectionGeneration;
-    _articles = [];
-    _recommendedArticles = [];
-    _featuredArticles = [];
-    _forYou = [];
-    _nearYou = [];
-    _villageSection = [];
-    _mandalSection = [];
-    _districtUgc = [];
-    _stateUgc = [];
-    _feedAds = [];
-    _posters = [];
-    _poll = null;
-    _liveNewsList = [];
-    _nextCursor = null;
-    _hasMore = true;
-    _feedStatus = FeedStatus.loading;
-    _refresh();
+  /// Same story in two lists is one story (see [homeStoryKey]).
+  static String _storyKey(NewsArticle a) => homeStoryKey(a);
+
+  void _onAppStateChanged() {
+    final identity = _homeIdentity;
+    if (identity == _identity) return;
+    // New reader, language or place: drop everything in flight, restart
+    // pagination and load Home for the new identity.
+    _identity = identity;
+    final generation = ++_generation;
+    ++_latestGeneration;
+    _homeRetryTimer?.cancel();
+    setState(() {
+      _forYou = [];
+      _nearYou = [];
+      _homeLoaded = false;
+      _homeFailed = false;
+      _latest = [];
+      _latestNext = null;
+      _latestHasMore = true;
+      _latestLoading = false;
+      _latestLoaded = false;
+      _latestFailed = false;
+      _currentBreakingIndex = 0;
+    });
+    _loadHome(generation);
+    _loadLatest(reset: true);
+    _loadCategories();
+    _loadWidgets(generation, forceRefresh: true);
   }
 
   @override
   void initState() {
     super.initState();
-    _preferencesIdentity = _feedLocationKey;
-    AppState.instance.addListener(_onPreferencesChanged);
-    _articles = [];
+    _identity = _homeIdentity;
+    AppState.instance.addListener(_onAppStateChanged);
     AnalyticsQueue.instance.start();
-    // 1. Critical first paint: one bootstrap call (For You + Near You, served
-    //    instantly from the device copy when there is one) and the first
-    //    page of the latest feed.
-    _bootstrapFuture = _loadHomeBootstrap();
-    _loadMore();
+
+    // First frame: the cached Home at once, then /feed/home/ and categories.
+    _loadHome(_generation);
     _loadCategories();
     unawaited(AnalyticsQueue.instance
         .track('feed_refresh', metadata: {'source': 'launch'}));
 
-    // 2. Progressive hydration: defer secondary ancillary metadata past initial frame
+    // After the first frame, in parallel: the Latest list and the widgets.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() => _isProgressivelyHydrated = true);
-      Future.microtask(() {
-        _loadLocationSections();
-        _loadFeedAds();
-        _loadFeatured();
-        _loadRecommendations();
-        _loadPoll();
-        _loadPosters();
-        _loadHomeVideos();
-        _loadLiveNews();
-        _loadDailyQuote();
-      });
+      _loadLatest(reset: true);
+      _loadWidgets(_generation);
     });
   }
 
   @override
   void dispose() {
-    AppState.instance.removeListener(_onPreferencesChanged);
+    AppState.instance.removeListener(_onAppStateChanged);
+    _homeRetryTimer?.cancel();
     _breakingNewsController.dispose();
     super.dispose();
   }
 
-  /// Home bootstrap: device copy first (instant, works offline), then the
-  /// network — in lite mode when the connection has been slow.
-  Future<void> _loadHomeBootstrap({bool forceRefresh = false}) async {
-    final identity = _feedLocationKey;
+  /// `/feed/home/`, stale-while-refresh: the cached copy for this reader and
+  /// place is shown first; the network answer replaces it only on success.
+  Future<void> _loadHome(int generation, {bool forceRefresh = false}) async {
     final app = AppState.instance;
     final repo = HomeFeedRepository.instance;
+    final viewer = _viewer;
 
-    if (_forYou.isEmpty && _nearYou.isEmpty) {
+    if (!_homeLoaded) {
       final cached = await repo.cached(
+        viewer: viewer,
         lang: _feedLang,
-        state: app.stateName,
-        district: app.district,
-        subdistrict: app.subdistrict,
-        village: app.village,
+        state: app.feedPlace.state,
+        district: app.feedPlace.district,
+        subdistrict: app.feedPlace.subdistrict,
+        village: app.feedPlace.village,
       );
-      if (cached != null && mounted && identity == _feedLocationKey) {
+      if (cached != null && mounted && generation == _generation) {
         setState(() {
           _forYou = cached.personalized;
           _nearYou = cached.local;
+          _bootstrapLite = cached.lite;
+          _homeLoaded = true;
         });
       }
     }
 
     final fresh = await repo.fetch(
+      viewer: viewer,
       lang: _feedLang,
-      state: app.stateName,
-      district: app.district,
-      subdistrict: app.subdistrict,
-      village: app.village,
+      state: app.feedPlace.state,
+      district: app.feedPlace.district,
+      subdistrict: app.feedPlace.subdistrict,
+      village: app.feedPlace.village,
       forceRefresh: forceRefresh,
     );
-    if (fresh == null || !mounted || identity != _feedLocationKey) return;
+    // A request for an old reader or place: ignore it.
+    if (!mounted || generation != _generation) return;
+
+    if (fresh == null) {
+      // Keep whatever is on screen (the cached copy).
+      setState(() {
+        _homeLoaded = true;
+        _homeFailed = true;
+      });
+      if (repo.lastFailureStatus == 429) {
+        // Throttled: try once more a little later, still keeping the cache.
+        _homeRetryTimer?.cancel();
+        _homeRetryTimer = Timer(const Duration(seconds: 30), () {
+          if (mounted && generation == _generation) {
+            _loadHome(generation, forceRefresh: true);
+          }
+        });
+      }
+      return;
+    }
+
     setState(() {
       _forYou = fresh.personalized;
       _nearYou = fresh.local;
       _bootstrapLite = fresh.lite;
+      _homeLoaded = true;
+      _homeFailed = false;
     });
 
     final bulk = fresh.analyticsBulkEndpoint;
-    if (bulk != null && bulk.isNotEmpty) AnalyticsQueue.instance.endpoint = bulk;
+    if (bulk != null && bulk.isNotEmpty) {
+      AnalyticsQueue.instance.endpoint = bulk;
+    }
     // The network just answered; a good moment to send what queued offline.
     unawaited(AnalyticsQueue.instance.flush());
   }
 
+  /// `/feed/`: [reset] loads the first page (refresh, category, new place);
+  /// otherwise the next page from `meta.next`, exactly as the server sent it.
+  Future<void> _loadLatest({bool reset = false}) async {
+    if (!reset && (_latestLoading || !_latestHasMore)) return;
+    final generation = reset ? ++_latestGeneration : _latestGeneration;
+    final next = reset ? null : _latestNext;
+    if (mounted) setState(() => _latestLoading = true);
+
+    try {
+      // Location is sent again: the backend's scope=main ranking now puts
+      // freshness first (today → yesterday → 3 days → older, newest-first
+      // inside each band) and uses location only within a band — checked
+      // live on /feed/. Before that fix, location pushed today's news off
+      // page 1, which is why it was left out.
+      final app = AppState.instance;
+      final page = await HomeFeedRepository.instance.fetchLatest(
+        next: next,
+        lang: _feedLang,
+        state: app.feedPlace.state,
+        district: app.feedPlace.district,
+        subdistrict: app.feedPlace.subdistrict,
+        village: app.feedPlace.village,
+        category: _selectedCategory,
+      );
+      if (!mounted || generation != _latestGeneration) return;
+      // Newest first within each page. /feed/ is not date-ordered even
+      // without location; a later page is sorted on its own and added
+      // below, so stories already on screen never jump.
+      final pageItems = [...page.items]
+        ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
+      setState(() {
+        if (reset) {
+          _latest = pageItems;
+        } else {
+          final seen = _latest.map(_storyKey).toSet();
+          _latest = [
+            ..._latest,
+            ...pageItems.where((a) => seen.add(_storyKey(a))),
+          ];
+        }
+        _latestNext = page.next;
+        _latestHasMore = page.next != null;
+        _latestLoaded = true;
+        _latestFailed = false;
+      });
+      if (_latest.isNotEmpty) {
+        NotificationService.instance.requestPermissionAfterArticlesLoaded();
+      }
+    } catch (e) {
+      debugPrint('[NewsFeedTab] /feed/ failed: $e');
+      // Keep the list already shown; a refresh or scroll retries.
+      if (mounted && generation == _latestGeneration) {
+        setState(() {
+          _latestLoaded = true;
+          _latestFailed = true;
+        });
+      }
+    } finally {
+      if (mounted && generation == _latestGeneration) {
+        setState(() => _latestLoading = false);
+      }
+    }
+  }
+
+  /// The non-news widgets, in parallel. Each hides itself on failure.
+  void _loadWidgets(int generation, {bool forceRefresh = false}) {
+    _loadFeedAds(generation, forceRefresh: forceRefresh);
+    _loadPoll(generation);
+    _loadPosters(generation);
+    _loadHomeVideos(generation);
+    _loadDailyQuote(generation, forceRefresh: forceRefresh);
+  }
+
   /// Opens a Home card. Articles open by slug (detail is
-  /// /api/v1/articles/{slug}/ — never the id). Live streams from
-  /// /feed/home/ have no slug and no article page, so they open Live.
+  /// /api/v1/articles/{slug}/ — never the id). Live streams have no article
+  /// page, so they open Live.
   void _openStory(NewsArticle article) {
     AppNavigator.pushSafe(
       context,
@@ -239,526 +346,180 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     );
   }
 
-  void _trackOpen(NewsArticle article, String section) {
-    unawaited(AnalyticsQueue.instance.track('article_open', metadata: {
-      'article_id': article.id,
-      'content_kind': article.contentKind,
-      'section': section,
-    }));
-  }
-
-  Future<void> _loadLiveNews() async {
-    final queryIdentity = _feedLocationKey;
-    try {
-      final list = await ApiService.instance.getLiveNews();
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _liveNewsList = list);
-      }
-    } catch (_) {
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _liveNewsList = []);
-      }
-    }
-  }
-
-  Future<ApiResponse<List<NewsArticle>>?> _settleSectionRequest(
-    Future<ApiResponse<List<NewsArticle>>> request,
-  ) async {
-    try {
-      return await request;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _loadLocationSections({bool clearExisting = false}) async {
-    final generation = ++_sectionGeneration;
-    final state = AppState.instance.stateName;
-    final district = AppState.instance.district;
-    final subdistrict = AppState.instance.subdistrict;
-    final village = AppState.instance.village;
-
-    if (clearExisting && mounted) {
-      setState(() {
-        _locationSectionsLoaded = false;
-        _villageSection = [];
-        _mandalSection = [];
-        _districtUgc = [];
-        _stateUgc = [];
-      });
-    }
-
-    final requests = <Future<ApiResponse<List<NewsArticle>>?>>[
-      if (village.isNotEmpty)
-        _settleSectionRequest(
-          ApiService.instance.getNewsFeed(
-            scope: 'local',
-            lang: _feedLang,
-            state: state,
-            district: district,
-            subdistrict: subdistrict.isEmpty ? null : subdistrict,
-            village: village,
-            pageSize: 10,
-            forceRefresh: true,
-          ),
-        )
-      else
-        Future.value(null),
-      if (village.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'local',
-            state: state,
-            district: district,
-            subdistrict: subdistrict.isEmpty ? null : subdistrict,
-            village: village,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (subdistrict.isNotEmpty)
-        _settleSectionRequest(
-          ApiService.instance.getNewsFeed(
-            scope: 'local',
-            lang: _feedLang,
-            state: state,
-            district: district,
-            subdistrict: subdistrict,
-            village: '',
-            pageSize: 10,
-            forceRefresh: true,
-          ),
-        )
-      else
-        Future.value(null),
-      if (subdistrict.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'local',
-            state: state,
-            district: district,
-            subdistrict: subdistrict,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (district.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'main',
-            state: state,
-            district: district,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-      if (state.isNotEmpty)
-        _settleSectionRequest(
-          UgcRepository.instance.getUgcFeed(
-            scope: 'main',
-            state: state,
-            pageSize: 10,
-          ),
-        )
-      else
-        Future.value(null),
-    ];
-
-    final results = await Future.wait(requests);
-    if (!mounted || generation != _sectionGeneration) return;
-
-    final villageAdmin = (results[0]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _coverageIs(article, 'local') &&
-          _matchesVillage(article, state, district, subdistrict, village),
-    );
-    final villageUgc = (results[1]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _matchesVillage(article, state, district, subdistrict, village),
-    );
-    final mergedVillage = _mergeArticles(villageAdmin, villageUgc);
-
-    final mandalAdmin = (results[2]?.data ?? <NewsArticle>[]).where(
-      (article) =>
-          _coverageIs(article, 'local') &&
-          _matchesMandal(article, state, district, subdistrict),
-    );
-    final mandalUgc = (results[3]?.data ?? <NewsArticle>[]).where(
-      (article) => _matchesMandal(article, state, district, subdistrict),
-    );
-    final villageIds = mergedVillage.map((article) => article.id).toSet();
-    final mergedMandal = _mergeArticles(mandalAdmin, mandalUgc)
-        .where((article) => !villageIds.contains(article.id))
-        .toList();
-
-    setState(() {
-      _locationSectionsLoaded = true;
-      _villageSection = mergedVillage;
-      _mandalSection = mergedMandal;
-      _districtUgc = (results[4]?.data ?? <NewsArticle>[])
-          .where(
-            (article) =>
-                _sameLocation(article.state, state) &&
-                _sameLocation(article.district, district),
-          )
-          .toList();
-      _stateUgc = (results[5]?.data ?? <NewsArticle>[])
-          .where(
-            (article) =>
-                _sameLocation(article.state, state) &&
-                !_hasLocation(article.district),
-          )
-          .toList();
-    });
-  }
+  /// `article_open` is sent by the detail screen once it is actually shown
+  /// (analytics handover), not on the tap — that counted taps on stories
+  /// that never opened, and put the id where the backend does not read it.
+  void _trackOpen(NewsArticle article, String section) {}
 
   bool _hasLocation(String? value) => value?.trim().isNotEmpty == true;
-
-  bool _sameLocation(String? actual, String expected) {
-    return _hasLocation(actual) &&
-        expected.trim().isNotEmpty &&
-        actual!.trim().toLowerCase() == expected.trim().toLowerCase();
-  }
 
   bool _coverageIs(NewsArticle article, String level) {
     return article.coverageLevel.trim().toLowerCase() == level;
   }
 
-  bool _matchesVillage(
-    NewsArticle article,
-    String state,
-    String district,
-    String subdistrict,
-    String village,
-  ) {
-    return village.isNotEmpty &&
-        _sameLocation(article.state, state) &&
-        _sameLocation(article.district, district) &&
-        (subdistrict.isEmpty ||
-            _sameLocation(article.subdistrict, subdistrict)) &&
-        _sameLocation(article.village, village);
-  }
-
-  bool _matchesMandal(
-    NewsArticle article,
-    String state,
-    String district,
-    String subdistrict,
-  ) {
-    return subdistrict.isNotEmpty &&
-        _sameLocation(article.state, state) &&
-        _sameLocation(article.district, district) &&
-        _sameLocation(article.subdistrict, subdistrict);
-  }
-
-  List<NewsArticle> _mergeArticles(
-    Iterable<NewsArticle> first,
-    Iterable<NewsArticle> second,
-  ) {
-    final byId = <String, NewsArticle>{};
-    for (final article in [...first, ...second]) {
-      byId.putIfAbsent(article.id, () => article);
-    }
-    final merged = byId.values.toList()
-      ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
-    return merged;
-  }
-
-  Future<void> _loadMore() async {
-    if (_isLoadingMore || !_hasMore) return;
-    final generation = _feedGeneration;
-    final locationKey = _feedLocationKey;
-    setState(() {
-      _isLoadingMore = true;
-      if (_articles.isEmpty) {
-        _feedStatus = FeedStatus.loading;
-        _feedError = null;
-      }
-    });
-
-    try {
-      if (_articles.isEmpty && _nextCursor == null) {
-        final state = await FeedRepository.instance.getInitialFeed(
-          scope: 'main',
-          category: _selectedCategory,
-          lang: _feedLang,
-          state: AppState.instance.stateName,
-          district: AppState.instance.district,
-          pageSize: 25,
-        );
-        if (!mounted ||
-            generation != _feedGeneration ||
-            locationKey != _feedLocationKey) {
-          return;
-        }
-        setState(() {
-          _articles = List.from(state.items);
-          _nextCursor = state.nextCursor;
-          _hasMore = state.hasMore;
-          _feedStatus = state.status;
-          _feedError = state.errorMessage;
-        });
-      } else {
-        final currentState = FeedState<NewsArticle>.success(
-          items: _articles,
-          nextCursor: _nextCursor,
-          hasMore: _hasMore,
-        );
-        final state = await FeedRepository.instance.loadNextPage(
-          currentState: currentState,
-          scope: 'main',
-          category: _selectedCategory,
-          lang: _feedLang,
-          state: AppState.instance.stateName,
-          district: AppState.instance.district,
-          pageSize: 25,
-        );
-        if (!mounted ||
-            generation != _feedGeneration ||
-            locationKey != _feedLocationKey) {
-          return;
-        }
-        setState(() {
-          _articles = List.from(state.items);
-          _nextCursor = state.nextCursor;
-          _hasMore = state.hasMore;
-          _feedStatus = state.status;
-          _feedError = state.errorMessage;
-        });
-      }
-
-      if (_articles.isNotEmpty) {
-        NotificationService.instance.requestPermissionAfterArticlesLoaded();
-      }
-    } catch (e) {
-      if (mounted && _articles.isEmpty) {
-        setState(() {
-          _feedStatus = FeedStatus.error;
-          _feedError = e is AppException
-              ? e.message
-              : 'కథనాలు లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.';
-        });
-      }
-    } finally {
-      if (mounted && generation == _feedGeneration) {
-        setState(() => _isLoadingMore = false);
-      }
-    }
-  }
-
-  Future<void> _loadFeatured() async {
-    final queryIdentity = _feedLocationKey;
-    try {
-      final breakingRes = await ApiService.instance.getNewsFeed(
-        scope: 'main',
-        breaking: true,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-        city: AppState.instance.city,
-        lang: _feedLang,
-        pageSize: 10,
-      );
-      if (mounted && (breakingRes.data?.isNotEmpty ?? false)) {
-        setState(() => _featuredArticles = breakingRes.data!);
-        return;
-      }
-      final featured = await ApiService.instance.getFeaturedArticles(
-        lang: _feedLang,
-      );
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _featuredArticles = featured);
-      }
-    } catch (e) {
-      // Silently fail, fall back to empty list
-    }
-  }
-
-  /// Fallback for the For You rail when the bootstrap has no personalized
-  /// section (older backend, or it failed).
-  Future<void> _loadRecommendations() async {
-    final queryIdentity = _feedLocationKey;
-    await _bootstrapFuture;
-    if (_forYou.isNotEmpty) return;
-    try {
-      final recs = await ApiService.instance.getRecommendations(limit: 15);
-      if (mounted && queryIdentity == _feedLocationKey) {
-        setState(() => _recommendedArticles = recs);
-      }
-    } catch (e) {
-      // Silently fail
-    }
-  }
-
   Future<void> _loadCategories() async {
     try {
-      final cats = await ApiService.instance.getCategories();
+      final lang = AppState.instance.contentLanguage ??
+          (AppState.instance.language == 'Telugu' ? 'te' : 'en');
+      final cats = await ApiService.instance.getCategories(lang: lang);
       if (mounted) setState(() => _categories = cats);
     } catch (_) {}
   }
 
-  Future<void> _loadPoll() async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadPoll(int generation) async {
     try {
       final polls = await ApiService.instance.getPolls();
-      if (mounted && queryIdentity == _feedLocationKey && polls.isNotEmpty) {
-        setState(() => _poll = polls.first);
+      // Only a poll the reader has not voted on or seen too often.
+      await PollExposure.instance.ready();
+      final eligible = PollExposure.instance.eligible(polls);
+      if (mounted && generation == _generation) {
+        setState(() => _poll = eligible.isNotEmpty ? eligible.first : null);
       }
     } catch (_) {}
   }
 
-  Future<void> _loadHomeVideos() async {
+  Future<void> _loadHomeVideos(int generation) async {
     try {
       final response = await VideoRepository.instance.getVideoFeed();
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       // isShort is the single classification both surfaces use, so a
       // mis-tagged Short cannot leak into the carousel.
-      final videos =
-          (response.data ?? []).where((v) => !v.isShort).toList();
-      if (videos.isNotEmpty) setState(() => _homeVideos = videos);
+      final videos = (response.data ?? []).where((v) => !v.isShort).toList();
+      setState(() => _homeVideos = videos);
     } catch (e) {
       debugPrint('[NewsFeedTab] home video load failed: $e');
     }
   }
 
-  Future<void> _loadPosters() async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadPosters(int generation) async {
     try {
       final posters = await ApiService.instance.getPosters();
-      if (mounted && queryIdentity == _feedLocationKey) {
+      if (mounted && generation == _generation) {
         setState(() => _posters = posters);
       }
     } catch (_) {}
   }
 
-  Future<void> _loadFeedAds({bool forceRefresh = false}) async {
-    final queryIdentity = _feedLocationKey;
+  /// The one `/ads/` request of this Home load. Inline slots, the breaking
+  /// strip and HomeScreen's bottom sticky banner all read this response.
+  Future<void> _loadFeedAds(int generation, {bool forceRefresh = false}) async {
     try {
       final response = await AdRepository.instance.getAds(
         placementZone: 'feed',
         scope: 'main',
         forceRefresh: forceRefresh,
       );
-      if (mounted &&
-          queryIdentity == _feedLocationKey &&
-          response.data != null) {
+      if (mounted && generation == _generation && response.data != null) {
         setState(() => _feedAds = response.data!);
+        HomeAds.current.value = response.data!;
       }
     } catch (_) {}
   }
 
-  Future<void> _loadDailyQuote({bool forceRefresh = false}) async {
-    final queryIdentity = _feedLocationKey;
+  Future<void> _loadDailyQuote(int generation,
+      {bool forceRefresh = false}) async {
     try {
       final q =
           await ApiService.instance.getRandomQuote(forceRefresh: forceRefresh);
-      if (mounted && queryIdentity == _feedLocationKey && q != null) {
+      if (mounted && generation == _generation && q != null) {
         setState(() => _dailyQuote = q);
       }
     } catch (_) {}
   }
 
+  /// Pull-to-refresh. Nothing is cleared: the old content stays until each
+  /// fresh response arrives and replaces it.
   Future<void> _refresh() async {
-    final generation = ++_feedGeneration;
-    if (mounted) setState(() => _isLoadingMore = false);
-    _bootstrapFuture = _loadHomeBootstrap(forceRefresh: true);
+    final generation = _generation;
     unawaited(AnalyticsQueue.instance.track('feed_refresh', metadata: {
       'source': 'pull',
       'mode': HomeFeedRepository.instance.prefersLite ? 'lite' : 'full',
     }));
-    try {
-      final currentState = FeedState<NewsArticle>.success(
-        items: _articles,
-        nextCursor: _nextCursor,
-        hasMore: _hasMore,
-      );
-      final state = await FeedRepository.instance.refreshFeed(
-        currentState: currentState,
-        scope: 'main',
-        category: _selectedCategory,
-        lang: _feedLang,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-      );
-
-      if (!mounted || generation != _feedGeneration) return;
-
-      setState(() {
-        _articles = List.from(state.items);
-        _nextCursor = state.nextCursor;
-        _hasMore = state.hasMore;
-        _feedStatus = state.status;
-        _feedError = state.errorMessage;
-        _dailyQuote = null;
-      });
-
-      if (state.hasRefreshError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(state.refreshErrorMessage!),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-
-      AdDeliveryService.instance.resetSession();
-      await _loadFeatured();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e is AppException
-                ? e.message
-                : 'రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    }
-
-    await _loadLocationSections();
-
-    // Ancillary sections load in background without blocking
-    _loadCategories();
-    _loadRecommendations();
-    _loadPoll();
-    _loadPosters();
-    _loadHomeVideos();
-    _loadLiveNews();
-    _loadFeedAds(forceRefresh: true);
-    _loadDailyQuote(forceRefresh: true);
-  }
-
-  Future<void> _changeLocation() async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const LocationSelectionScreen()),
-    );
-    if (changed != true || !mounted) return;
-
-    setState(() {
-      _feedGeneration++;
-      _articles = [];
-      _featuredArticles = [];
-      _recommendedArticles = [];
-      _forYou = [];
-      _nearYou = [];
-      _nextCursor = null;
-      _hasMore = true;
-      _isLoadingMore = false;
-      _feedStatus = FeedStatus.loading;
-    });
-    _bootstrapFuture = _loadHomeBootstrap();
+    AdDeliveryService.instance.resetSession();
+    _homeRetryTimer?.cancel();
+    _loadWidgets(generation, forceRefresh: true);
     await Future.wait([
-      _bootstrapFuture!,
-      _loadMore(),
-      _loadLocationSections(clearExisting: true),
-      _loadFeatured(),
-      _loadFeedAds(forceRefresh: true),
+      _loadHome(generation, forceRefresh: true),
+      _loadLatest(reset: true),
     ]);
+    if (mounted && generation == _generation && _homeFailed && _latestFailed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('రిఫ్రెష్ చేయడం విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
+
+  /// A category chip shows that category's news only (Home's hero, rails
+  /// and extras step aside); "All" brings them back.
+  void _selectCategory(String? slug) {
+    setState(() {
+      _selectedCategory = slug;
+      // Drop the previous list at once: it used to stay on screen until the
+      // new page arrived — and for good when that request failed — so the
+      // chip was on but the news was still "All" or the last category.
+      _latest = [];
+      _latestNext = null;
+      _latestHasMore = true;
+      _latestLoaded = false;
+      _latestFailed = false;
+    });
+    unawaited(AnalyticsQueue.instance
+        .track('category_select', metadata: {'category': slug ?? 'all'}));
+    _loadLatest(reset: true);
+  }
+
+  /// The picture for a story card. Many feed stories carry it only in
+  /// `media_items`, so the hero showed a grey card for them while the For
+  /// You rail (which already looked there) showed the photo.
+  static String _storyImage(NewsArticle a) {
+    if (a.imageUrl.isNotEmpty) return a.imageUrl;
+    for (final m in a.mediaItems) {
+      if (m.thumbnailUrl.isNotEmpty) return m.thumbnailUrl;
+      if (m.mediaType != 'video' && m.url.isNotEmpty) return m.url;
+    }
+    return '';
+  }
+
+  /// Behind a story that has no picture at all: deep brand red to near
+  /// black, so white headline text reads and the card still looks designed.
+  static const _noImageGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF9F1239), Color(0xFF3B0A16), Color(0xFF111111)],
+    stops: [0.0, 0.55, 1.0],
+  );
+
+  /// Card image area for a story with no picture: the brand gradient with
+  /// the app logo, faint — reads as intentional, not as a failed load.
+  Widget _noImageTile() {
+    return DecoratedBox(
+      key: const Key('no_image_tile'),
+      decoration: const BoxDecoration(gradient: _noImageGradient),
+      child: Center(
+        child: Opacity(
+          opacity: 0.85,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/images/logo.png',
+              width: 40,
+              height: 40,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Hero from the Home response only (see [homeHeroStories]).
+  List<NewsArticle> _heroStories() =>
+      homeHeroStories(_forYou, _nearYou, latest: _latest);
 
   Widget _buildCategorySelector() {
     if (_categories.isEmpty) return const SizedBox.shrink();
@@ -782,12 +543,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
           return GestureDetector(
             onTap: () {
               if (isSelected) return;
-              setState(() {
-                _selectedCategory = isAll ? null : cat?.slug;
-              });
-              unawaited(AnalyticsQueue.instance.track('category_select',
-                  metadata: {'category': _selectedCategory ?? 'all'}));
-              _refresh();
+              _selectCategory(isAll ? null : cat?.slug);
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
@@ -807,7 +563,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               ),
               child: Center(
                 child: Text(
-                  isAll ? tr('all') : categoryLabel(cat!.name),
+                  isAll ? tr('all') : cat!.localizedName,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
@@ -1028,44 +784,44 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   ),
                 ),
                 child: Container(
-                width: 130,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: borderColor),
-                  image: imageUrl.isNotEmpty
-                      ? DecorationImage(
-                          image: CachedNetworkImageProvider(imageUrl,
-                              maxWidth: 300),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child: Container(
+                  width: 130,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.7),
-                      ],
+                    border: Border.all(color: borderColor),
+                    image: imageUrl.isNotEmpty
+                        ? DecorationImage(
+                            image: CachedNetworkImageProvider(imageUrl,
+                                maxWidth: 300),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.7),
+                        ],
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    alignment: Alignment.bottomCenter,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
-                  padding: const EdgeInsets.all(8),
-                  alignment: Alignment.bottomCenter,
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
                 ),
               );
             },
@@ -1081,11 +837,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       child: BackdropFilter(
         filter: dart_ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
         child: Container(
+          // 8, not 16: the icon buttons carry their own 12px padding, so
+          // their glyphs now line up with the 16–20px content edge below.
           padding: EdgeInsets.only(
             top: MediaQuery.of(context).padding.top + 8,
             bottom: 12,
-            left: 16,
-            right: 16,
+            left: 8,
+            right: 8,
           ),
           decoration: BoxDecoration(
             color: isDark
@@ -1099,152 +857,194 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               ),
             ),
           ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  width: 32,
-                  height: 32,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _changeLocation,
-                    borderRadius: BorderRadius.circular(8),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 48),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Vaaradhi',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w900,
-                                color: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.color,
-                              ),
-                            ),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.location_on_outlined,
-                                  size: 13,
-                                  color: AppColors.primary,
-                                ),
-                                const SizedBox(width: 3),
-                                Flexible(
-                                  child: Text(
-                                    AppState.instance.displayLocation,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
-                                ),
-                                const Icon(
-                                  Icons.keyboard_arrow_down_rounded,
-                                  size: 15,
-                                  color: AppColors.primary,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
+          // Profile left, logo centred, Search + Notifications right. The
+          // logo sits in its own layer so it is centred on the screen, not
+          // between the uneven left and right groups. Location moved to the
+          // bottom bar's Local tab.
+          child: SizedBox(
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Semantics(
+                  image: true,
+                  label: 'Vaaradhi',
+                  // 36pt, the height of the avatar beside it, decoded at
+                  // screen density so the mark stays sharp.
+                  child: ClipRRect(
+                    key: const Key('home_header_logo'),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      cacheWidth:
+                          (36 * MediaQuery.devicePixelRatioOf(context)).round(),
                     ),
                   ),
                 ),
-              ),
-              IconButton(
-                icon: Icon(Icons.search_rounded,
-                    color: Theme.of(context).iconTheme.color),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SearchScreen()),
-                  );
-                },
-              ),
-
-              // Notifications, badged with whatever is unread. Rebuilt from
-              // AppState so the count follows a push arriving or the list
-              // being read, without this bar polling anything.
-              AnimatedBuilder(
-                animation: AppState.instance,
-                builder: (context, _) {
-                  final unread = AppState.instance.unreadNotificationsCount;
-                  return IconButton(
-                    tooltip: AppState.instance.language == 'Telugu'
-                        ? 'నోటిఫికేషన్లు'
-                        : 'Notifications',
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen()),
-                    ),
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(Icons.notifications_none_rounded,
-                            color: Theme.of(context).iconTheme.color),
-                        if (unread > 0)
-                          Positioned(
-                            right: -3,
-                            top: -3,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4, vertical: 1),
-                              constraints: const BoxConstraints(minWidth: 15),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                // Past 99 the badge would widen enough to
-                                // push the icons along.
-                                unread > 99 ? '99+' : '$unread',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.2,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              // Spotlight is reached from the bottom navigation (main / local
-              // news tabs), so the header keeps only Search and Notifications.
-            ],
+                Row(
+                  children: [
+                    _buildProfileButton(),
+                    const Spacer(),
+                    ..._buildHeaderActions(),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  /// Top-left: Profile, in a 48dp target.
+  /// - Logged in: the reader's avatar — their photo, else their initial on a
+  ///   soft brand tint — a clean 32dp circle with a hairline edge, no glow.
+  /// - Guest: the plain outline person icon, matching Search and the bell.
+  Widget _buildProfileButton() {
+    return AnimatedBuilder(
+      animation: AppState.instance,
+      builder: (context, _) {
+        final state = AppState.instance;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final photo = state.isLoggedIn ? state.profileAvatar : null;
+        final hasPhoto = photo != null;
+        final name = state.userName.trim();
+        final initial =
+            state.isLoggedIn && name.isNotEmpty && name != 'Guest User'
+                ? String.fromCharCode(name.runes.first).toUpperCase()
+                : '';
 
+        final Widget face;
+        if (hasPhoto) {
+          face = CircleAvatar(
+            key: const Key('home_header_avatar'),
+            radius: 16,
+            backgroundColor: AppColors.chipBg,
+            backgroundImage: photo,
+          );
+        } else if (initial.isNotEmpty) {
+          face = CircleAvatar(
+            key: const Key('home_header_avatar'),
+            radius: 16,
+            backgroundColor:
+                AppColors.primary.withValues(alpha: isDark ? 0.25 : 0.12),
+            child: Text(
+              initial,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+                height: 1,
+              ),
+            ),
+          );
+        } else {
+          face = Icon(Icons.person_outline_rounded,
+              color: Theme.of(context).iconTheme.color);
+        }
 
-  Widget _buildBreakingNewsSection(List<HeroCardItem> heroItems) {
+        return IconButton(
+          key: const Key('home_header_profile'),
+          tooltip: tr('nav_profile'),
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            ProfileTab.open(context);
+          },
+          icon: hasPhoto || initial.isNotEmpty
+              // Hairline ring so a photo's edge is crisp on any header.
+              ? DecoratedBox(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.18)
+                          : Colors.black.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: face,
+                )
+              : face,
+        );
+      },
+    );
+  }
+
+  /// Top-right: Search and Notifications.
+  List<Widget> _buildHeaderActions() {
+    return [
+      IconButton(
+        key: const Key('home_header_search'),
+        tooltip: AppState.instance.language == 'Telugu' ? 'వెతకండి' : 'Search',
+        icon: Icon(Icons.search_rounded,
+            color: Theme.of(context).iconTheme.color),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SearchScreen()),
+          );
+        },
+      ),
+
+      // Notifications, badged with whatever is unread. Rebuilt from
+      // AppState so the count follows a push arriving or the list
+      // being read, without this bar polling anything.
+      AnimatedBuilder(
+        animation: AppState.instance,
+        builder: (context, _) {
+          final unread = AppState.instance.unreadNotificationsCount;
+          return IconButton(
+            tooltip: AppState.instance.language == 'Telugu'
+                ? 'నోటిఫికేషన్లు'
+                : 'Notifications',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+            ),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_none_rounded,
+                    color: Theme.of(context).iconTheme.color),
+                if (unread > 0)
+                  Positioned(
+                    right: -3,
+                    top: -3,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      constraints: const BoxConstraints(minWidth: 15),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        // Past 99 the badge would widen enough to
+                        // push the icons along.
+                        unread > 99 ? '99+' : '$unread',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    ];
+  }
+
+  /// The hero carousel, from [_heroStories]: live, breaking, featured.
+  Widget _buildBreakingNewsSection(List<NewsArticle> heroItems) {
     if (heroItems.isEmpty) return const SizedBox.shrink();
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1264,326 +1064,293 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
             },
             itemCount: heroItems.length,
             itemBuilder: (context, index) {
-              final item = heroItems[index];
-              final isLive = item.kind == HeroCardKind.liveStream &&
-                  item.liveStream != null;
-              final stream = item.liveStream;
-              final article = item.article;
+              final NewsArticle article = heroItems[index];
+              final isLive = article.contentKind == 'live';
+              // Only a recent story the server marked says so on its badge.
+              final badge = isLive || !homeIsRecent(article)
+                  ? null
+                  : article.isBreaking
+                      ? 'BREAKING'
+                      : article.isFeatured
+                          ? 'FEATURED'
+                          : null;
 
-              final imageUrl = isLive
-                  ? (stream?.thumbnailUrl ?? '')
-                  : (article?.imageUrl ?? '');
-              final title = isLive
-                  ? (stream?.title ?? '')
-                  : (article?.title ?? '');
-              final subtitle = isLive
-                  ? (stream?.channelName.isNotEmpty == true
-                      ? 'లైవ్ ప్రసారం • ${stream!.channelName}'
-                      : 'లైవ్ ప్రసారం • YouTube Live')
-                  : 'Updated ${article?.timeAgo ?? ''}';
+              final imageUrl = _storyImage(article);
+              final title = article.title;
+              final subtitle =
+                  isLive ? 'లైవ్ ప్రసారం' : 'Updated ${article.timeAgo}';
 
-              return GestureDetector(
-                onTap: () {
-                  if (isLive) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const LiveNewsScreen()),
-                    );
-                  } else if (article != null) {
-                    AppNavigator.pushSafe(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => NewsDetailScreen(
-                              article: article, slug: article.slug)),
-                    );
-                  }
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: isLive
-                          ? Colors.red.withValues(alpha: 0.4)
-                          : borderColor,
-                      width: isLive ? 1.5 : 1.0,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: isLive
-                            ? Colors.red.withValues(alpha: 0.2)
-                            : Colors.black.withValues(alpha: 0.12),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                    image: imageUrl.isNotEmpty
-                        ? DecorationImage(
-                            image: CachedNetworkImageProvider(imageUrl,
-                                maxWidth: 800),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: isLive
-                            ? [
-                                Colors.black.withValues(alpha: 0.2),
-                                Colors.black.withValues(alpha: 0.55),
-                                Colors.black.withValues(alpha: 0.95),
-                              ]
-                            : [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.4),
-                                Colors.black.withValues(alpha: 0.9),
-                              ],
-                        stops: const [0.4, 0.7, 1.0],
-                      ),
-                    ),
-                    padding: const EdgeInsets.all(20),
-                    child: Stack(
-                      children: [
-                        if (isLive)
-                          Center(
-                            child: Container(
-                              width: 54,
-                              height: 54,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.35),
-                                  width: 1.5,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.3),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.play_arrow_rounded,
-                                color: Colors.white,
-                                size: 34,
-                              ),
-                            ),
+              return ImpressionTracker(
+                  story: article,
+                  child: GestureDetector(
+                    onTap: () {
+                      AdManager.instance.recordContentInteraction();
+                      _trackOpen(article, 'hero');
+                      _openStory(article);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: isLive
+                              ? Colors.red.withValues(alpha: 0.4)
+                              : borderColor,
+                          width: isLive ? 1.5 : 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isLive
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
                           ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ],
+                        image: imageUrl.isNotEmpty
+                            ? DecorationImage(
+                                image: CachedNetworkImageProvider(imageUrl,
+                                    maxWidth: 800),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
+                        // A story with no picture gets the brand's deep red
+                        // instead of a flat grey card.
+                        gradient: imageUrl.isEmpty ? _noImageGradient : null,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(24),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: isLive
+                                ? [
+                                    Colors.black.withValues(alpha: 0.2),
+                                    Colors.black.withValues(alpha: 0.55),
+                                    Colors.black.withValues(alpha: 0.95),
+                                  ]
+                                : [
+                                    Colors.transparent,
+                                    Colors.black.withValues(alpha: 0.4),
+                                    Colors.black.withValues(alpha: 0.9),
+                                  ],
+                            stops: const [0.4, 0.7, 1.0],
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(20),
+                        child: Stack(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            if (isLive)
+                              Center(
+                                child: Container(
+                                  width: 54,
+                                  height: 54,
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.35),
+                                      width: 1.5,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color:
+                                            Colors.black.withValues(alpha: 0.3),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: Colors.white,
+                                    size: 34,
+                                  ),
+                                ),
+                              ),
+                            Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                if (isLive)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          gradient: const LinearGradient(
-                                            colors: [
-                                              Color(0xFFDC2626),
-                                              Color(0xFFB91C1C),
-                                            ],
-                                          ),
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.red
-                                                  .withValues(alpha: 0.5),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Container(
-                                              width: 7,
-                                              height: 7,
-                                              decoration: const BoxDecoration(
-                                                color: Colors.white,
-                                                shape: BoxShape.circle,
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (isLive)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                colors: [
+                                                  Color(0xFFDC2626),
+                                                  Color(0xFFB91C1C),
+                                                ],
                                               ),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.red
+                                                      .withValues(alpha: 0.5),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(width: 6),
-                                            const Text(
-                                              'LIVE',
-                                              style: TextStyle(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Container(
+                                                  width: 7,
+                                                  height: 7,
+                                                  decoration:
+                                                      const BoxDecoration(
+                                                    color: Colors.white,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                const Text(
+                                                  'LIVE',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w900,
+                                                    letterSpacing: 1.2,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    else if (badge != null)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            // Solid, so it reads on any photo
+                                            // (the 30% orange washed out).
+                                            color: AppColors.primary,
+                                            child: Text(
+                                              badge,
+                                              style: const TextStyle(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w900,
                                                 letterSpacing: 1.2,
                                                 color: Colors.white,
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        color: Colors.orange
-                                            .withValues(alpha: 0.3),
-                                        child: const Text(
-                                          'BREAKING',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 1.2,
-                                            color: Colors.white,
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                if (isLive &&
-                                    stream?.channelName.isNotEmpty == true)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.2),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.3),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          stream!.channelName,
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                else if (!isLive &&
-                                    article?.category.isNotEmpty == true)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: BackdropFilter(
-                                      filter: dart_ui.ImageFilter.blur(
-                                          sigmaX: 8, sigmaY: 8),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.15),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.2),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          article!.category.toUpperCase(),
-                                          style: const TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
-                                            letterSpacing: 0.5,
-                                            color: Colors.white,
+                                    if (badge == null && !isLive)
+                                      const SizedBox(),
+                                    if (!isLive && article.category.isNotEmpty)
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: BackdropFilter(
+                                          filter: dart_ui.ImageFilter.blur(
+                                              sigmaX: 8, sigmaY: 8),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white
+                                                  .withValues(alpha: 0.15),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.2),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              article.category.toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.5,
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -0.5,
-                                    height: 1.2,
-                                    color: Colors.white,
-                                  ),
+                                  ],
                                 ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  subtitle,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color:
-                                        Colors.white.withValues(alpha: 0.8),
-                                  ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.5,
+                                        height: 1.2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      subtitle,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                        color:
+                                            Colors.white.withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: BackdropFilter(
-                              filter: dart_ui.ImageFilter.blur(
-                                  sigmaX: 8, sigmaY: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
-                                color: Colors.white.withValues(alpha: 0.15),
-                                child: Text(
-                                  '${(index + 1).toString().padLeft(2, '0')} / ${heroItems.length.toString().padLeft(2, '0')}',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.5,
-                                    color: Colors.white,
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: BackdropFilter(
+                                  filter: dart_ui.ImageFilter.blur(
+                                      sigmaX: 8, sigmaY: 8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 6),
+                                    color: Colors.white.withValues(alpha: 0.15),
+                                    child: Text(
+                                      '${(index + 1).toString().padLeft(2, '0')} / ${heroItems.length.toString().padLeft(2, '0')}',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.5,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              );
+                  ));
             },
           ),
         ),
@@ -1610,6 +1377,126 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         ),
         const SizedBox(height: 8),
       ],
+    );
+  }
+
+  /// Latest stories shown before the quote / poll / posters / videos.
+  static const _latestLeadCount = 5;
+
+  /// The non-news widgets: daily quote, poll, posters, videos. Each shows
+  /// only once loaded; nothing before the first frame is done.
+  List<Widget> _homeExtras() {
+    if (!_isProgressivelyHydrated) return const [];
+    return [
+      if (_dailyQuote != null &&
+          (_dailyQuote!['text'] != null || _dailyQuote!['quote'] != null)) ...[
+        const SizedBox(height: 16),
+        DailyGreetingWidget(
+          imageUrl: _dailyQuote!['image_url'] ?? _dailyQuote!['imageUrl'] ?? '',
+          title: _dailyQuote!['author']?.toString() ?? '',
+          quote: _dailyQuote!['text'] ?? _dailyQuote!['quote'] ?? '',
+        ),
+      ],
+      if (_poll != null) ...[
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: PollCard(poll: _poll!),
+        ),
+      ],
+      if (_posters.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _buildPostersStrip(),
+      ],
+      if (_homeVideos.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _buildHomeVideosStrip(),
+      ],
+    ];
+  }
+
+  /// A run of the Latest list (stories and inline ads), with an optional
+  /// loading spinner at its end.
+  Widget _buildLatestSliver(
+    List<FeedPresentationItem<NewsArticle>> items, {
+    required Color cardColor,
+    required Color borderColor,
+    required EdgeInsets padding,
+    required bool showSpinner,
+  }) {
+    return SliverPadding(
+      padding: padding,
+      sliver: SliverList.separated(
+        itemCount: items.length + (showSpinner ? 1 : 0),
+        separatorBuilder: (context, index) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          if (index == items.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+          final item = items[index];
+          if (item.isAd && item.ad != null) {
+            return UnifiedAdWidget(
+              key: ValueKey(item.stableKey),
+              ad: item.ad!,
+              placementZone: 'feed',
+              exposureKey:
+                  'home_${_identity}_${_latestGeneration}_${item.stableKey}',
+            );
+          }
+          return ImpressionTracker(
+            story: item.content!,
+            child: _buildFeedArticleCard(item, cardColor, borderColor),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Shown over saved content when `/feed/home/` could not be refreshed
+  /// (offline, 5xx, or 429 — which also retries on its own shortly).
+  Widget _buildOfflineNotice() {
+    final telugu = AppState.instance.language == 'Telugu';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      key: const Key('home_offline_notice'),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : const Color(0xFFFFF4E5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 18,
+              color: isDark ? Colors.white70 : const Color(0xFF8A5A00)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              telugu
+                  ? 'సేవ్ చేసిన వార్తలు చూపిస్తున్నాం'
+                  : 'Showing saved stories',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : const Color(0xFF6B4600),
+              ),
+            ),
+          ),
+          TextButton(
+            key: const Key('home_offline_retry'),
+            onPressed: _refresh,
+            child: Text(telugu ? 'మళ్ళీ ప్రయత్నించండి' : 'Retry'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1660,6 +1547,56 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   }
 
   /// Header over the paginated latest feed.
+  /// A category with no stories yet.
+  Widget _buildCategoryFailed() {
+    final telugu = AppState.instance.language == 'Telugu';
+    return Padding(
+      key: const Key('home_category_failed'),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+      child: Column(
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 44, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            telugu
+                ? 'ఈ వర్గం వార్తలు లోడ్ కాలేదు.'
+                : 'Could not load this category.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            key: const Key('home_category_retry'),
+            onPressed: () => _loadLatest(reset: true),
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryEmpty() {
+    final telugu = AppState.instance.language == 'Telugu';
+    return Padding(
+      key: const Key('home_category_empty'),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
+      child: Column(
+        children: [
+          Icon(Icons.article_outlined, size: 44, color: Colors.grey.shade400),
+          const SizedBox(height: 12),
+          Text(
+            telugu
+                ? 'ఈ వర్గంలో ప్రస్తుతం వార్తలు లేవు.'
+                : 'No news in this category yet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLatestHeader() => _buildSectionTitle(
         AppState.instance.language == 'Telugu' ? 'తాజా వార్తలు' : 'Latest',
       );
@@ -1697,103 +1634,107 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, index) {
                 final article = items[index];
-                final image = article.mediaItems.isNotEmpty &&
-                        article.mediaItems.first.thumbnailUrl.isNotEmpty
-                    ? article.mediaItems.first.thumbnailUrl
-                    : article.imageUrl;
-                return SizedBox(
-                  width: 220,
-                  child: Material(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      key: ValueKey('for_you_${article.id}'),
-                      onTap: () {
-                        AdManager.instance.recordContentInteraction();
-                        _trackOpen(article, 'for_you');
-                        _openStory(article);
-                      },
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: 16 / 9,
-                              child: image.isEmpty
-                                  ? Container(
-                                      color: AppColors.chipBg,
-                                      child: const Icon(
-                                          Icons.article_outlined,
-                                          color: AppColors.textMuted),
-                                    )
-                                  : CachedNetworkImage(
-                                      imageUrl: image,
-                                      fit: BoxFit.cover,
-                                      memCacheWidth: 480,
-                                      placeholder: (_, __) =>
-                                          Container(color: AppColors.chipBg),
-                                      errorWidget: (_, __, ___) => Container(
-                                        color: AppColors.chipBg,
-                                        child: const Icon(
-                                            Icons.image_not_supported_outlined,
-                                            color: AppColors.textMuted),
-                                      ),
+                final image = _storyImage(article);
+                return ImpressionTracker(
+                    story: article,
+                    child: SizedBox(
+                      width: 220,
+                      child: Material(
+                        color: cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          key: ValueKey('for_you_${article.id}'),
+                          onTap: () {
+                            AdManager.instance.recordContentInteraction();
+                            _trackOpen(article, 'for_you');
+                            _openStory(article);
+                          },
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: image.isEmpty
+                                      ? _noImageTile()
+                                      : CachedNetworkImage(
+                                          imageUrl: image,
+                                          fit: BoxFit.cover,
+                                          memCacheWidth: 480,
+                                          placeholder: (_, __) => Container(
+                                              color: AppColors.chipBg),
+                                          errorWidget: (_, __, ___) =>
+                                              Container(
+                                            color: AppColors.chipBg,
+                                            child: const Icon(
+                                                Icons
+                                                    .image_not_supported_outlined,
+                                                color: AppColors.textMuted),
+                                          ),
+                                        ),
+                                ),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                                  child: Text(
+                                    article.category.isNotEmpty
+                                        ? article.category.toUpperCase()
+                                        : '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.4,
+                                      color: AppColors.primary,
                                     ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                              child: Text(
-                                article.category.isNotEmpty
-                                    ? article.category.toUpperCase()
-                                    : '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.4,
-                                  color: AppColors.primary,
+                                  ),
                                 ),
-                              ),
-                            ),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                              child: Text(
-                                article.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  height: 1.35,
-                                  fontWeight: FontWeight.w700,
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                  child: Text(
+                                    article.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: ArticleTypography.heading(
+                                      fontSize: 14,
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w700,
+                                      color: Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge
+                                              ?.color ??
+                                          (Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? AppColors.readingTitleDark
+                                              : AppColors.readingTitleLight),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const Spacer(),
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                              child: Text(
-                                article.timeAgo,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.textMuted,
+                                const Spacer(),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                                  child: Text(
+                                    article.timeAgo,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textMuted,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                );
+                    ));
               },
             ),
           ),
@@ -1908,11 +1849,15 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         article.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: ArticleTypography.heading(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w800,
                           height: 1.3,
-                          letterSpacing: -0.2,
+                          letterSpacing: 0.0,
+                          color: Theme.of(context).textTheme.bodyLarge?.color ??
+                              (Theme.of(context).brightness == Brightness.dark
+                                  ? AppColors.readingTitleDark
+                                  : AppColors.readingTitleLight),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -1937,6 +1882,23 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                             ),
                           ),
                         ],
+                      ),
+                      // Publishing source on every card (Play News policy).
+                      const SizedBox(height: 3),
+                      Text(
+                        article.isUgc && article.byline.isNotEmpty
+                            ? '${article.sourceLabel(telugu: true)} · ${article.byline}'
+                            : article.sourceLabel(telugu: true),
+                        key: const Key('home_card_source'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.readingMetaDark
+                              : AppColors.readingMetaLight,
+                        ),
                       ),
                     ],
                   ),
@@ -2058,379 +2020,331 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedState = AppState.instance.stateName;
-    final selectedDistrict = AppState.instance.district;
-    final selectedSubdistrict = AppState.instance.subdistrict;
-    final selectedVillage = AppState.instance.village;
-
-    final districtSection = _mergeArticles(
-      _articles.where(
-        (article) =>
-            _coverageIs(article, 'district') &&
-            _sameLocation(article.district, selectedDistrict),
-      ),
-      _districtUgc,
-    );
-    final stateSection = _mergeArticles(
-      _articles.where(
-        (article) =>
-            _coverageIs(article, 'state') &&
-            _sameLocation(article.state, selectedState),
-      ),
-      _stateUgc,
-    );
-    final globalSection =
-        _articles.where((article) => _coverageIs(article, 'global')).toList();
-    // For You: personalized ranking from the bootstrap; recommendations only
-    // as a fallback when the bootstrap has none.
-    final forYou =
-        _forYou.isNotEmpty ? _forYou : _recommendedArticles;
-    final sectionIds = {
-      ...forYou.map((article) => article.id),
-      ..._nearYou.map((article) => article.id),
-      ..._villageSection.map((article) => article.id),
-      ..._mandalSection.map((article) => article.id),
-      ...districtSection.map((article) => article.id),
-      ...stateSection.map((article) => article.id),
-      ...globalSection.map((article) => article.id),
+    final heroItems = _heroStories();
+    // Newest first, fresh-first, and nothing the hero already shows.
+    final forYou = homeForYouStories(_forYou, heroItems);
+    // Latest is /feed/ itself, so scrolling to the end really loads more.
+    // Nothing already shown above — hero, For You, Near You — repeats here;
+    // matched by kind:id, since article and citizen-post ids are separate.
+    final shownAbove = {
+      ...heroItems.map(_storyKey),
+      ...forYou.map(_storyKey),
+      ..._nearYou.map(_storyKey),
     };
-    final hasHomeContent = _articles.isNotEmpty ||
-        _forYou.isNotEmpty ||
+    // With a category chip on, the sections above are hidden, so every
+    // story of that category is listed (none is "already shown above").
+    final recommended = _selectedCategory != null
+        ? _latest
+        : _latest.where((a) => !shownAbove.contains(_storyKey(a))).toList();
+    final hasHomeContent = heroItems.isNotEmpty ||
+        forYou.isNotEmpty ||
         _nearYou.isNotEmpty ||
-        _liveNewsList.any((s) => s.isLiveActive) ||
-        _villageSection.isNotEmpty ||
-        _mandalSection.isNotEmpty ||
-        _districtUgc.isNotEmpty ||
-        _stateUgc.isNotEmpty ||
-        (_locationSectionsLoaded && selectedState.isNotEmpty);
-    final breakingNews = _featuredArticles.isNotEmpty
-        ? _featuredArticles
-        : _articles.take(5).toList();
-    // Latest: the paginated feed itself, so scrolling to the end really
-    // loads more. (It used to render the 15 recommendations while
-    // pagination appended to a list nobody displayed.) Nothing shown above
-    // — hero, rail, sections — is repeated here.
-    final heroIds = breakingNews.map((a) => a.id).toSet();
-    final recommended = _articles
-        .where((article) =>
-            !sectionIds.contains(article.id) && !heroIds.contains(article.id))
-        .toList();
-    final activeStreams = _liveNewsList.where((s) => s.isLiveActive).toList();
-    final heroItems = [
-      ...activeStreams.map((s) => HeroCardItem.live(s)),
-      ...breakingNews.map((a) => HeroCardItem.article(a)),
-    ];
+        _latest.isNotEmpty;
+    // Still waiting for the first answer from either news endpoint.
+    final stillLoading = !_homeLoaded || (!_latestLoaded && _latestLoading);
+    final bothFailed = _homeFailed && _latestFailed;
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Stack(
-        children: [
-          !hasHomeContent
-              ? (_feedStatus == FeedStatus.loading || _isLoadingMore
-                  ? const Center(child: CircularProgressIndicator())
-                  : _feedStatus == FeedStatus.error
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.error_outline_rounded,
-                                    size: 56, color: AppColors.error),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'కథనాలు లోడ్ చేయడం విఫలమైంది',
-                                  style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _feedError ??
-                                      'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                      fontSize: 13, color: AppColors.textMuted),
-                                ),
-                                const SizedBox(height: 16),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _nextCursor = null;
-                                      _hasMore = true;
-                                      _feedStatus = FeedStatus.loading;
-                                    });
-                                    _loadMore();
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.primary,
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
-                                  ),
-                                  child: const Text('మళ్ళీ ప్రయత్నించండి'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.article_outlined,
-                                  size: 56,
-                                  color: AppColors.textMuted
-                                      .withValues(alpha: 0.5)),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'కథనాలు అందుబాటులో లేవు',
-                                style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.textDark),
-                              ),
-                              const SizedBox(height: 6),
-                              const Text(
-                                'తాజా కథనాల కోసం వేచి ఉండండి.',
-                                style: TextStyle(
-                                    fontSize: 13, color: AppColors.textMuted),
-                              ),
-                            ],
-                          ),
-                        ))
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  color: AppColors.primary,
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (ScrollNotification scrollInfo) {
-                      if (scrollInfo.metrics.pixels >=
-                              scrollInfo.metrics.maxScrollExtent - 200 &&
-                          !_isLoadingMore) {
-                        _loadMore();
-                      }
-                      return false;
-                    },
-                    child: Builder(
-                      builder: (context) {
-                        final isDark =
-                            Theme.of(context).brightness == Brightness.dark;
-                        final cardColor = isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.black.withValues(alpha: 0.03);
-                        final borderColor = isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.05);
-                        final feedAdsWithoutBreakingStrip =
-                            _feedAds.where((ad) => !ad.isBreakingStrip).toList();
-                        
-                        final presentationItems = recommended.isNotEmpty
-                            ? AdManager.instance
-                                .buildFeedPresentation<NewsArticle>(
-                                contentItems: recommended,
-                                adsPool: feedAdsWithoutBreakingStrip,
-                                contentKey: (article) =>
-                                    '${article.contentKind}:${article.id}',
-                              )
-                            : <FeedPresentationItem<NewsArticle>>[];
-
-                        return CustomScrollView(
-                          slivers: [
-                            SliverPadding(
-                              padding: EdgeInsets.only(
-                                top: MediaQuery.of(context).padding.top +
-                                    (_breakingStripAds.isNotEmpty ? 120 : 70), // Space for floating app bar & breaking strip
-                              ),
-                              sliver: SliverToBoxAdapter(
+    return ImpressionScope(
+        log: _impressions,
+        child: Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Stack(
+            children: [
+              !hasHomeContent
+                  ? (stillLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : bothFailed
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
                                 child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    RepaintBoundary(
-                                      child: _buildCategorySelector(),
-                                    ),
-                                    RepaintBoundary(
-                                      child: _buildBreakingNewsSection(
-                                          heroItems),
-                                    ),
-                                    // For You — personalized rail.
-                                    if (forYou.isNotEmpty)
-                                      RepaintBoundary(
-                                        child: _buildForYouRail(forYou),
-                                      ),
-                                    // Near You — the bootstrap's local section.
-                                    _buildLocationSection(
-                                      title: AppState.instance.language ==
-                                              'Telugu'
-                                          ? 'మీ సమీపంలో'
-                                          : 'Near You',
-                                      location:
-                                          AppState.instance.displayLocation,
-                                      icon: Icons.near_me_outlined,
-                                      accent: AppColors.primary,
-                                      articles: _nearYou,
-                                      cardColor: cardColor,
-                                      borderColor: borderColor,
-                                    ),
-                                    // Empty sections are hidden, never shown
-                                    // as an empty "no news yet" card.
-                                    if (selectedVillage.isNotEmpty)
-                                      _buildLocationSection(
-                                        title:
-                                            '$selectedVillage స్థానిక వార్తలు',
-                                        location: selectedVillage,
-                                        icon: Icons.holiday_village_outlined,
-                                        accent: AppColors.primary,
-                                        articles: _villageSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                      ),
-                                    if (_isProgressivelyHydrated) ...[
-                                      if (selectedSubdistrict.isNotEmpty)
-                                        _buildLocationSection(
-                                          title:
-                                              '$selectedSubdistrict మండల వార్తలు',
-                                          location: selectedSubdistrict,
-                                          icon: Icons.location_city_outlined,
-                                          accent: Colors.teal,
-                                          articles: _mandalSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      if (selectedDistrict.isNotEmpty)
-                                        _buildLocationSection(
-                                          title:
-                                              '$selectedDistrict జిల్లా వార్తలు',
-                                          location: '$selectedDistrict జిల్లా',
-                                          icon: Icons.domain_outlined,
-                                          accent: Colors.indigo,
-                                          articles: districtSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      if (selectedState.isNotEmpty)
-                                        _buildLocationSection(
-                                          title: '$selectedState ముఖ్యాంశాలు',
-                                          location: selectedState,
-                                          icon: Icons.map_outlined,
-                                          accent: Colors.deepOrange,
-                                          articles: stateSection,
-                                          cardColor: cardColor,
-                                          borderColor: borderColor,
-                                        ),
-                                      _buildLocationSection(
-                                        title: 'జాతీయ / అంతర్జాతీయ వార్తలు',
-                                        location: 'జాతీయం / అంతర్జాతీయం',
-                                        icon: Icons.public_outlined,
-                                        accent: Colors.blueGrey,
-                                        articles: globalSection,
-                                        cardColor: cardColor,
-                                        borderColor: borderColor,
-                                      ),
-                                      if (_dailyQuote != null &&
-                                          (_dailyQuote!['text'] != null ||
-                                              _dailyQuote!['quote'] !=
-                                                  null)) ...[
-                                        const SizedBox(height: 16),
-                                        DailyGreetingWidget(
-                                          imageUrl: _dailyQuote!['image_url'] ??
-                                              _dailyQuote!['imageUrl'] ??
-                                              '',
-                                          title: _dailyQuote!['author'] ??
-                                              'Daily Quote',
-                                          quote: _dailyQuote!['text'] ??
-                                              _dailyQuote!['quote'] ??
-                                              '',
-                                        ),
-                                      ],
-                                      if (_poll != null) ...[
-                                        const SizedBox(height: 16),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 16),
-                                          child: PollCard(poll: _poll!),
-                                        ),
-                                      ],
-                                      if (_posters.isNotEmpty) ...[
-                                        const SizedBox(height: 16),
-                                        _buildPostersStrip(),
-                                      ],
-                                      if (_homeVideos.isNotEmpty) ...[
-                                        const SizedBox(height: 16),
-                                        _buildHomeVideosStrip(),
-                                      ],
-                                    ],
+                                    const Icon(Icons.error_outline_rounded,
+                                        size: 56, color: AppColors.error),
                                     const SizedBox(height: 16),
-                                    if (recommended.isNotEmpty)
-                                      _buildLatestHeader(),
+                                    const Text(
+                                      'కథనాలు లోడ్ చేయడం విఫలమైంది',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'దయచేసి నెట్‌వర్క్ తనిఖీ చేసి మళ్ళీ ప్రయత్నించండి.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: AppColors.textMuted),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    ElevatedButton(
+                                      key: const Key('home_retry'),
+                                      onPressed: _refresh,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.primary,
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                      ),
+                                      child: const Text('మళ్ళీ ప్రయత్నించండి'),
+                                    ),
                                   ],
                                 ),
                               ),
-                            ),
-                            if (presentationItems.isNotEmpty)
-                              SliverPadding(
-                                padding: const EdgeInsets.only(
-                                    left: 16, right: 16, top: 8, bottom: 120),
-                                sliver: SliverList.separated(
-                                  itemCount: presentationItems.length +
-                                      (_hasMore ? 1 : 0),
-                                  separatorBuilder: (context, index) =>
-                                      const SizedBox(height: 10),
-                                  itemBuilder: (context, index) {
-                                    if (index == presentationItems.length) {
-                                      return const Center(
-                                        child: Padding(
-                                          padding: EdgeInsets.all(16.0),
-                                          child: CircularProgressIndicator(),
-                                        ),
-                                      );
-                                    }
-
-                                    final item = presentationItems[index];
-                                    if (item.isAd && item.ad != null) {
-                                      return UnifiedAdWidget(
-                                        key: ValueKey(item.stableKey),
-                                        ad: item.ad!,
-                                        placementZone: 'feed',
-                                        exposureKey:
-                                            'home_${_feedLocationKey}_${_feedGeneration}_${item.stableKey}',
-                                      );
-                                    }
-
-                                    return _buildFeedArticleCard(
-                                        item, cardColor, borderColor);
-                                  },
-                                ),
-                              )
-                            else
-                              const SliverToBoxAdapter(
-                                child: SizedBox(height: 120),
+                            )
+                          : Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.article_outlined,
+                                      size: 56,
+                                      color: AppColors.textMuted
+                                          .withValues(alpha: 0.5)),
+                                  const SizedBox(height: 16),
+                                  const Text(
+                                    'కథనాలు అందుబాటులో లేవు',
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'తాజా కథనాల కోసం వేచి ఉండండి.',
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppColors.textMuted),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextButton.icon(
+                                    key: const Key('home_empty_refresh'),
+                                    onPressed: _refresh,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: const Text('రిఫ్రెష్ చేయండి'),
+                                  ),
+                                ],
                               ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
+                            ))
+                  : RefreshIndicator(
+                      key: const Key('home_refresh'),
+                      onRefresh: _refresh,
+                      color: AppColors.primary,
+                      // The header floats over the list, so the spinner starts
+                      // below it (and below the breaking strip when shown);
+                      // from the very top it appeared hidden behind the header.
+                      edgeOffset: MediaQuery.of(context).padding.top +
+                          (_breakingStripAds.isNotEmpty ? 118 : 68),
+                      displacement: 32,
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: (ScrollNotification scrollInfo) {
+                          if (scrollInfo.metrics.pixels >=
+                                  scrollInfo.metrics.maxScrollExtent - 200 &&
+                              !_latestLoading &&
+                              _latestHasMore) {
+                            _loadLatest();
+                          }
+                          return false;
+                        },
+                        child: Builder(
+                          builder: (context) {
+                            final isDark =
+                                Theme.of(context).brightness == Brightness.dark;
+                            final cardColor = isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.03);
+                            final borderColor = isDark
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.black.withValues(alpha: 0.05);
+                            // Inline slots take what the strip and the bottom
+                            // sticky banner do not — all from the one /ads/ call.
+                            final inlineAds = HomeAds.inline(_feedAds);
 
-          // Floating Top App Bar Layer
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildTopAppBar(),
-                if (_breakingStripAds.isNotEmpty)
-                  RotatingBreakingStrip(
-                    ads: _breakingStripAds,
-                    placementZone: 'feed',
-                  ),
-              ],
-            ),
+                            final presentationItems = recommended.isNotEmpty
+                                ? AdManager.instance
+                                    .buildFeedPresentation<NewsArticle>(
+                                    contentItems: recommended,
+                                    adsPool: inlineAds,
+                                    // Each ad once, spaced out, capped — not
+                                    // the same banner every few stories.
+                                    policy: AdFrequencyPolicy.home,
+                                    contentKey: (article) =>
+                                        '${article.contentKind}:${article.id}',
+                                  )
+                                : <FeedPresentationItem<NewsArticle>>[];
+
+                            // A category chip is on: Home becomes that
+                            // category's news only — the hero, rails and extras
+                            // step aside, so the choice visibly changes the page.
+                            final filtering = _selectedCategory != null;
+
+                            return CustomScrollView(
+                              // A pull must always reach the refresh, even when
+                              // Home is shorter than the screen.
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              slivers: [
+                                SliverPadding(
+                                  padding: EdgeInsets.only(
+                                    top: MediaQuery.of(context).padding.top +
+                                        (_breakingStripAds.isNotEmpty
+                                            ? 120
+                                            : 70), // Space for floating app bar & breaking strip
+                                  ),
+                                  sliver: SliverToBoxAdapter(
+                                    child: Column(
+                                      children: [
+                                        // Showing the saved copy because the
+                                        // refresh failed (offline, 5xx, 429).
+                                        if (_homeFailed) _buildOfflineNotice(),
+                                        RepaintBoundary(
+                                          child: _buildCategorySelector(),
+                                        ),
+                                        if (!filtering)
+                                          RepaintBoundary(
+                                            child: _buildBreakingNewsSection(
+                                                heroItems),
+                                          ),
+                                        // For You — personalized rail.
+                                        if (!filtering && forYou.isNotEmpty)
+                                          RepaintBoundary(
+                                            child: _buildForYouRail(forYou),
+                                          ),
+                                        // Near You — the bootstrap's local
+                                        // section; hidden when it is empty.
+                                        if (!filtering)
+                                          _buildLocationSection(
+                                            title: AppState.instance.language ==
+                                                    'Telugu'
+                                                ? 'మీ సమీపంలో'
+                                                : 'Near You',
+                                            location: AppState
+                                                .instance.displayLocation,
+                                            icon: Icons.near_me_outlined,
+                                            accent: AppColors.primary,
+                                            articles: _nearYou,
+                                            cardColor: cardColor,
+                                            borderColor: borderColor,
+                                          ),
+                                        // Village, Mandal, District, State and
+                                        // National are not separate sections:
+                                        // /feed/home/ returns only For You and
+                                        // Near You. Those stories reach the
+                                        // reader through Latest (/feed/).
+                                        const SizedBox(height: 16),
+                                        if (recommended.isNotEmpty)
+                                          _buildLatestHeader(),
+                                        // No Latest stories yet: the extras show
+                                        // here rather than not at all.
+                                        if (presentationItems.isEmpty &&
+                                            !filtering)
+                                          ..._homeExtras(),
+                                        // The chosen category is loading.
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            !_latestLoaded)
+                                          const Padding(
+                                            key: Key('home_category_loading'),
+                                            padding: EdgeInsets.symmetric(
+                                                vertical: 48),
+                                            child: Center(
+                                                child:
+                                                    CircularProgressIndicator()),
+                                          ),
+                                        // It failed: say so, offer a retry — never
+                                        // the previous category's news.
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            _latestLoaded &&
+                                            _latestFailed &&
+                                            !_latestLoading)
+                                          _buildCategoryFailed(),
+                                        if (filtering &&
+                                            presentationItems.isEmpty &&
+                                            _latestLoaded &&
+                                            !_latestFailed &&
+                                            !_latestLoading)
+                                          _buildCategoryEmpty(),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // News first: the opening Latest
+                                // stories come straight after the sections, then
+                                // the quote / poll / posters / videos, then the
+                                // rest of Latest.
+                                if (filtering && presentationItems.isNotEmpty)
+                                  _buildLatestSliver(
+                                    presentationItems,
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16,
+                                        right: 16,
+                                        top: 8,
+                                        bottom: 120),
+                                    showSpinner: _latestHasMore,
+                                  )
+                                else if (presentationItems.isNotEmpty) ...[
+                                  _buildLatestSliver(
+                                    presentationItems
+                                        .take(_latestLeadCount)
+                                        .toList(),
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16, right: 16, top: 8),
+                                    showSpinner: false,
+                                  ),
+                                  SliverToBoxAdapter(
+                                    child: Column(
+                                      key: const Key('home_extras'),
+                                      children: [
+                                        ..._homeExtras(),
+                                        const SizedBox(height: 10),
+                                      ],
+                                    ),
+                                  ),
+                                  _buildLatestSliver(
+                                    presentationItems
+                                        .skip(_latestLeadCount)
+                                        .toList(),
+                                    cardColor: cardColor,
+                                    borderColor: borderColor,
+                                    padding: const EdgeInsets.only(
+                                        left: 16, right: 16, bottom: 120),
+                                    showSpinner: _latestHasMore,
+                                  ),
+                                ] else
+                                  const SliverToBoxAdapter(
+                                    child: SizedBox(height: 120),
+                                  ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+
+              // Floating Top App Bar Layer
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildTopAppBar(),
+                    if (_breakingStripAds.isNotEmpty)
+                      RotatingBreakingStrip(
+                        ads: _breakingStripAds,
+                        placementZone: 'feed',
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        ));
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/news_article.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/article_typography.dart';
 
 /// A horizontal run of trending stories, shown beneath a utility card.
 ///
@@ -111,10 +112,9 @@ class _TrendingCard extends StatelessWidget {
                     article.title,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: ArticleTypography.heading(
                       fontSize: 12,
                       height: 1.45,
-                      fontWeight: FontWeight.w600,
                       color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),

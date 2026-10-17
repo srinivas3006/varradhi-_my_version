@@ -54,6 +54,36 @@ String _extractMediaUrl(Map<String, dynamic> json) {
 /// One flat model backing both the queue card and the detail screen —
 /// detail-only fields are simply empty/zero when only list data is
 /// available, and get filled in once the detail endpoint responds.
+/// One reporter photo or video.
+class AdminMediaItem {
+  final String url;
+  final String type; // 'image' | 'video'
+
+  const AdminMediaItem({required this.url, required this.type});
+
+  bool get isVideo => type.toLowerCase().contains('video');
+
+  /// `media_items: [{media_url | url, media_type, sort_order}]`, ordered.
+  static List<AdminMediaItem> listFrom(Map<String, dynamic> json) {
+    final raw = json['media_items'];
+    if (raw is! List) return const [];
+    final rows = raw.whereType<Map>().toList()
+      ..sort((a, b) => (int.tryParse('${a['sort_order'] ?? 0}') ?? 0)
+          .compareTo(int.tryParse('${b['sort_order'] ?? 0}') ?? 0));
+    return [
+      for (final m in rows)
+        if (UrlNormalizer.normalize(
+                (m['media_url'] ?? m['url'] ?? '').toString())
+            .isNotEmpty)
+          AdminMediaItem(
+            url: UrlNormalizer.normalize(
+                (m['media_url'] ?? m['url'] ?? '').toString()),
+            type: (m['media_type'] ?? 'image').toString(),
+          ),
+    ];
+  }
+}
+
 class AdminUgcSubmissionModel {
   final String id;
   final String title;
@@ -76,6 +106,25 @@ class AdminUgcSubmissionModel {
   final String videoThumbnailUrl;
   final String brandedMediaUrl;
   final String brandedMediaType;
+
+  /// Every photo / video the reporter sent (media_items), in order; falls
+  /// back to the single original when the reply has no list.
+  final List<AdminMediaItem> mediaItems;
+
+  List<AdminMediaItem> get allMedia => mediaItems.isNotEmpty
+      ? mediaItems
+      : [
+          if (originalMediaUrl.isNotEmpty)
+            AdminMediaItem(url: originalMediaUrl, type: originalMediaType),
+        ];
+
+  /// The first photo — what "add Vaaradhi brand" stamps.
+  AdminMediaItem? get firstImage {
+    for (final m in allMedia) {
+      if (!m.isVideo) return m;
+    }
+    return null;
+  }
 
   final String uploadStatus;
   final String validationStatus;
@@ -117,6 +166,7 @@ class AdminUgcSubmissionModel {
     required this.videoThumbnailUrl,
     required this.brandedMediaUrl,
     required this.brandedMediaType,
+    this.mediaItems = const [],
     required this.uploadStatus,
     required this.validationStatus,
     required this.reporterUserId,
@@ -173,6 +223,7 @@ class AdminUgcSubmissionModel {
       videoThumbnailUrl: UrlNormalizer.normalize((json['thumbnail_url'] ?? json['video_thumbnail_url'] ?? json['thumbnail'] ?? '')?.toString()),
       brandedMediaUrl: UrlNormalizer.normalize((json['branded_media_url'] ?? json['watermarked_url'] ?? '')?.toString()),
       brandedMediaType: (json['branded_media_type'] ?? json['media_type'])?.toString() ?? 'image',
+      mediaItems: AdminMediaItem.listFrom(json),
       uploadStatus: json['upload_status']?.toString() ?? '',
       validationStatus: json['validation_status']?.toString() ?? '',
       reporterUserId: (reporterMap?['id'] ?? reporterMap?['user_id'] ?? json['reporter_id'] ?? json['user_id'])?.toString(),
@@ -243,6 +294,7 @@ class AdminUgcSubmissionModel {
       videoThumbnailUrl: videoThumbnailUrl,
       brandedMediaUrl: brandedMediaUrl ?? this.brandedMediaUrl,
       brandedMediaType: brandedMediaType ?? this.brandedMediaType,
+      mediaItems: mediaItems,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       validationStatus: validationStatus ?? this.validationStatus,
       reporterUserId: reporterUserId,

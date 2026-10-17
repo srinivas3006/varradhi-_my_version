@@ -63,10 +63,10 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
       final response = await UgcRepository.instance.getUgcFeed(
           cursor: _cursor,
           pageSize: 20,
-          state: AppState.instance.stateName,
-          district: AppState.instance.district,
-          subdistrict: AppState.instance.subdistrict,
-          village: AppState.instance.village);
+          state: AppState.instance.feedPlace.state,
+          district: AppState.instance.feedPlace.district,
+          subdistrict: AppState.instance.feedPlace.subdistrict,
+          village: AppState.instance.feedPlace.village);
 
       if (!mounted || generation != _generation) return;
       if (response.hasErrors) throw Exception(response.errorMessage);

@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vaaradhi/models/spotlight_item.dart';
 
@@ -73,9 +72,18 @@ void main() {
         .readAsStringSync();
 
     test('the image starts below a black status-bar band', () {
-      expect(src, contains('top: statusBarHeight,'));
-      expect(src, contains('child: const ColoredBox(color: Colors.black)'));
-      expect(src, contains('top: statusBarHeight + mediaHeight'));
+      // The band belongs to the screen, and the pager starts under it, so a
+      // card sliding in during a swipe never carries a black strip above
+      // its image.
+      final screen = File('lib/spotlight/spotlight_screen.dart')
+          .readAsStringSync();
+      expect(screen, contains('child: ColoredBox(color: Colors.black)'));
+      expect(screen, contains('top: statusBarHeight,'));
+      expect(screen, contains('removeTop: true'));
+
+      expect(src, isNot(contains('statusBarHeight')));
+      expect(src, isNot(contains('ColoredBox(color: Colors.black)')));
+      expect(src, contains('top: mediaHeight,'));
     });
 
     test('the contact email is no longer shown under the headline', () {

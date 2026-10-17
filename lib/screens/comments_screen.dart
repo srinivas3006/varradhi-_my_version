@@ -28,9 +28,16 @@ class CommentsScreen extends StatefulWidget {
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: 0.82,
-        child: CommentsScreen(article: article, sheetMode: true),
+      // Lift the sheet above the keyboard so the composer stays visible
+      // while typing.
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: FractionallySizedBox(
+          heightFactor: 0.82,
+          child: CommentsScreen(article: article, sheetMode: true),
+        ),
       ),
     );
   }
@@ -78,7 +85,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   : 'Comments on citizen posts are coming soon.',
               key: const Key('ugc_comments_unavailable'),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+              style:
+                  const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
             ),
           ],
         ),
@@ -100,9 +108,11 @@ class _CommentsScreenState extends State<CommentsScreen> {
       final fetched = await ApiService.instance.getComments(widget.article.id);
       if (mounted) {
         final appState = AppState.instance;
-        final filtered = fetched.where((c) =>
-            !appState.isUserBlocked(c.authorId) &&
-            !appState.isUserBlocked(c.username)).toList();
+        final filtered = fetched
+            .where((c) =>
+                !appState.isUserBlocked(c.authorId) &&
+                !appState.isUserBlocked(c.username))
+            .toList();
         for (final c in filtered) {
           c.replies.removeWhere((r) =>
               appState.isUserBlocked(r.authorId) ||
@@ -176,8 +186,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
             ? widget.article.id
             : widget.article.slug;
         if (targetId.isNotEmpty) {
-          AppState.instance.userAddedComments[targetId] =
-              (AppState.instance.userAddedComments[targetId] ?? 0) + 1;
+          AppState.instance.recordUserComment(targetId);
         }
         AppState.instance.setComments(widget.article.id, _comments);
 
@@ -269,18 +278,19 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 const SizedBox(height: 16),
                 if (isOwnComment) ...[
                   ListTile(
-                    leading:
-                        const Icon(Icons.edit_outlined, color: AppColors.primary),
+                    leading: const Icon(Icons.edit_outlined,
+                        color: AppColors.primary),
                     title: Text(tr('edit_comment'),
-                        style: TextStyle(fontWeight: FontWeight.w600, color: titleColor)),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, color: titleColor)),
                     onTap: () {
                       Navigator.pop(context);
                       _showEditDialog(comment);
                     },
                   ),
                   ListTile(
-                    leading:
-                        const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    leading: const Icon(Icons.delete_outline,
+                        color: Colors.redAccent),
                     title: Text(tr('delete_comment'),
                         style: const TextStyle(
                             color: Colors.redAccent,
@@ -292,8 +302,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   ),
                 ] else ...[
                   ListTile(
-                    leading:
-                        const Icon(Icons.flag_outlined, color: AppColors.primary),
+                    leading: const Icon(Icons.flag_outlined,
+                        color: AppColors.primary),
                     title: Text(tr('report_comment'),
                         style: const TextStyle(
                             color: AppColors.primary,
@@ -307,8 +317,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     leading: Icon(Icons.block, color: iconColor),
                     title: Text(tr('block_user'),
                         style: TextStyle(
-                            color: titleColor,
-                            fontWeight: FontWeight.w600)),
+                            color: titleColor, fontWeight: FontWeight.w600)),
                     onTap: () {
                       Navigator.pop(context);
                       _confirmBlockUser(comment);
@@ -509,7 +518,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     tr('report_reason_prompt'),
                     style: TextStyle(
                       fontSize: 13,
-                      color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                      color: isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textMuted,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -519,7 +530,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           r.$2,
                           style: TextStyle(
                             fontSize: 14,
-                            color: isDark ? AppColors.textCommentBodyDark : AppColors.textDark,
+                            color: isDark
+                                ? AppColors.textCommentBodyDark
+                                : AppColors.textDark,
                           ),
                         ),
                         trailing: Icon(
@@ -541,7 +554,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           } catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(tr('comment_report_failed'))),
+                              SnackBar(
+                                  content: Text(tr('comment_report_failed'))),
                             );
                           }
                         },
@@ -613,9 +627,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
         children: [
           CircleAvatar(
             radius: isReply ? 14 : 18,
-            backgroundColor: isDark
-                ? AppColors.surfaceElevatedDark
-                : AppColors.chipBg,
+            backgroundColor:
+                isDark ? AppColors.surfaceElevatedDark : AppColors.chipBg,
             backgroundImage: NetworkImage(comment.avatarUrl),
           ),
           const SizedBox(width: 12),
@@ -630,7 +643,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 13,
-                        color: isDark ? AppColors.textLight : AppColors.textDark,
+                        color:
+                            isDark ? AppColors.textLight : AppColors.textDark,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -766,46 +780,46 @@ class _CommentsScreenState extends State<CommentsScreen> {
   Widget build(BuildContext context) {
     if (_commentsUnavailable) return _buildCommentsUnavailable(context);
     final body = Column(
-        children: [
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _fetchComments,
-              color: AppColors.primary,
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _comments.isEmpty
-                      ? ListView(
-                          children: [
-                            const SizedBox(height: 120),
-                            Center(
-                              child: Text(
-                                tr('no_comments'),
-                                style: const TextStyle(
-                                    color: AppColors.textMuted, fontSize: 14),
-                              ),
+      children: [
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _fetchComments,
+            color: AppColors.primary,
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _comments.isEmpty
+                    ? ListView(
+                        children: [
+                          const SizedBox(height: 120),
+                          Center(
+                            child: Text(
+                              tr('no_comments'),
+                              style: const TextStyle(
+                                  color: AppColors.textMuted, fontSize: 14),
                             ),
-                          ],
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _comments.length,
-                          itemBuilder: (context, index) {
-                            final comment = _comments[index];
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildCommentItem(comment, isReply: false),
-                                ...comment.replies.map((reply) =>
-                                    _buildCommentItem(reply, isReply: true)),
-                              ],
-                            );
-                          },
-                        ),
-            ),
+                          ),
+                        ],
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _comments.length,
+                        itemBuilder: (context, index) {
+                          final comment = _comments[index];
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildCommentItem(comment, isReply: false),
+                              ...comment.replies.map((reply) =>
+                                  _buildCommentItem(reply, isReply: true)),
+                            ],
+                          );
+                        },
+                      ),
           ),
-          _buildCommentComposer(context),
-        ],
-      );
+        ),
+        _buildCommentComposer(context),
+      ],
+    );
 
     if (widget.sheetMode) return _asSheet(context, body);
 
@@ -840,7 +854,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDarkNavy : Theme.of(context).scaffoldBackgroundColor,
+        color: isDark
+            ? AppColors.cardDarkNavy
+            : Theme.of(context).scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         boxShadow: [
           BoxShadow(
@@ -858,7 +874,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
             width: 38,
             height: 4,
             decoration: BoxDecoration(
-              color: isDark ? AppColors.borderDark : Theme.of(context).dividerColor,
+              color: isDark
+                  ? AppColors.borderDark
+                  : Theme.of(context).dividerColor,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -871,21 +889,26 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
-                    color: isDark ? AppColors.textLight : Theme.of(context).textTheme.bodyLarge?.color,
+                    color: isDark
+                        ? AppColors.textLight
+                        : Theme.of(context).textTheme.bodyLarge?.color,
                   ),
                 ),
                 const Spacer(),
                 IconButton(
                   icon: Icon(Icons.close_rounded,
-                      size: 20,
-                      color: isDark ? AppColors.textLight : null),
+                      size: 20, color: isDark ? AppColors.textLight : null),
                   onPressed: () => Navigator.pop(context),
                   tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: isDark ? AppColors.borderDark : Theme.of(context).dividerColor),
+          Divider(
+              height: 1,
+              color: isDark
+                  ? AppColors.borderDark
+                  : Theme.of(context).dividerColor),
           Expanded(child: body),
         ],
       ),
@@ -940,7 +963,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   width: 64,
                   height: 64,
                   decoration: BoxDecoration(
-                    color: AppColors.brandBlue.withValues(alpha: isDark ? 0.2 : 0.1),
+                    color: AppColors.brandBlue
+                        .withValues(alpha: isDark ? 0.2 : 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -970,7 +994,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       height: 1.45,
-                      color: isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
+                      color: isDark
+                          ? AppColors.textSecondaryDark
+                          : AppColors.textMuted,
                     ),
                   ),
                 ),
@@ -995,7 +1021,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                         }
                       });
                     },
-                    icon: const Icon(Icons.login_rounded, size: 20, color: Colors.white),
+                    icon: const Icon(Icons.login_rounded,
+                        size: 20, color: Colors.white),
                     label: Text(
                       tr('log_in'),
                       style: const TextStyle(
@@ -1023,7 +1050,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
-                      color: isDark ? AppColors.iconMutedDark : AppColors.textMuted,
+                      color: isDark
+                          ? AppColors.iconMutedDark
+                          : AppColors.textMuted,
                     ),
                   ),
                 ),
@@ -1035,7 +1064,6 @@ class _CommentsScreenState extends State<CommentsScreen> {
     );
   }
 
-
   Widget _buildCommentComposer(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
@@ -1044,7 +1072,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
         color: isDark ? AppColors.cardDarkNavy : Theme.of(context).cardColor,
         border: Border(
           top: BorderSide(
-            color: isDark ? AppColors.borderDark : Theme.of(context).dividerColor.withValues(alpha: 0.2),
+            color: isDark
+                ? AppColors.borderDark
+                : Theme.of(context).dividerColor.withValues(alpha: 0.2),
             width: 1,
           ),
         ),
@@ -1075,7 +1105,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     onTap: _cancelReply,
                     child: Icon(Icons.close,
                         size: 16,
-                        color: isDark ? AppColors.iconMutedDark : AppColors.textMuted),
+                        color: isDark
+                            ? AppColors.iconMutedDark
+                            : AppColors.textMuted),
                   )
                 ],
               ),
@@ -1088,19 +1120,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
                   backgroundColor: isDark
                       ? AppColors.surfaceElevatedDark
                       : AppColors.primary.withValues(alpha: 0.12),
-                  backgroundImage:
-                      (AppState.instance.profileImagePath != null &&
-                              AppState.instance.profileImagePath!
-                                  .startsWith('http'))
-                          ? NetworkImage(AppState.instance.profileImagePath!)
-                          : null,
-                  child: (AppState.instance.profileImagePath != null &&
-                          AppState.instance.profileImagePath!
-                              .startsWith('http'))
+                  backgroundImage: AppState.instance.profileAvatar,
+                  child: AppState.instance.profileAvatar != null
                       ? null
                       : Icon(Icons.person_rounded,
                           size: 18,
-                          color: isDark ? AppColors.textSecondaryDark : AppColors.primary),
+                          color: isDark
+                              ? AppColors.textSecondaryDark
+                              : AppColors.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1108,43 +1135,60 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     controller: _commentController,
                     focusNode: _focusNode,
                     enabled: !_isPosting,
+                    // Grows with the text (up to 5 lines, then scrolls) and
+                    // shows the keyboard's Enter key for new lines; the send
+                    // button posts.
+                    minLines: 1,
+                    maxLines: 5,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    textCapitalization: TextCapitalization.sentences,
                     style: TextStyle(
                       fontSize: 14,
                       color: isDark ? AppColors.textLight : AppColors.textDark,
                     ),
-                    cursorColor: isDark ? AppColors.textLight : AppColors.primary,
+                    cursorColor:
+                        isDark ? AppColors.textLight : AppColors.primary,
                     decoration: InputDecoration(
                       hintText: tr('add_comment_hint'),
                       hintStyle: TextStyle(
                           fontSize: 14,
-                          color: isDark ? AppColors.iconMutedDark : AppColors.textMuted),
+                          color: isDark
+                              ? AppColors.iconMutedDark
+                              : AppColors.textMuted),
                       filled: true,
-                      fillColor: isDark ? AppColors.surfaceElevatedDark : AppColors.chipBg,
+                      fillColor: isDark
+                          ? AppColors.surfaceElevatedDark
+                          : AppColors.chipBg,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 10),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide(
-                          color: isDark ? AppColors.borderDark : Colors.transparent,
+                          color: isDark
+                              ? AppColors.borderDark
+                              : Colors.transparent,
                           width: 1,
                         ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide(
-                          color: isDark ? AppColors.borderDark : Colors.transparent,
+                          color: isDark
+                              ? AppColors.borderDark
+                              : Colors.transparent,
                           width: 1,
                         ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide(
-                          color: isDark ? AppColors.brandBlue : AppColors.primary,
+                          color:
+                              isDark ? AppColors.brandBlue : AppColors.primary,
                           width: 1.5,
                         ),
                       ),
                     ),
-                    onSubmitted: (_) => _postComment(),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1155,7 +1199,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2.5),
                       )
                     : IconButton(
-                        icon: const Icon(Icons.send_rounded, color: AppColors.primary),
+                        icon: const Icon(Icons.send_rounded,
+                            color: AppColors.primary),
                         onPressed: _postComment,
                       ),
               ],

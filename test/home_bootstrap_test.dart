@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/models/news_article.dart';
 import 'package:vaaradhi/models/search_result.dart';
 import 'package:vaaradhi/repositories/home_feed_repository.dart';
-import 'package:vaaradhi/services/analytics_queue.dart';
 import 'package:vaaradhi/services/sharing/share_content_builder.dart';
 import 'package:vaaradhi/utils/share_service.dart';
 
@@ -138,10 +137,10 @@ void main() {
   });
 
   group('home bootstrap repository', () {
-    test('sends location, scope, mode and limit', () async {
+    test('sends location, mode and limit — and no scope', () async {
       final a = _Adapter((_) => (200, _homeBody()));
       final repo = HomeFeedRepository.forTesting(_dio(a));
-      await repo.fetch(
+      await repo.fetch(viewer: 'guest',
           lang: 'te',
           state: 'Telangana',
           district: 'Suryapet',
@@ -154,7 +153,8 @@ void main() {
       expect(q['district'], 'Suryapet');
       expect(q['subdistrict'], 'Jajireddygudem');
       expect(q['village'], 'Kesaram');
-      expect(q['scope'], 'main');
+      // /feed/home/ builds both the main and the local section itself.
+      expect(q.containsKey('scope'), isFalse);
       expect(q['mode'], 'normal');
       expect(q['limit'], '10');
     });
@@ -162,7 +162,7 @@ void main() {
     test('honours cache_ttl_seconds, refresh bypasses it', () async {
       final a = _Adapter((_) => (200, _homeBody()));
       final repo = HomeFeedRepository.forTesting(_dio(a));
-      Future<HomeBootstrap?> go({bool force = false}) => repo.fetch(
+      Future<HomeBootstrap?> go({bool force = false}) => repo.fetch(viewer: 'guest',
           state: 'Telangana',
           district: 'Suryapet',
           subdistrict: '',
@@ -178,13 +178,13 @@ void main() {
     test('the last response is kept on the device for an instant start',
         () async {
       final a = _Adapter((_) => (200, _homeBody()));
-      await HomeFeedRepository.forTesting(_dio(a)).fetch(
+      await HomeFeedRepository.forTesting(_dio(a)).fetch(viewer: 'guest',
           state: 'Telangana', district: 'Suryapet', subdistrict: '', village: '');
 
       // A fresh repository (new app launch) with no network.
       final offline = HomeFeedRepository.forTesting(
           _dio(_Adapter((_) => (500, {}))));
-      final cached = await offline.cached(
+      final cached = await offline.cached(viewer: 'guest',
           state: 'Telangana', district: 'Suryapet', subdistrict: '', village: '');
       expect(cached, isNotNull);
       expect(cached!.fromDeviceCache, isTrue);
@@ -195,47 +195,9 @@ void main() {
       final repo = HomeFeedRepository.forTesting(
           _dio(_Adapter((_) => (404, {'detail': 'Not found.'}))));
       expect(
-          await repo.fetch(
+          await repo.fetch(viewer: 'guest',
               state: '', district: '', subdistrict: '', village: ''),
           isNull);
-    });
-  });
-
-  group('offline analytics', () {
-    test('queues, then flushes to the bulk endpoint on 202', () async {
-      final a = _Adapter((_) => (202, {'data': {'accepted_count': 2}}));
-      final q = AnalyticsQueue.forTesting(_dio(a));
-      await q.track('feed_refresh', metadata: {'mode': 'lite'});
-      await q.track('article_open', metadata: {'article_id': 'x'});
-      expect(q.pending, hasLength(2));
-
-      await q.flush();
-      expect(q.pending, isEmpty);
-      final body = a.requests.single.data as Map;
-      expect(a.requests.single.path, '/api/v1/analytics/events/bulk/');
-      final events = body['events'] as List;
-      expect(events.first['event_type'], 'feed_refresh');
-      expect(events.first['metadata'], {'mode': 'lite'});
-      expect(events.first, contains('session_id'));
-      expect(events.first, contains('language'));
-      expect(events.first, contains('device_type'));
-    });
-
-    test('keeps events when the network is down', () async {
-      final q = AnalyticsQueue.forTesting(
-          _dio(_Adapter((_) => (503, {'detail': 'down'}))));
-      await q.track('feed_refresh');
-      await q.flush();
-      expect(q.pending, hasLength(1));
-    });
-
-    test('survives a restart', () async {
-      final q = AnalyticsQueue.forTesting(
-          _dio(_Adapter((_) => (503, {}))));
-      await q.track('feed_refresh');
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('analytics_event_queue_v1'),
-          contains('feed_refresh'));
     });
   });
 

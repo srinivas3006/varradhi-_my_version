@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/core/network/dio_client.dart';
-import 'package:vaaradhi/services/api_service.dart';
 import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {
@@ -124,6 +125,64 @@ void main() {
     });
   });
 
+  group('the saved photo is what the avatar draws', () {
+    test('after upload the avatar is the server photo, not the initial',
+        () async {
+      serve((o) async => _json({
+            'data': {'profile_image': 'https://cdn.example.com/me.png'}
+          }, 200));
+
+      await state.updateProfile(name: 'N', imagePath: avatar.path);
+
+      final img = state.profileAvatar;
+      expect(img, isA<CachedNetworkImageProvider>(),
+          reason: 'the local path is cleared after upload, so the avatar '
+              'must fall back to the server URL');
+      expect((img as CachedNetworkImageProvider).url,
+          'https://cdn.example.com/me.png');
+    });
+
+    test('a relative profile_image is made absolute', () async {
+      serve((o) async => _json({
+            'data': {'profile_image': '/media/profiles/me.png'}
+          }, 200));
+
+      expect(await state.updateProfile(name: 'N', imagePath: avatar.path),
+          isTrue);
+      expect(state.profileImageUrl, startsWith('http'));
+      expect(state.profileImageUrl, endsWith('/media/profiles/me.png'));
+      expect(state.profileAvatar, isNotNull);
+    });
+
+    test('a fresh local pick is shown before the upload returns', () {
+      state.profileImagePath = avatar.path;
+      state.profileImageUrl = 'https://cdn.example.com/old.png';
+      expect(state.profileAvatar, isA<FileImage>());
+    });
+
+    test('a stale local path that no longer exists falls back to the url',
+        () {
+      state.profileImagePath = '/no/such/file.jpg';
+      state.profileImageUrl = 'https://cdn.example.com/old.png';
+      expect(state.profileAvatar, isA<CachedNetworkImageProvider>());
+    });
+
+    test('no photo at all means no image (the initial is shown)', () {
+      expect(state.profileAvatar, isNull);
+    });
+
+    test('profile, home header and comments all draw profileAvatar', () {
+      for (final f in [
+        'lib/screens/profile_tab.dart',
+        'lib/screens/news_feed_tab.dart',
+        'lib/screens/comments_screen.dart',
+      ]) {
+        expect(File(f).readAsStringSync(), contains('profileAvatar'),
+            reason: f);
+      }
+    });
+  });
+
   group('a failed upload keeps the previous avatar', () {
     test('a 500 restores the old url and name', () async {
       state.profileImageUrl = 'https://cdn.example.com/old.png';
@@ -157,7 +216,7 @@ void main() {
       final fn =
           src.substring(src.indexOf('Future<void> refreshRolesFromServer'));
       expect(fn, contains("me['profile_image']"));
-      expect(fn, contains('profileImageUrl = serverImage'));
+      expect(fn, contains('profileImageUrl = url'));
     });
 
     test('updateProfile takes an image file rather than a path string', () {

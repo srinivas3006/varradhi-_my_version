@@ -48,7 +48,14 @@ class DeepLinkService {
   @visibleForTesting
   Future<void> handleUri(String? rawUri) async {
     final target = NotificationDeepLinkResolver.resolveFromUri(rawUri);
-    if (target.type == NotificationTargetType.unknown) return;
+    if (target.type == NotificationTargetType.unknown) {
+      // A real link opened the app but names nothing we can show: say so
+      // instead of silently staying on Home. No link at all → nothing.
+      if (rawUri != null && rawUri.trim().isNotEmpty) {
+        unawaited(NotificationService.instance.showContentUnavailable());
+      }
+      return;
+    }
 
     if (!NotificationNavigationGate.instance.isNavigationReady) {
       NotificationNavigationGate.instance.setPendingTarget(target);

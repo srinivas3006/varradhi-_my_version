@@ -11,7 +11,7 @@ void main() {
           const MaterialApp(home: Scaffold(body: WatermarkBanner())));
       final img = tester.widget<Image>(find.byType(Image));
       expect((img.image as AssetImage).assetName,
-          'assets/images/watermark_banner.png');
+          WatermarkBanner.asset);
     });
 
     testWidgets('it keeps the artwork ratio when given no height',
@@ -19,8 +19,8 @@ void main() {
       await tester.pumpWidget(
           const MaterialApp(home: Scaffold(body: WatermarkBanner())));
       final ar = tester.widget<AspectRatio>(find.byType(AspectRatio));
-      // 1600x296 — laid out at its own shape rather than squeezed.
-      expect(ar.aspectRatio, closeTo(1600 / 296, 0.001));
+      // 1600x533 — laid out at its own shape rather than squeezed.
+      expect(ar.aspectRatio, closeTo(1600 / 533, 0.001));
     });
 
     testWidgets('a fixed height wins when supplied', (tester) async {
@@ -31,10 +31,10 @@ void main() {
           tester.widget<SizedBox>(find.byType(SizedBox).first).height, 26);
     });
 
-    test('the asset exists and is a real png', () {
-      final f = File('assets/images/watermark_banner.png');
+    test('the asset exists and is a real jpeg', () {
+      final f = File(WatermarkBanner.asset);
       expect(f.existsSync(), isTrue);
-      expect(f.readAsBytesSync().sublist(1, 4), [0x50, 0x4E, 0x47]);
+      expect(f.readAsBytesSync().sublist(0, 2), [0xFF, 0xD8]);
     });
   });
 
@@ -47,18 +47,20 @@ void main() {
           .readAsStringSync();
       final media = src.indexOf('height: mediaHeight');
       final title = src.indexOf('article.title');
-      for (final mark in ["'VAARADHI'"]) {
+      for (final mark in ['const VaaradhiVerticalWatermark()']) {
         final at = src.indexOf(mark);
         expect(at, greaterThan(media), reason: '$mark after the media slot');
         expect(at, lessThan(title), reason: '$mark before the headline');
       }
     });
 
-    test('on the article detail screen', () {
+    test('not on the article detail screen', () {
+      // The masthead belongs on shared and downloaded images, not on the
+      // reading screen — the detail photo gets Spotlight's faint wordmark.
       final src =
           File('lib/screens/news_detail_screen.dart').readAsStringSync();
-      expect(src.indexOf('WatermarkBanner('),
-          lessThan(src.indexOf('article.title,')));
+      expect(src, isNot(contains('WatermarkBanner(')));
+      expect(src, contains('const VaaradhiVerticalWatermark()'));
     });
   });
 
@@ -85,15 +87,20 @@ void main() {
       });
     }
 
-    test('the spotlight card has one wordmark, no logo, no band', () {
+    test('the spotlight card has one wordmark, one logo badge, no band', () {
       final card = code(bannerSurfaces[0]);
       expect("'VAARADHI'".allMatches(card).length, 1);
-      expect(card, isNot(contains('logo.png')));
+      // Two logos: the round source badge for desk stories (Play News
+      // policy: name the publisher) and the Way2News-style corner badge
+      // that brands screenshots.
+      expect('logo.png'.allMatches(card).length, 2);
+      expect(card, contains('spotlight_source_logo'));
+      expect('child: VaaradhiLogoBadge()'.allMatches(card).length, 1);
       expect(card, isNot(contains('WatermarkBanner(')));
     });
 
-    test('the detail screen has one banner', () {
-      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[1])).length, 1);
+    test('the detail screen has no banner', () {
+      expect('WatermarkBanner('.allMatches(code(bannerSurfaces[1])).length, 0);
     });
 
     test('the overlay itself no longer draws a band', () {
@@ -106,7 +113,8 @@ void main() {
       final share = code('lib/utils/share_service.dart');
       // The photo image paints the banner asset straight onto its canvas;
       // only the black no-image fallback card lays out the widget.
-      expect("'assets/images/watermark_banner.png'".allMatches(share).length,
+      // Same artwork as on screen: the shared image uses WatermarkBanner.asset.
+      expect('WatermarkBanner.asset'.allMatches(share).length,
           1);
       expect('WatermarkBanner('.allMatches(share).length, 1);
       expect(share, isNot(contains('ArticleWatermarkOverlay(')));

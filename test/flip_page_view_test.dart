@@ -1,43 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vaaradhi/core/widgets/flip_page_view.dart';
-import 'package:vaaradhi/models/spotlight_item.dart';
 
 void main() {
   group('FlipPageView transition maths', () {
-    test('a settled card gets no scale, so text is never on a scaled layer', () {
-      expect(FlipPageView.incomingScaleAt(0), 1.0);
-    });
-
-    test('the incoming card starts slightly small and settles to natural size', () {
-      final atStart = FlipPageView.incomingScaleAt(1.0);
-      expect(atStart, lessThan(1.0));
-      expect(atStart, greaterThan(0.95),
-          reason: 'scale is a finishing touch, not the effect');
-      expect(FlipPageView.incomingScaleAt(1.0),
-          lessThan(FlipPageView.incomingScaleAt(0.5)));
-    });
-
-    test('tilt is barely perceptible', () {
-      expect(FlipPageView.maxTiltDegrees, lessThan(2.0));
-      expect(FlipPageView.tiltAt(0), 0.0);
-      expect(FlipPageView.tiltAt(1), greaterThan(0));
-    });
-
-    test('scrim deepens as the outgoing card leaves', () {
+    test('a settled card is not moved', () {
+      expect(FlipPageView.parallaxAt(0, 800), 0.0);
       expect(FlipPageView.scrimAt(0), 0.0);
+    });
+
+    test('no background gap opens between the cards mid-swipe', () {
+      // Pager positions at progress p (screen coords, page height h):
+      //   outgoing bottom = h - p*h + parallax
+      //   incoming top    = h - p*h
+      // The outgoing card must always reach down to the incoming one.
+      const h = 800.0;
+      for (var p = 0.0; p <= 1.0; p += 0.05) {
+        final outgoingBottom = h - p * h + FlipPageView.parallaxAt(p, h);
+        final incomingTop = h - p * h;
+        expect(outgoingBottom, greaterThanOrEqualTo(incomingTop),
+            reason: 'progress $p');
+      }
+    });
+
+    test('the outgoing card drifts slower than the page', () {
+      const h = 800.0;
+      final netTravel = h - FlipPageView.parallaxAt(1, h);
+      expect(netTravel, greaterThan(0));
+      expect(netTravel, lessThan(h));
+    });
+
+    test('scrim deepens as the outgoing card is covered', () {
       expect(FlipPageView.scrimAt(1), greaterThan(FlipPageView.scrimAt(0.5)));
       expect(FlipPageView.scrimAt(1), lessThanOrEqualTo(1.0));
     });
 
-    test('the incoming card lags the pager, which is what reveals it', () {
-      expect(FlipPageView.revealLagAt(0, 800), 0.0);
-      expect(FlipPageView.revealLagAt(1, 800), greaterThan(0));
+    test('the incoming shadow is gone by the time the card lands', () {
+      expect(FlipPageView.shadowAt(0), 0.0);
+      expect(FlipPageView.shadowAt(0.5), greaterThan(0));
+      expect(FlipPageView.shadowAt(0.05), lessThan(FlipPageView.shadowAt(0.5)));
     });
 
     test('progress beyond the gesture is clamped', () {
       expect(FlipPageView.scrimAt(5), FlipPageView.scrimAt(1));
-      expect(FlipPageView.tiltAt(-3), FlipPageView.tiltAt(0));
+      expect(FlipPageView.parallaxAt(-3, 800), 0.0);
     });
   });
 

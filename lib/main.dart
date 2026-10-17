@@ -2,6 +2,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'services/poll_exposure.dart';
+import 'core/ads/ad_pacer.dart';
+import 'widgets/ads/corner_three_d_ad_overlay.dart';
 import 'core/navigation/app_navigator_observer.dart';
 import 'screens/account_login_screen.dart';
 import 'screens/splash_screen.dart';
@@ -32,6 +36,15 @@ void main() async {
   if (picker is ImagePickerAndroid) {
     picker.useAndroidPhotoPicker = true;
   }
+
+  // Licences of the bundled article fonts (SIL OFL 1.1), shown in the
+  // app's licence page.
+  LicenseRegistry.addLicense(() async* {
+    for (final font in const ['Ramabhadra', 'Mandali']) {
+      final text = await rootBundle.loadString('assets/fonts/OFL-$font.txt');
+      yield LicenseEntryWithLineBreaks(['google_fonts', font], text);
+    }
+  });
 
   // Global Flutter framework error handling
   FlutterError.onError = (details) {
@@ -73,6 +86,20 @@ void main() async {
   ]);
 
   // Immediately mount the application so the logo splash screen renders with zero white screen delay
+  // Poll frequency counts, so the first feed can honour them.
+  unawaited(PollExposure.instance.ready());
+  // Times active use for the ads that come and go (one clock per app run).
+  AdPacer.instance.start();
+  // Background push handler registered before runApp (notification
+  // handover); Firebase itself still initialises after the first frame.
+  if (!kIsWeb) {
+    try {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('[main] background handler registration deferred: $e');
+    }
+  }
+
   runApp(const VaaradhiApp());
 
   // Asynchronously initialize heavy background services (Firebase, FCM tokens, deep links, role sync)
@@ -89,11 +116,14 @@ Future<void> _initBackgroundServices() async {
     await DeepLinkService.instance.init();
 
     if (AppState.instance.isLoggedIn && AppState.instance.fcmToken != null) {
-      unawaited(ApiService.instance.updateFcmToken(AppState.instance.fcmToken!).catchError((_) => {}));
+      unawaited(ApiService.instance
+          .updateFcmToken(AppState.instance.fcmToken!)
+          .catchError((_) => {}));
     }
 
     if (AppState.instance.isLoggedIn) {
-      unawaited(AppState.instance.refreshRolesFromServer().catchError((_) => null));
+      unawaited(
+          AppState.instance.refreshRolesFromServer().catchError((_) => null));
     }
   } catch (e) {
     debugPrint('[Main] Background services init error: $e');
@@ -122,6 +152,21 @@ class VaaradhiApp extends StatelessWidget {
           themeMode: AppState.instance.themeMode,
           themeAnimationDuration: const Duration(milliseconds: 400),
           themeAnimationCurve: Curves.easeInOut,
+          // Every touch or scroll anywhere counts as active use for the
+          // ads that come and go (AdPacer). Purely observes; never consumes.
+          // The 3D / video corner ad sits above the Navigator, so it can
+          // appear on every screen.
+          builder: (context, child) => Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => AdPacer.instance.reportActivity(),
+            onPointerMove: (_) => AdPacer.instance.reportActivity(),
+            child: Stack(
+              children: [
+                if (child != null) Positioned.fill(child: child),
+                const Positioned.fill(child: CornerThreeDAdOverlay()),
+              ],
+            ),
+          ),
           home: const SplashScreen(),
           routes: {
             '/login': (_) => const AccountLoginScreen(),

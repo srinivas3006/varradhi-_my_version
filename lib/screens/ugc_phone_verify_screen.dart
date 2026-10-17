@@ -57,6 +57,11 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
             initialMobile: AppState.instance.userPhone);
     _phoneController.text = _c.mobile;
     _c.addListener(_onChanged);
+    // Already verified? The backend is asked before any OTP is sent; the
+    // screen closes itself (via _onChanged) when it says "Mobile verified.".
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _c.checkExistingVerification();
+    });
   }
 
   void _onChanged() {
@@ -112,6 +117,27 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
     if (ok && mounted) _c.editNumber();
   }
 
+  /// While the backend is asked whether this account is already verified.
+  Widget _checkingExisting() => Padding(
+        key: const Key('ugc-verify-checking'),
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Column(
+          children: [
+            const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5)),
+            const SizedBox(height: 16),
+            Text(
+              _t('మీ మొబైల్ ధృవీకరణను తనిఖీ చేస్తోంది…',
+                  'Checking your mobile verification…'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -144,12 +170,15 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
                       Colors.amber.shade800),
                 ],
                 const SizedBox(height: 28),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _c.step == UgcVerifyStep.enterCode
-                      ? _codeStep(isDark)
-                      : _phoneStep(isDark),
-                ),
+                if (_c.busy == UgcVerifyBusy.checkingExisting)
+                  _checkingExisting()
+                else
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: _c.step == UgcVerifyStep.enterCode
+                        ? _codeStep(isDark)
+                        : _phoneStep(isDark),
+                  ),
                 if (_c.errorMessage != null) ...[
                   const SizedBox(height: 16),
                   _banner(_c.errorMessage!, Icons.error_outline_rounded,
@@ -259,7 +288,8 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
         ),
         if (_c.mode == UgcVerifyMode.backendSms) ...[
           const SizedBox(height: 8),
-          Text(_t('OTP SMS ద్వారా పంపబడుతుంది.', 'The OTP will be sent by SMS.'),
+          Text(
+              _t('OTP SMS ద్వారా పంపబడుతుంది.', 'The OTP will be sent by SMS.'),
               style: const TextStyle(fontSize: 12, color: AppColors.textMuted)),
         ],
         const SizedBox(height: 20),
@@ -268,9 +298,8 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
           label: _t('OTP పంపండి', 'Send OTP'),
           busy: sending,
           busyLabel: _t('OTP పంపుతోంది…', 'Sending OTP…'),
-          onPressed: IndianMobile.isValid(_c.mobile) && !_c.isBusy
-              ? _sendCode
-              : null,
+          onPressed:
+              IndianMobile.isValid(_c.mobile) && !_c.isBusy ? _sendCode : null,
         ),
       ],
     );
@@ -367,6 +396,8 @@ class _UgcPhoneVerifyScreenState extends State<UgcPhoneVerifyScreen> {
         label: Text(_t('మళ్లీ ప్రయత్నించండి', 'Try again')),
       ));
     }
+    // Firebase could not send (e.g. BILLING_NOT_ENABLED): the backend SMS
+    // OTP is the way through. Without this button the reporter is stuck.
     if (_c.canUseFallback && _c.mode == UgcVerifyMode.firebase) {
       actions.add(OutlinedButton.icon(
         key: const Key('ugc-verify-fallback'),

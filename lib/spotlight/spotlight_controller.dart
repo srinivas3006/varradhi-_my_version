@@ -8,10 +8,12 @@ import '../models/spotlight_item.dart';
 import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../models/poll.dart';
+import '../services/poll_exposure.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
 import '../repositories/feed_repository.dart';
+import '../repositories/news_article_repository.dart';
 import '../services/notification_service.dart';
 import '../state/app_state.dart';
 import '../core/errors/app_exception.dart';
@@ -56,6 +58,8 @@ class SpotlightController extends ChangeNotifier {
         AppState.instance.city,
         AppState.instance.subdistrict,
         AppState.instance.village,
+        AppState.instance.isLoggedIn,
+        AppState.instance.userId,
       ].join('|');
 
   void _onPreferencesChanged() {
@@ -185,12 +189,19 @@ class SpotlightController extends ChangeNotifier {
       final isLocal = _state.isLocalNews;
       final category = _state.selectedCategory;
       final app = AppState.instance;
+      // Same rule as Home: the news language only, null = all languages.
       final lang = app.contentLanguage;
-      final selectedState = app.stateName;
-      final district = app.district;
-      final city = app.city;
-      final subdistrict = isLocal ? app.subdistrict : '';
-      final village = isLocal ? app.village : '';
+      // Backend contract (Oct 2026): after a place is chosen every feed call
+      // carries it — state, district, subdistrict and village. Main shows
+      // global news plus that state's and place's news; Local stays strict.
+      // With no place chosen, main sends none (broad feed) rather than the
+      // placeholder state.
+      final place = app.feedPlace;
+      final selectedState = isLocal ? app.stateName : place.state;
+      final district = isLocal ? app.district : place.district;
+      final city = isLocal || app.hasValidLocation ? app.city : '';
+      final subdistrict = isLocal ? app.subdistrict : place.subdistrict;
+      final village = isLocal ? app.village : place.village;
       final scope = isLocal ? 'local' : 'main';
       final currentArticles = _state.feed
           .map((item) => item.article)
@@ -201,14 +212,23 @@ class SpotlightController extends ChangeNotifier {
           items: currentArticles,
           nextCursor: _state.nextCursor,
           hasMore: _articleHasMore);
+      // Location is sent in both modes (backend contract, verified live):
+      // scope=main returns the broad newest-first feed and never hides other
+      // districts; scope=local returns only that place's stories.
+      final articleState = selectedState;
+      final articleDistrict = district;
+      final articleCity = city;
       final primary = refresh
           ? _feedRepository.getInitialFeed(
               scope: scope,
               category: category,
               lang: lang,
-              state: selectedState,
-              district: district,
-              city: city,
+              state: articleState,
+              district: articleDistrict,
+              city: articleCity,
+              // Local: the full place. The backend returns the district's
+              // news (district + village/mandal) and uses mandal/village only
+              // to rank nearby stories first. Main sends none of them.
               subdistrict: subdistrict,
               village: village,
               pageSize: 25,
@@ -219,9 +239,9 @@ class SpotlightController extends ChangeNotifier {
                   scope: scope,
                   category: category,
                   lang: lang,
-                  state: selectedState,
-                  district: district,
-                  city: city,
+                  state: articleState,
+                  district: articleDistrict,
+                  city: articleCity,
                   subdistrict: subdistrict,
                   village: village,
                   pageSize: 25)
@@ -231,6 +251,11 @@ class SpotlightController extends ChangeNotifier {
               .getUgcFeed(
                   cursor: refresh ? null : _ugcCursor,
                   scope: scope,
+                  // The reader's place in both modes. Citizen posts approved
+                  // at village / mandal / district level are shown by the
+                  // backend only to readers in that area: without it a guest
+                  // missed them, while a logged-in reader got them through
+                  // the saved profile location — different news per login.
                   state: selectedState,
                   district: district,
                   subdistrict: subdistrict,
@@ -259,8 +284,11 @@ class SpotlightController extends ChangeNotifier {
             ? ApiService.instance.getPolls()
             : Future.value(List<Poll>.from(_pollsPool)),
       ]);
-      if (_disposed || gen != _requestGeneration || seq != _paginationSequence)
+      if (_disposed ||
+          gen != _requestGeneration ||
+          seq != _paginationSequence) {
         return;
+      }
       final feedState = results[0] as FeedState<NewsArticle>;
       final ugc = results[1] as ApiResponse<List<NewsArticle>>;
       final ads = results[2] as ApiResponse<List<AdBanner>>;
@@ -293,7 +321,14 @@ class SpotlightController extends ChangeNotifier {
       }
       _articleHasMore = feedState.hasMore;
       final seen = <String>{};
-      final stories = [...feedState.items, ..._ugcItems]
+      // Main: global and state news only. Local: district, mandal and
+      // village news of the reader's own district.
+      final stories = [
+        ...feedState.items,
+        ..._ugcItems,
+      ]
+          .where(
+              (item) => belongsToTab(item, local: isLocal, district: district))
           .where((item) => seen.add('${item.contentKind}:${item.id}'))
           .toList()
         ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
@@ -305,6 +340,11 @@ class SpotlightController extends ChangeNotifier {
               SpotlightItem.posterPages(Map<String, dynamic>.from(json)))
           .where((item) => posterIds.add(item.id))
           .toList();
+      // Each poll appears once in the feed, and only while the reader has
+      // not voted on it or seen it [PollExposure.maxViews] times. Cycling the
+      // same poll every 8 stories showed one poll over and over.
+      await PollExposure.instance.ready();
+      final polls = PollExposure.instance.eligible(_pollsPool);
       final content = <SpotlightItem>[];
       var posterIndex = 0;
       var pollIndex = 0;
@@ -315,8 +355,8 @@ class SpotlightController extends ChangeNotifier {
         if (position % 5 == 0 && posterIndex < posters.length) {
           content.add(posters[posterIndex++]);
         }
-        if (position % 8 == 0 && _pollsPool.isNotEmpty) {
-          content.add(SpotlightItem.poll(_pollsPool[pollIndex++ % _pollsPool.length]));
+        if (position % 8 == 0 && pollIndex < polls.length) {
+          content.add(SpotlightItem.poll(polls[pollIndex++]));
         }
       }
       content.addAll(posters.skip(posterIndex));
@@ -324,6 +364,8 @@ class SpotlightController extends ChangeNotifier {
         contentItems: content,
         eligibleAds: _adsPool,
         allowTimed: true,
+        // Each ad at most twice, at least 6 stories apart.
+        policy: AdFrequencyPolicy.spotlight,
         contentKey: (item) => '${item.type.name}:${item.id}',
       );
       final updatedFeed = run
@@ -336,8 +378,9 @@ class SpotlightController extends ChangeNotifier {
               : entry.content!)
           .toList();
       final hasMore = _articleHasMore || _ugcHasMore;
-      if (updatedFeed.isNotEmpty && hasMore)
+      if (updatedFeed.isNotEmpty && hasMore) {
         updatedFeed.add(SpotlightItem.shimmer());
+      }
       _state = _state.copyWith(
           feed: updatedFeed,
           nextCursor: feedState.nextCursor,
@@ -347,8 +390,21 @@ class SpotlightController extends ChangeNotifier {
           isFetching: false,
           errorMessage: failure,
           clearError: failure == null);
-      if (stories.isNotEmpty)
+      if (stories.isNotEmpty) {
         NotificationService.instance.requestPermissionAfterArticlesLoaded();
+      }
+      // A page whose stories all belong to the other tab adds nothing
+      // visible; fetch on (a few pages at most) so the feed never stalls.
+      final grew = stories.length > _visibleStoryCount;
+      _visibleStoryCount = stories.length;
+      if ((refresh ? stories.length < 3 : !grew) &&
+          hasMore &&
+          _emptyPageStreak < 3) {
+        _emptyPageStreak++;
+        _autoLoadMore = true;
+      } else {
+        _emptyPageStreak = 0;
+      }
     } catch (e) {
       if (gen != _requestGeneration) return;
       debugPrint('[SpotlightController] feed load error: $e');
@@ -370,7 +426,46 @@ class SpotlightController extends ChangeNotifier {
         completer.complete();
       }
       if (!_disposed) notifyListeners();
+      if (_autoLoadMore && !_disposed && gen == _requestGeneration) {
+        _autoLoadMore = false;
+        unawaited(loadFeed());
+      }
     }
+  }
+
+  int _visibleStoryCount = 0;
+  int _emptyPageStreak = 0;
+  bool _autoLoadMore = false;
+
+  static const _mainLevels = {
+    'global',
+    'national',
+    'international',
+    'country',
+    'state',
+    '',
+  };
+  static const _localLevels = {
+    'district',
+    'local',
+    'mandal',
+    'subdistrict',
+    'village',
+    'city',
+  };
+
+  /// Main shows global and state news; Local shows district, mandal and
+  /// village news of the reader's district. Uses the story's
+  /// coverage_level (citizen posts get it from their place fields).
+  @visibleForTesting
+  static bool belongsToTab(NewsArticle a,
+      {required bool local, required String district}) {
+    final level = a.coverageLevel.trim().toLowerCase();
+    if (!local) return _mainLevels.contains(level);
+    if (!_localLevels.contains(level)) return false;
+    final mine = district.trim().toLowerCase();
+    final theirs = (a.district ?? '').trim().toLowerCase();
+    return mine.isEmpty || theirs.isEmpty || theirs == mine;
   }
 
   /// Placement is computed from parent content, never from elapsed swipe time.
@@ -455,6 +550,9 @@ class SpotlightController extends ChangeNotifier {
   }
 
   Future<void> refreshFeed() async {
+    // A refresh shows each story as it is now — new images included — not
+    // the full-article copies fetched earlier.
+    NewsArticleRepository.instance.clearCache();
     await loadFeed(refresh: true);
   }
 

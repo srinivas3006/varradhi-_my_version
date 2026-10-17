@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../models/news_article.dart';
 import '../state/app_state.dart';
+import 'analytics_queue.dart';
 import 'api_service.dart';
 import 'dio_client.dart';
 
@@ -27,11 +30,26 @@ class EngagementEndpoints {
 }
 
 enum ReportOutcome {
+  /// 201: in the backend moderation queue.
   sent,
+
+  /// 400 "… already reported by this user."
   alreadyReported,
 
-  /// No report endpoint for this story type yet; caller uses the fallback.
-  unsupported,
+  /// 401: the server does not (yet) take reports from guests. The caller
+  /// asks the reader to log in and sends the same report again.
+  loginRequired,
+
+  /// 404: the story was removed or is no longer public.
+  notFound,
+
+  /// 429: too many reports; try again later.
+  throttled,
+
+  /// 400 validation error (bad reason, notes too long).
+  invalid,
+
+  /// Network / 5xx / anything else.
   failed,
 }
 
@@ -40,8 +58,8 @@ enum ReportOutcome {
 ///
 /// Real failures (network, 404 not found, 429 throttled, 5xx) surface so the
 /// UI can roll back. Only a server without the route (405/501, i.e. an older
-/// deployment) makes likes/saves stay on the device and desk reports fall
-/// back to email.
+/// deployment) makes likes/saves stay on the device. Reports never fall back
+/// to email (handover §17.1): they go to the backend moderation queue.
 class ContentEngagementService {
   ContentEngagementService._({Dio? dio}) : _dioOverride = dio;
   static final ContentEngagementService instance = ContentEngagementService._();
@@ -57,8 +75,6 @@ class ContentEngagementService {
   final Set<String> _unsupported = {};
 
   static const _kUgcReaction = 'ugc_reaction';
-  static const _kUgcBookmark = 'ugc_bookmark';
-  static const _kArticleReport = 'article_report';
 
   /// Only "route/method not available" counts as unsupported. The endpoints
   /// are live (handover §17), so a 404 means the *item* is missing or not
@@ -88,7 +104,10 @@ class ContentEngagementService {
   Future<Map<String, dynamic>> react(NewsArticle story, String reaction) async {
     final id = _idOf(story);
     if (!story.isUgc) {
-      return ApiService.instance.postArticleReaction(id, reaction);
+      final counts =
+          await ApiService.instance.postArticleReaction(id, reaction);
+      _trackReaction(story, reaction);
+      return counts;
     }
     if (_unsupported.contains(_kUgcReaction)) return const {};
     try {
@@ -96,6 +115,7 @@ class ContentEngagementService {
       final r = reaction == 'none'
           ? await _dio.delete(path)
           : await _dio.put(path, data: {'reaction_type': reaction});
+      _trackReaction(story, reaction);
       return _data(r);
     } catch (e) {
       if (_isUnsupported(e)) {
@@ -106,68 +126,188 @@ class ContentEngagementService {
     }
   }
 
-  // --- Save / Bookmark ----------------------------------------------------
+  /// Analytics, after the server accepted the reaction.
+  static void _trackReaction(NewsArticle story, String reaction) {
+    unawaited(AnalyticsQueue.instance.trackContent('reaction', story,
+        metadata: reaction == 'none'
+            ? const {'action': 'removed'}
+            : {'reaction': reaction, 'action': 'set'}));
+  }
 
-  /// Toggles the saved state towards [nowSaved] and returns the state that
-  /// actually holds afterwards, or null on failure.
+  /// Analytics, after the bookmark change went through.
+  static void _trackBookmark(NewsArticle story, bool bookmarked) {
+    unawaited(AnalyticsQueue.instance.trackContent('bookmark', story,
+        metadata: {'action': bookmarked ? 'added' : 'removed'}));
+  }
+
+  // --- Bookmark -----------------------------------------------------------
+  //
+  // "Bookmark" is the backend's name for saving a story, and the only one the
+  // app uses for it (bookmark handover):
+  //   save article:    POST /api/v1/bookmarks/          {article_id}  §3
+  //   unsave article:  POST /api/v1/bookmarks/toggle/   {article_id}  §2
+  //   citizen post:    POST /api/v1/ugc/{id}/bookmark/toggle/         §4
+  // Toggles answer {bookmarked: bool}, which is the final state.
+
+  /// Moves the story's bookmark to [nowBookmarked] and returns the state the
+  /// server reports afterwards, or null on failure (the caller restores the
+  /// previous icon).
   ///
-  /// Citizen posts: the server answers `{bookmarked: bool}` and that value
-  /// is the truth (the endpoint is a toggle, so it can disagree with the
-  /// optimistic guess). `GET /api/v1/bookmarks/` is article-only, so a copy
-  /// of each saved citizen post is also kept on the device for the
-  /// Bookmarks screen to list.
-  Future<bool?> setSaved(NewsArticle story, {required bool nowSaved}) async {
+  /// Nothing here is retried after a failure: a timed-out toggle may still
+  /// have gone through, and repeating it would reverse the bookmark.
+  Future<bool?> setBookmarked(NewsArticle story,
+      {required bool nowBookmarked}) async {
     final id = _idOf(story);
-    if (!story.isUgc) {
-      try {
-        var saved = await ApiService.instance.toggleBookmark(id) ?? nowSaved;
-        if (saved != nowSaved) {
-          // The server already had the state the reader asked for (the
-          // app's copy was stale), so the toggle undid it. Toggle once more
-          // so the server ends where the reader tapped.
-          saved = await ApiService.instance.toggleBookmark(id) ?? nowSaved;
-        }
-        return saved;
-      } catch (e) {
-        debugPrint('[Engagement] article bookmark failed: $e');
-        return null;
+    if (id.isEmpty) {
+      debugPrint('[Bookmark] no id on story; nothing sent');
+      return null;
+    }
+    debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+        '-> want bookmarked=$nowBookmarked');
+
+    if (!AppState.instance.isLoggedIn) {
+      // Guests bookmark too: the story is kept on the phone
+      // and copied to the account when they log in (syncGuestBookmarks).
+      // The server has no guest bookmarks, so nothing is sent now.
+      if (nowBookmarked) {
+        await AppState.instance.saveStoryOnDevice(story);
+      } else {
+        await AppState.instance.removeDeviceSavedStory(id);
+        AppState.instance.setBookmarked(id, false);
       }
+      debugPrint('[Bookmark] guest: $id kept on the phone '
+          'bookmarked=$nowBookmarked');
+      _trackBookmark(story, nowBookmarked);
+      return nowBookmarked;
     }
 
-    bool? saved;
-    if (!_unsupported.contains(_kUgcBookmark)) {
+    try {
+      final bookmarked = story.isUgc
+          ? await _toggleUgc(id)
+          : await _setArticle(id, nowBookmarked);
+      debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+          'now bookmarked=$bookmarked');
+      _trackBookmark(story, bookmarked);
+      return bookmarked;
+    } catch (e) {
+      debugPrint('[Bookmark] ${story.isUgc ? 'ugc' : 'article'} $id '
+          'failed: ${_message(e)}');
+      return null;
+    }
+  }
+
+  Future<bool> _setArticle(String id, bool nowBookmarked) async {
+    if (nowBookmarked) {
+      // Save only — this endpoint can never remove a bookmark, so a stale
+      // app copy cannot turn a save into an unsave.
+      await ApiService.instance.addBookmark(id);
+      return true;
+    }
+    final bookmarked = await ApiService.instance.toggleBookmark(id);
+    if (bookmarked == true) {
+      // It was not bookmarked on the server, so this toggle added it. Toggle
+      // back so the server ends where the reader tapped. This is a reply to
+      // a successful answer, not a retry of a failed request.
+      debugPrint('[Bookmark] article $id was not bookmarked on the server; '
+          'toggling back');
+      return await ApiService.instance.toggleBookmark(id) ?? false;
+    }
+    return bookmarked ?? false;
+  }
+
+  Future<bool> _toggleUgc(String id) async {
+    final r = await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
+    final value = _data(r)['bookmarked'];
+    debugPrint('[Bookmark] POST ${EngagementEndpoints.ugcBookmarkToggle(id)} '
+        '-> ${r.statusCode} bookmarked=$value');
+    if (value is! bool) throw Exception('no bookmarked in response');
+    // A logged-in bookmark lives on the server; drop any phone copy.
+    if (!value) await AppState.instance.removeDeviceSavedStory(id);
+    return value;
+  }
+
+  Future<void>? _guestSync;
+
+  /// Copies the bookmarks a guest made on this phone into the account that
+  /// just logged in, then clears them from the phone. Runs once per login
+  /// and again whenever the Saved screen opens while any are left (e.g. the
+  /// network was down at login).
+  ///
+  /// Checks the account's saved list first so nothing is toggled off: an
+  /// article is added with the safe POST /bookmarks/, and a citizen post is
+  /// toggled only when the account does not have it yet. A story that fails
+  /// stays on the phone for the next attempt.
+  Future<void> syncGuestBookmarks() => _guestSync ??=
+      _syncGuestBookmarks().whenComplete(() => _guestSync = null);
+
+  Future<void> _syncGuestBookmarks() async {
+    final guest = AppState.instance.deviceSavedStories;
+    if (guest.isEmpty || !AppState.instance.isLoggedIn) return;
+    debugPrint('[Bookmark] copying ${guest.length} guest bookmark(s) '
+        'to the account');
+
+    final Set<String> onServer;
+    try {
+      onServer = (await ApiService.instance.getBookmarks())
+          .map((i) => i.contentId)
+          .toSet();
+    } catch (e) {
+      debugPrint('[Bookmark] guest copy postponed, list failed: '
+          '${_message(e)}');
+      return;
+    }
+
+    for (final story in guest) {
+      final id = _idOf(story);
+      if (id.isEmpty) continue;
       try {
-        final r = await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
-        final value = _data(r)['bookmarked'];
-        saved = value is bool ? value : nowSaved;
-      } catch (e) {
-        if (!_isUnsupported(e)) {
-          debugPrint('[Engagement] UGC bookmark failed: $e');
-          return null;
+        if (!onServer.contains(id)) {
+          if (story.isUgc) {
+            final r =
+                await _dio.post(EngagementEndpoints.ugcBookmarkToggle(id));
+            if (_data(r)['bookmarked'] != true) {
+              throw Exception('toggle did not add it');
+            }
+          } else {
+            await ApiService.instance.addBookmark(id);
+          }
         }
-        _unsupported.add(_kUgcBookmark);
+        await AppState.instance.removeDeviceSavedStory(id);
+        AppState.instance.setBookmarked(id, true);
+        debugPrint('[Bookmark] guest bookmark $id copied to the account');
+      } catch (e) {
+        final code = e is DioException ? e.response?.statusCode : null;
+        if (code == 400 || code == 404) {
+          // Handover §9: the story is unpublished or gone; it can never be
+          // saved, so stop retrying it.
+          await AppState.instance.removeDeviceSavedStory(id);
+          AppState.instance.setBookmarked(id, false);
+          debugPrint('[Bookmark] guest bookmark $id no longer available '
+              '($code); dropped');
+        } else {
+          debugPrint('[Bookmark] guest bookmark $id kept on the phone: '
+              '${_message(e)}');
+        }
       }
     }
-    saved ??= nowSaved; // older server: device-only
-    if (saved) {
-      await AppState.instance.saveStoryOnDevice(story);
-    } else {
-      await AppState.instance.removeDeviceSavedStory(id);
-      AppState.instance.setBookmarked(id, false);
-    }
-    return saved;
   }
 
   // --- Report -------------------------------------------------------------
 
+  /// Sends a report for any story. No login is required on the app side:
+  /// a logged-in reader's token goes with it, a guest is identified by the
+  /// X-Device-ID header every request carries. If the server still demands
+  /// login it answers 401 → [ReportOutcome.loginRequired].
+  ///
+  /// [notes] is capped at the backend's 1000-character limit.
   Future<ReportOutcome> report(NewsArticle story,
       {required String reason, String? notes}) async {
     final id = _idOf(story);
     if (id.isEmpty) return ReportOutcome.failed;
-
-    if (!story.isUgc && _unsupported.contains(_kArticleReport)) {
-      return ReportOutcome.unsupported;
+    if (notes != null && notes.length > maxReportNotes) {
+      notes = notes.substring(0, maxReportNotes);
     }
+
     try {
       if (story.isUgc) {
         // Backend accepts any reason string up to 100 chars (§12), so the
@@ -189,14 +329,24 @@ class ContentEngagementService {
       if (message.contains('already reported')) {
         return ReportOutcome.alreadyReported;
       }
-      if (!story.isUgc && _isUnsupported(e)) {
-        _unsupported.add(_kArticleReport);
-        return ReportOutcome.unsupported;
+      final status = e is DioException ? e.response?.statusCode : null;
+      switch (status) {
+        case 401:
+          return ReportOutcome.loginRequired;
+        case 404:
+          return ReportOutcome.notFound;
+        case 429:
+          return ReportOutcome.throttled;
+        case 400:
+          return ReportOutcome.invalid;
       }
-      debugPrint('[Engagement] report failed: $e');
+      debugPrint('[Engagement] report failed: ${e.runtimeType} $status');
       return ReportOutcome.failed;
     }
   }
+
+  /// Backend limit on report notes.
+  static const int maxReportNotes = 1000;
 
   static String _message(Object e) {
     if (e is DioException) {

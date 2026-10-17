@@ -130,8 +130,8 @@ class LocationPermissionCoordinator {
 
   static void _showSettingsSnackBar(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Location permission is blocked in settings.'),
+      const SnackBar(
+        content: Text('Location permission is blocked in settings.'),
         action: SnackBarAction(
           label: 'Settings',
           onPressed: Geolocator.openAppSettings,

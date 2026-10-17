@@ -377,11 +377,12 @@ class _VideoTabState extends State<VideoTab> {
                   ad: _bottomAd!,
                   placementZone: 'feed',
                   onDismiss: () {
-                    if (mounted)
+                    if (mounted) {
                       setState(() {
                         _bottomAdDismissed = true;
                         _bottomAd = null;
                       });
+                    }
                   },
                 ),
               ),
@@ -617,7 +618,6 @@ class _VideoTabState extends State<VideoTab> {
   }
 }
 
-
 /// Individual Vertical Short Card with Unified Video Engine & Glass Controls
 class VideoCardItem extends StatefulWidget {
   final VideoItem video;
@@ -702,8 +702,6 @@ class _VideoCardItemState extends State<VideoCardItem>
       setState(() {
         _controller = ctrl;
       });
-
-
     } catch (e) {
       if (!mounted || token != _generationToken) {
         ctrl.dispose();

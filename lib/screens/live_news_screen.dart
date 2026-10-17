@@ -67,7 +67,8 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary))
           : RefreshIndicator(
               onRefresh: _fetchLiveNews,
               color: AppColors.primary,
@@ -79,7 +80,8 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                         // 1. LIVE ACTIVE SECTION
                         if (activeStreams.isNotEmpty) ...[
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
                             child: Row(
                               children: [
                                 Container(
@@ -106,7 +108,9 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                           ...activeStreams.map((stream) {
                             final vId = stream.youtubeVideoId.isNotEmpty
                                 ? stream.youtubeVideoId
-                                : (YoutubePlayerController.convertUrlToId(stream.youtubeUrl) ?? '');
+                                : (YoutubePlayerController.convertUrlToId(
+                                        stream.youtubeUrl) ??
+                                    '');
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: _LiveVideoCard(
@@ -122,10 +126,12 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                         // 2. UPCOMING LIVE SECTION (Optional)
                         if (upcomingStreams.isNotEmpty) ...[
                           const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
-                                Icon(Icons.schedule_rounded, size: 16, color: Color(0xFFF59E0B)),
+                                Icon(Icons.schedule_rounded,
+                                    size: 16, color: Color(0xFFF59E0B)),
                                 SizedBox(width: 6),
                                 Text(
                                   'షెడ్యూల్ చేసిన ప్రసారాలు',
@@ -141,7 +147,8 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                           ),
                           ...upcomingStreams.map((stream) {
                             return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 6),
                               child: _UpcomingLiveBanner(stream: stream),
                             );
                           }),
@@ -167,7 +174,8 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                   color: AppColors.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.live_tv_rounded, size: 40, color: AppColors.primary),
+                child: const Icon(Icons.live_tv_rounded,
+                    size: 40, color: AppColors.primary),
               ),
               const SizedBox(height: 20),
               const Text(
@@ -198,7 +206,8 @@ class _LiveNewsScreenState extends State<LiveNewsScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   side: const BorderSide(color: AppColors.primary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
                 ),
               ),
             ],
@@ -268,7 +277,9 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
             Container(
               height: 200,
               color: Colors.black12,
-              child: const Center(child: Icon(Icons.videocam_off_rounded, size: 48, color: Colors.grey)),
+              child: const Center(
+                  child: Icon(Icons.videocam_off_rounded,
+                      size: 48, color: Colors.grey)),
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -279,7 +290,8 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(4),
@@ -287,11 +299,15 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.fiber_manual_record, color: Colors.white, size: 10),
+                          Icon(Icons.fiber_manual_record,
+                              color: Colors.white, size: 10),
                           SizedBox(width: 4),
                           Text(
                             'LIVE',
-                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900),
                           ),
                         ],
                       ),
@@ -315,14 +331,18 @@ class _LiveVideoCardState extends State<_LiveVideoCard> {
                   const SizedBox(height: 6),
                   Text(
                     widget.channelName,
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
                 if (widget.description.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     widget.description,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMuted),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -352,16 +372,20 @@ class _UpcomingLiveBanner extends StatelessWidget {
       } else if (diff.inHours > 0 && diff.inHours < 24) {
         scheduledText = '${diff.inHours} గంటల్లో ప్రారంభం';
       } else if (diff.inDays > 0) {
-        scheduledText = '${stream.scheduledAt!.day}/${stream.scheduledAt!.month} న షెడ్యూల్ చేయబడింది';
+        scheduledText =
+            '${stream.scheduledAt!.day}/${stream.scheduledAt!.month} న షెడ్యూల్ చేయబడింది';
       }
     }
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFFFFBEB),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : const Color(0xFFFFFBEB),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+        border:
+            Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -371,7 +395,8 @@ class _UpcomingLiveBanner extends StatelessWidget {
               color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.notifications_active_rounded, color: Color(0xFFF59E0B), size: 22),
+            child: const Icon(Icons.notifications_active_rounded,
+                color: Color(0xFFF59E0B), size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -401,7 +426,9 @@ class _UpcomingLiveBanner extends StatelessWidget {
                     ),
                     if (stream.channelName.isNotEmpty) ...[
                       const SizedBox(width: 6),
-                      Text('• ${stream.channelName}', style: const TextStyle(fontSize: 11.5, color: AppColors.textMuted)),
+                      Text('• ${stream.channelName}',
+                          style: const TextStyle(
+                              fontSize: 11.5, color: AppColors.textMuted)),
                     ],
                   ],
                 ),
@@ -414,7 +441,8 @@ class _UpcomingLiveBanner extends StatelessWidget {
               HapticFeedback.lightImpact();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('ఈ ప్రత్యక్ష ప్రసారం కోసం రిమైండర్ సెట్ చేయబడింది'),
+                  content:
+                      Text('ఈ ప్రత్యక్ష ప్రసారం కోసం రిమైండర్ సెట్ చేయబడింది'),
                   duration: Duration(seconds: 2),
                 ),
               );
@@ -424,9 +452,11 @@ class _UpcomingLiveBanner extends StatelessWidget {
               minimumSize: const Size(60, 32),
               foregroundColor: const Color(0xFFD97706),
               side: const BorderSide(color: Color(0xFFD97706)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
             ),
-            child: const Text('రిమైండర్', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+            child: const Text('రిమైండర్',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
           ),
         ],
       ),

@@ -114,7 +114,7 @@ void main() {
       expect(find.byType(SpotlightScreenView), findsOneWidget);
       expect(find.byType(LocalNewsTab), findsNothing);
 
-      // VideoTab and ProfileTab must still be unmounted
+      // Reels (VideoTab) is still unmounted, and Profile is not a tab.
       expect(find.byType(VideoTab), findsNothing);
       expect(find.byType(ProfileTab), findsNothing);
 

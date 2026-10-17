@@ -21,10 +21,13 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
     _fetchSessions();
   }
 
-  String _firstString(Map<String, dynamic> json, List<String> keys, [String fallback = '']) {
+  String _firstString(Map<String, dynamic> json, List<String> keys,
+      [String fallback = '']) {
     for (final key in keys) {
       final value = json[key];
-      if (value != null && value.toString().trim().isNotEmpty) return value.toString();
+      if (value != null && value.toString().trim().isNotEmpty) {
+        return value.toString();
+      }
     }
     return fallback;
   }
@@ -44,9 +47,11 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
         final deviceId = _firstString(json, ['device_id']);
         return {
           'id': _firstString(json, ['id', 'session_id']),
-          'device': _firstString(json, ['device_name', 'device'], 'తెలియని పరికరం'),
+          'device':
+              _firstString(json, ['device_name', 'device'], 'తెలియని పరికరం'),
           'deviceType': _firstString(json, ['device_type']).toLowerCase(),
-          'lastActive': _firstString(json, ['last_active_at', 'last_used_at', 'updated_at', 'created_at']),
+          'lastActive': _firstString(json,
+              ['last_active_at', 'last_used_at', 'updated_at', 'created_at']),
           'isCurrent': deviceId.isNotEmpty && deviceId == currentDeviceId,
         };
       }).toList();
@@ -73,8 +78,12 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
     if (dt == null) return raw;
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 5) return 'ప్రస్తుతం యాక్టివ్‌గా ఉంది';
-    if (diff.inHours < 1) return 'చివరిగా ${diff.inMinutes} నిమిషాల కిందట యాక్టివ్‌గా ఉంది';
-    if (diff.inDays < 1) return 'చివరిగా ${diff.inHours} గంటల కిందట యాక్టివ్‌గా ఉంది';
+    if (diff.inHours < 1) {
+      return 'చివరిగా ${diff.inMinutes} నిమిషాల కిందట యాక్టివ్‌గా ఉంది';
+    }
+    if (diff.inDays < 1) {
+      return 'చివరిగా ${diff.inHours} గంటల కిందట యాక్టివ్‌గా ఉంది';
+    }
     return 'చివరిగా ${diff.inDays} రోజుల కిందట యాక్టివ్‌గా ఉంది';
   }
 
@@ -83,7 +92,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('సెషన్‌ను రద్దు చేయాలా?'),
-        content: const Text('మీరు ఖచ్చితంగా ఈ పరికరం నుండి లాగ్ అవుట్ చేయాలనుకుంటున్నారా?'),
+        content: const Text(
+            'మీరు ఖచ్చితంగా ఈ పరికరం నుండి లాగ్ అవుట్ చేయాలనుకుంటున్నారా?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -101,19 +111,23 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                 await ApiService.instance.revokeDeviceSession(id);
                 if (mounted) {
                   messenger.showSnackBar(
-                    const SnackBar(content: Text('పరికర సెషన్ రద్దు చేయబడింది.')),
+                    const SnackBar(
+                        content: Text('పరికర సెషన్ రద్దు చేయబడింది.')),
                   );
                 }
               } catch (e) {
                 if (mounted) {
                   setState(() => _sessions = previousSessions);
                   messenger.showSnackBar(
-                    const SnackBar(content: Text('సెషన్‌ను రద్దు చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.')),
+                    const SnackBar(
+                        content: Text(
+                            'సెషన్‌ను రద్దు చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.')),
                   );
                 }
               }
             },
-            child: const Text('రద్దు చేయి', style: TextStyle(color: AppColors.primary)),
+            child: const Text('రద్దు చేయి',
+                style: TextStyle(color: AppColors.primary)),
           ),
         ],
       ),
@@ -136,7 +150,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_error != null) {
@@ -146,14 +161,18 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
           children: [
             Text(_error!),
             const SizedBox(height: 16),
-            ElevatedButton(onPressed: _fetchSessions, child: const Text('మళ్లీ ప్రయత్నించండి')),
+            ElevatedButton(
+                onPressed: _fetchSessions,
+                child: const Text('మళ్లీ ప్రయత్నించండి')),
           ],
         ),
       );
     }
 
     if (_sessions.isEmpty) {
-      return const Center(child: Text('యాక్టివ్ సెషన్‌లు ఏవీ కనుగొనబడలేదు.', style: TextStyle(color: AppColors.textMuted)));
+      return const Center(
+          child: Text('యాక్టివ్ సెషన్‌లు ఏవీ కనుగొనబడలేదు.',
+              style: TextStyle(color: AppColors.textMuted)));
     }
 
     return RefreshIndicator(
@@ -197,21 +216,29 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
-                                color: Theme.of(context).textTheme.bodyLarge?.color,
+                                color: Theme.of(context)
+                                    .textTheme
+                                    .bodyLarge
+                                    ?.color,
                               ),
                             ),
                           ),
                           if (isCurrent) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                color: const Color(0xFF10B981)
+                                    .withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text(
                                 'ప్రస్తుత పరికరం',
-                                style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold),
+                                style: TextStyle(
+                                    color: Color(0xFF10B981),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                           ]
@@ -219,7 +246,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _formatLastActive(session['lastActive'] as String? ?? ''),
+                        _formatLastActive(
+                            session['lastActive'] as String? ?? ''),
                         style: const TextStyle(
                           fontSize: 13,
                           color: AppColors.textMuted,
@@ -230,7 +258,8 @@ class _DeviceSessionsScreenState extends State<DeviceSessionsScreen> {
                 ),
                 if (!isCurrent)
                   IconButton(
-                    icon: const Icon(Icons.exit_to_app, color: AppColors.primary),
+                    icon:
+                        const Icon(Icons.exit_to_app, color: AppColors.primary),
                     onPressed: () => _revokeSession(session['id'] as String),
                     tooltip: 'సెషన్‌ను రద్దు చేయండి',
                   ),

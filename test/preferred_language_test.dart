@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -104,16 +105,21 @@ void main() {
       expect(body, isNot(contains('} catch (_) {\n      // Backend error')));
     });
 
-    test('theme and font size are read back after login', () {
+    // The phone's theme wins after login: the server default used to flip a
+    // reader's light theme to dark, so the active theme is pushed to the
+    // profile instead of read from it. Font size is still read back.
+    test('font size is read back; the phone theme is synced, not overwritten',
+        () {
       final fn = state2.substring(state2.indexOf('Future<void> refreshRolesFromServer'));
-      expect(fn, contains("me['theme']"));
       expect(fn, contains("me['font_size']"));
+      expect(fn, contains('_syncProfileToBackend(theme: themeMode.name)'));
+      expect(fn, isNot(contains("me['theme']")));
     });
 
-    test('theme values map to the documented enum', () {
-      final fn = state2.substring(state2.indexOf('Future<void> refreshRolesFromServer'));
-      expect(fn, contains("'light' => ThemeMode.light"));
-      expect(fn, contains("'dark' => ThemeMode.dark"));
+    test('theme values sent are the documented enum', () {
+      // themeMode.name is what PATCH /auth/me/ receives.
+      expect(ThemeMode.values.map((m) => m.name),
+          containsAll(['light', 'dark', 'system']));
     });
   });
 }
