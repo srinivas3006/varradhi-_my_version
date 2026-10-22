@@ -643,6 +643,11 @@ class AppState extends ChangeNotifier {
     unawaited(ContentEngagementService.instance
         .syncGuestBookmarks()
         .catchError((Object e) => debugPrint('[Bookmark] guest copy: $e')));
+    // Categories chosen as a guest go to the account as well.
+    if (preferredCategories.isNotEmpty) {
+      unawaited(syncPreferredCategories().catchError(
+          (Object e) => debugPrint('[Preferences] guest copy: $e')));
+    }
   }
 
   /// Called by the Dio interceptor after a successful silent token refresh.
@@ -1003,45 +1008,65 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<void> setPreferredCategories(List<String> categories) async {
-    preferredCategories = categories;
+  /// Saves the reader's chosen categories (backend slugs) on the device.
+  /// A signed-in reader's choice is sent to the backend separately with
+  /// [syncPreferredCategories], so the screen can tell whether it worked.
+  Future<void> setPreferredCategories(List<String> categorySlugs) async {
+    preferredCategories = List<String>.from(categorySlugs);
     hasPromptedPreferences = true;
     notifyListeners();
     await _persist();
-
-    if (isLoggedIn) {
-      try {
-        // The on-device list mixes real content categories with location
-        // and format filters (e.g. "Andhra Pradesh", "Videos") that are not
-        // valid category slugs server-side. Sending an unknown slug makes
-        // the whole PATCH fail validation, so only forward slugs that
-        // actually exist in the backend's active category list.
-        final validSlugs = (await ApiService.instance.getCategories())
-            .map((c) => c.slug)
-            .toSet();
-        final Map<String, double> weights = {};
-        for (var cat in categories) {
-          final slug = _categoryToSlug(cat);
-          if (slug.isNotEmpty && validSlugs.contains(slug)) {
-            weights[slug] = 1.0;
-          }
-        }
-        if (weights.isNotEmpty) {
-          await ApiService.instance.updateCategoryPreferences(weights);
-        }
-      } catch (e) {
-        debugPrint('Failed to sync category preferences to backend: $e');
-      }
-    }
   }
 
-  static String _categoryToSlug(String cat) {
-    return cat
-        .trim()
-        .toLowerCase()
-        .replaceAll('&', 'and')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
+  /// Sends the saved categories to `PATCH /api/v1/users/me/preferences/`.
+  /// Throws when the reader is signed out or the request fails.
+  ///
+  /// Every active category is sent — chosen ones 1.0, the rest 0.0 — so
+  /// unticking a category also reaches the backend. Before, only ticked
+  /// names went, and only those whose English name happened to equal a
+  /// slug (5 of the 16 chips), so most choices never arrived and none could
+  /// be removed.
+  Future<void> syncPreferredCategories() async {
+    if (!isLoggedIn) throw StateError('Not signed in');
+    final active = (await ApiService.instance.getCategories())
+        .where((c) => c.isActive && c.slug.isNotEmpty)
+        .map((c) => c.slug)
+        .toSet();
+    if (active.isEmpty) throw StateError('Categories unavailable');
+    final chosen = resolvePreferenceSlugs(preferredCategories, active);
+    await ApiService.instance.updateCategoryPreferences({
+      for (final slug in active) slug: chosen.contains(slug) ? 1.0 : 0.0,
+    });
+  }
+
+  /// Maps saved entries onto [activeSlugs]. Entries are slugs now; older
+  /// installs saved the screen's English chip names, which are translated
+  /// here so nobody's earlier choice is lost.
+  static Set<String> resolvePreferenceSlugs(
+      Iterable<String> saved, Set<String> activeSlugs) {
+    const legacy = <String, List<String>>{
+      'national': ['national-news'],
+      'andhra pradesh': ['state-news'],
+      'telangana': ['state-news'],
+      'cinema': ['cinema', 'cinima'],
+      'education & jobs': ['education', 'jobs-careers'],
+      'spiritual': ['devotional'],
+      'latest news': ['general'],
+    };
+    final result = <String>{};
+    for (final entry in saved) {
+      if (activeSlugs.contains(entry)) {
+        result.add(entry);
+        continue;
+      }
+      final key = entry.trim().toLowerCase();
+      if (activeSlugs.contains(key)) {
+        result.add(key);
+        continue;
+      }
+      result.addAll((legacy[key] ?? const []).where(activeSlugs.contains));
+    }
+    return result;
   }
 
   void markPreferencesPrompted() {

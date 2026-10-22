@@ -22,6 +22,23 @@ class SmartFitImage extends StatefulWidget {
   /// Decode width cap, as memCacheWidth elsewhere.
   final int maxDecodeWidth;
 
+  /// Downloads and decodes [imageUrl] ahead of time, under the same cache
+  /// key a [SmartFitImage] of that width reads, so the card shows it at
+  /// once instead of an empty frame. Failures are ignored: the card itself
+  /// retries and shows its own error state.
+  static Future<void> precache(
+    BuildContext context,
+    String imageUrl, {
+    int maxDecodeWidth = 1080,
+  }) {
+    if (imageUrl.isEmpty) return Future<void>.value();
+    return precacheImage(
+      CachedNetworkImageProvider(imageUrl, maxWidth: maxDecodeWidth),
+      context,
+      onError: (_, __) {},
+    );
+  }
+
   /// Crop anchor for an [imageAspect] photo in a [frameAspect] frame
   /// (both width / height).
   @visibleForTesting

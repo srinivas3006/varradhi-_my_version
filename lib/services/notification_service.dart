@@ -29,6 +29,8 @@ import '../screens/notifications_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/poll_detail_screen.dart';
 import '../screens/poster_detail_screen.dart';
+import '../screens/spotlight_screen.dart';
+import '../spotlight/spotlight_controller.dart';
 import '../features/reels/reel_model.dart';
 import '../features/reels/reels_screen.dart';
 import '../screens/ugc_feed_screen.dart';
@@ -95,9 +97,9 @@ class NotificationService {
         final payload = response.payload;
         if (payload == null || payload.isEmpty) return;
         try {
-          final data = jsonDecode(payload) as Map<String, dynamic>;
+          final data = Map<String, dynamic>.from(jsonDecode(payload) as Map);
           debugPrint('[Notifications] tap on local notification');
-          handleNotificationPayload(data);
+          unawaited(_handleTap(data));
         } catch (e) {
           debugPrint('[Notifications] could not parse tap payload: $e');
         }
@@ -123,8 +125,7 @@ class NotificationService {
         final data = jsonDecode(payload);
         if (data is Map) {
           debugPrint('[Notifications] app launched from a local notification');
-          NotificationNavigationGate.instance
-              .setPendingTarget(targetForTap(Map<String, dynamic>.from(data)));
+          unawaited(_handleTap(Map<String, dynamic>.from(data)));
         }
       }
     } catch (e) {
@@ -200,10 +201,42 @@ class NotificationService {
       // caps this method as a whole; these caps decide which parts still get
       // a chance when one of them stalls.
       await Firebase.initializeApp().timeout(const Duration(seconds: 4));
-      await _initLocalNotifications();
+      // Bounded on its own: a failure here must not skip the FCM tap
+      // handlers below, or tray taps open nothing.
+      try {
+        await _initLocalNotifications();
+      } catch (e) {
+        debugPrint('[Notifications] local notifications init failed: $e');
+      }
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       final messaging = FirebaseMessaging.instance;
+
+      // Tray taps are wired before the token fetch below, which can take
+      // seconds without network: a tap must not wait on it.
+      //
+      // Background: the app was running and the reader tapped the tray.
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        if (kDebugMode) {
+          debugPrint('App opened from notification');
+        }
+        unawaited(_recordInInbox(message));
+        unawaited(_handleTap(Map<String, dynamic>.from(message.data)));
+      });
+
+      // Terminated: the tap launched the app. Not awaited and not timed
+      // out — a slow read used to throw and drop the tap, leaving the
+      // reader on Home. The gate holds the target until Home is ready.
+      unawaited(messaging.getInitialMessage().then((initialMessage) {
+        if (initialMessage == null) return;
+        if (kDebugMode) {
+          debugPrint('Initial notification on launch');
+        }
+        unawaited(_recordInInbox(initialMessage));
+        unawaited(_handleTap(Map<String, dynamic>.from(initialMessage.data)));
+      }).catchError((Object e) {
+        debugPrint('[Notifications] could not read initial message: $e');
+      }));
 
       // Acquire early FCM token so guest registration and login can send it immediately
       try {
@@ -312,7 +345,7 @@ class NotificationService {
             content: InkWell(
               onTap: () {
                 messengerKey.currentState?.hideCurrentSnackBar();
-                handleNotificationPayload(data);
+                unawaited(_handleTap(Map<String, dynamic>.from(data)));
               },
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -338,28 +371,6 @@ class NotificationService {
           ),
         );
       });
-
-      // 3. Background tap notification handler (when user taps notification from system tray)
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        if (kDebugMode) {
-          debugPrint('App opened from notification');
-        }
-        unawaited(_recordInInbox(message));
-        handleNotificationPayload(message.data);
-      });
-
-      // 4. Terminated state launch handler: store in navigation gate
-      final initialMessage = await messaging
-          .getInitialMessage()
-          .timeout(const Duration(seconds: 3));
-      if (initialMessage != null) {
-        if (kDebugMode) {
-          debugPrint('Initial notification on launch');
-        }
-        unawaited(_recordInInbox(initialMessage));
-        NotificationNavigationGate.instance
-            .setPendingTarget(targetForTap(initialMessage.data));
-      }
     } catch (e) {
       debugPrint('NotificationService early init error: $e');
     }
@@ -466,6 +477,48 @@ class NotificationService {
     }
 
     await navigateToTarget(target, context: context);
+  }
+
+  /// Every notification tap — tray (background or launch), app-shown
+  /// notification, in-app banner — comes through here, so one
+  /// notification_id opens its content once. Before Home is ready the
+  /// target is held by [NotificationNavigationGate].
+  Future<void> _handleTap(Map<String, dynamic> data) async {
+    if (!await claimNotificationTap(data)) {
+      debugPrint('[NotificationService] notification already opened, '
+          'ignoring tap');
+      return;
+    }
+    await handleNotificationPayload(data);
+  }
+
+  static const _openedIdsKey = 'opened_notification_ids';
+  final Set<String> _openedNotificationIds = {};
+
+  /// False when this notification_id was already opened. Remembered across
+  /// launches: Android re-delivers the launch notification when the app is
+  /// reopened from Recents, which reopened a story already read.
+  /// Payloads without an id are always handled.
+  @visibleForTesting
+  Future<bool> claimNotificationTap(Map<String, dynamic> data) async {
+    final id = (data['notification_id'] ?? '').toString().trim();
+    if (id.isEmpty) return true;
+    // Claimed in memory first (synchronously), so two callbacks for the
+    // same tap cannot both pass while prefs load.
+    if (!_openedNotificationIds.add(id)) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final opened = prefs.getStringList(_openedIdsKey) ?? <String>[];
+      if (opened.contains(id)) return false;
+      opened.add(id);
+      await prefs.setStringList(
+        _openedIdsKey,
+        opened.length > 100 ? opened.sublist(opened.length - 100) : opened,
+      );
+    } catch (e) {
+      debugPrint('[NotificationService] could not persist opened id: $e');
+    }
+    return true;
   }
 
   String? _lastHandledId;
@@ -683,13 +736,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                _openRoute(
-                  navContext,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        NewsDetailScreen(article: article, slug: slug),
-                  ),
-                );
+                _openInSpotlight(navContext, article);
               }
             } catch (e) {
               _dismissLoadingIndicator();
@@ -807,6 +854,23 @@ class NotificationService {
             );
           } else if (target.identifier != null &&
               target.identifier!.isNotEmpty) {
+            // The citizen post in Spotlight, like a news notification.
+            _showLoadingIndicator(navContext);
+            try {
+              final post = await ApiService.instance
+                  .getUgcDetail(target.identifier!)
+                  .timeout(const Duration(seconds: 8));
+              _dismissLoadingIndicator();
+              if (navContext.mounted) _openInSpotlight(navContext, post);
+              break;
+            } catch (e) {
+              // Not loadable here (offline, or outside the reader's area):
+              // the detail screen below retries it and shows the state.
+              _dismissLoadingIndicator();
+              debugPrint('[NotificationService] UGC load error for '
+                  '"${target.identifier}": $e');
+            }
+            if (!navContext.mounted) break;
             final article = _ugcArticleFromTarget(target);
             _openRoute(
               navContext,
@@ -944,6 +1008,25 @@ class NotificationService {
     } finally {
       NotificationNavigationGate.instance.releaseDispatchLock();
     }
+  }
+
+  /// Opens Spotlight with [article] as the first card, the reader's feed
+  /// following it. A district/mandal/village story opens the Local tab
+  /// when the reader has a place set.
+  void _openInSpotlight(BuildContext context, NewsArticle article) {
+    final isLocal = AppState.instance.hasValidLocation &&
+        SpotlightController.isLocalStory(article);
+    _openRoute(
+      context,
+      MaterialPageRoute(
+        settings:
+            RouteSettings(name: isLocal ? '/spotlight/local' : '/spotlight'),
+        builder: (_) => SpotlightScreen(
+          pinnedArticle: article,
+          isLocal: isLocal,
+        ),
+      ),
+    );
   }
 
   /// Opens the Reels viewer for a /video/{id}/ link.
