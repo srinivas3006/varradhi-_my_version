@@ -112,4 +112,88 @@ void main() {
       expect(LocationProvider.rankDetectedMatches(place, [_state]), isEmpty);
     });
   });
+
+  group('nearest village from GPS (backend)', () {
+    test('reads flat place names', () {
+      final r = LocationSearchResult.fromNearest({
+        'id': 'v1',
+        'name_en': 'Kesaram',
+        'subdistrict': 'Jajireddygudem',
+        'district': 'Suryapet',
+        'state': 'Telangana',
+        'distance_km': 0.4,
+      })!;
+      expect(r.type, LocationLevel.village);
+      expect([r.nameEn, r.subdistrict, r.district, r.state],
+          ['Kesaram', 'Jajireddygudem', 'Suryapet', 'Telangana']);
+    });
+
+    test('reads the nested shape of the villages endpoint', () {
+      final r = LocationSearchResult.fromNearest({
+        'village': {
+          'id': 'v1',
+          'name_en': 'Kesaram',
+          'name_te': 'కేసారం',
+          'subdistrict': {
+            'name_en': 'Jajireddygudem',
+            'district': {
+              'name_en': 'Suryapet',
+              'state': {'name_en': 'Telangana'},
+            },
+          },
+        },
+        'distance_km': 0.4,
+      })!;
+      expect([r.nameEn, r.subdistrict, r.district, r.state],
+          ['Kesaram', 'Jajireddygudem', 'Suryapet', 'Telangana']);
+      expect(r.nameTe, 'కేసారం');
+    });
+
+    test('reads the live production response (Mavala, Adilabad)', () {
+      // GET /api/v1/locations/nearest/?lat=19.6641&lng=78.5320, Oct 2026.
+      const tg = {'name_en': 'Telangana', 'name_te': 'తెలంగాణ'};
+      const district = {
+        'name_en': 'Adilabad',
+        'name_te': 'ఆదిలాబాద్',
+        'state': tg,
+      };
+      const mandal = {
+        'name_en': 'Mavala',
+        'name_te': 'మావల',
+        'district': district,
+      };
+      final r = LocationSearchResult.fromNearest({
+        'village': {
+          'id': 'b851c313-2c47-4002-80aa-21449923d1a4',
+          'subdistrict': mandal,
+          'name_en': 'Mavala',
+          'name_te': 'మావల',
+          'slug': 'mavala',
+          'pincode': '',
+          'latitude': '19.635500',
+          'longitude': '78.509700',
+        },
+        'subdistrict': mandal,
+        'district': district,
+        'state': tg,
+        'distance_km': 3.945,
+      })!;
+      expect(r.id, 'b851c313-2c47-4002-80aa-21449923d1a4');
+      expect([r.nameEn, r.nameTe, r.subdistrict, r.district, r.state],
+          ['Mavala', 'మావల', 'Mavala', 'Adilabad', 'Telangana']);
+    });
+
+    test('no name, no result', () {
+      expect(LocationSearchResult.fromNearest({'distance_km': 3}), isNull);
+    });
+
+    test('the GPS match leads, without a duplicate', () {
+      final nearest = _kesaram[3];
+      final list = LocationProvider.withNearestFirst(
+          nearest, [_mandal, _kesaram[3], _state]);
+      expect(list.first, same(nearest));
+      expect(list.where((r) => r.nameEn == 'Kesaram').length, 1);
+      expect(LocationProvider.withNearestFirst(null, [_state]), [_state]);
+    });
+  });
 }

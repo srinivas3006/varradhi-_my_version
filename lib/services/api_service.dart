@@ -774,6 +774,34 @@ class ApiService {
     }
   }
 
+  /// `GET /api/v1/locations/nearest/?lat=&lng=` — the mapped village
+  /// closest to a GPS fix, with its mandal, district and state. Null when
+  /// none is mapped within [maxDistanceKm] (404) or the call fails.
+  ///
+  /// Kept to 5 km: only villages with coordinates take part, and many have
+  /// none yet (Oct 2026: 0 of 15 in Jajireddygudem mandal), so a wider
+  /// radius offered a village in another district — 16 km away — as the
+  /// reader's own. Villages are a few km apart; beyond 5 km the name
+  /// matching is the better guess.
+  Future<Map<String, dynamic>?> getNearestLocation(
+    double lat,
+    double lng, {
+    double maxDistanceKm = 5,
+  }) async {
+    try {
+      final response =
+          await _dio.get('/api/v1/locations/nearest/', queryParameters: {
+        'lat': lat.toStringAsFixed(6),
+        'lng': lng.toStringAsFixed(6),
+        'max_distance_km': maxDistanceKm,
+      });
+      final data = response.data is Map ? response.data['data'] : null;
+      return data is Map ? Map<String, dynamic>.from(data) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<dynamic>> getStates() async {
     try {
       final response =

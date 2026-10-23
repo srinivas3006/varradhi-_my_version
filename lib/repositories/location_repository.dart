@@ -45,6 +45,12 @@ class LocationRepository {
     return raw.map((e) => LocationSearchResult.fromJson(Map<String, dynamic>.from(e))).toList();
   }
 
+  /// The mapped village nearest a GPS fix, or null.
+  Future<LocationSearchResult?> nearest(double lat, double lng) async {
+    final raw = await ApiService.instance.getNearestLocation(lat, lng);
+    return raw == null ? null : LocationSearchResult.fromNearest(raw);
+  }
+
   Future<LocationProfile> profile({required bool isAuthenticated}) async {
     final raw = await ApiService.instance.getLocationProfile();
     if (raw == null) return const LocationProfile();

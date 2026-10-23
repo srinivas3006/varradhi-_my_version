@@ -117,6 +117,35 @@ class LocationSearchResult {
     );
   }
 
+  /// The village from `GET /api/v1/locations/nearest/`. Accepts the
+  /// place names flat (`"district": "Suryapet"`) or nested as the villages
+  /// endpoint sends them (`subdistrict.district.state`). Null without a name.
+  static LocationSearchResult? fromNearest(Map<String, dynamic> json) {
+    final v = json['village'] is Map
+        ? Map<String, dynamic>.from(json['village'] as Map)
+        : json;
+    String nameOf(dynamic x) => x is Map
+        ? (x['name_en'] ?? x['name'] ?? '').toString()
+        : (x ?? '').toString();
+    final sub = json['subdistrict'] ?? v['subdistrict'];
+    final dist =
+        json['district'] ?? (sub is Map ? sub['district'] : null) ?? v['district'];
+    final st = json['state'] ?? (dist is Map ? dist['state'] : null) ?? v['state'];
+    final name = nameOf(v);
+    if (name.trim().isEmpty) return null;
+    return LocationSearchResult(
+      type: LocationLevel.village,
+      id: (v['id'] ?? '').toString(),
+      nameEn: name,
+      nameTe: (v['name_te'] ?? '').toString(),
+      slug: (v['slug'] ?? '').toString(),
+      state: nameOf(st),
+      district: nameOf(dist),
+      subdistrict: nameOf(sub),
+      pincode: (v['pincode'] ?? '').toString(),
+    );
+  }
+
   /// "Khairatabad, Hyderabad, Telangana"
   String get breadcrumb {
     final parts = <String>[];

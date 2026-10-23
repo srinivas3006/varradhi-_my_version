@@ -65,14 +65,20 @@ class DetectedPlace {
 }
 
 class LocationDetectResult {
-  const LocationDetectResult.success(this.place)
-      : failure = null,
-        latitude = null,
-        longitude = null;
+  const LocationDetectResult.success(this.place,
+      {this.latitude, this.longitude})
+      : failure = null;
   const LocationDetectResult.failed(this.failure)
       : place = null,
         latitude = null,
         longitude = null;
+
+  /// A GPS fix the geocoder could not name. The backend's nearest-village
+  /// lookup can still place it.
+  const LocationDetectResult.unnamed(
+      {required double this.latitude, required double this.longitude})
+      : place = null,
+        failure = LocationDetectFailure.noPlaceFound;
 
   final DetectedPlace? place;
   final LocationDetectFailure? failure;
@@ -144,23 +150,19 @@ class LocationDetector {
     try {
       final position = await _fix();
 
-      final marks = await geo.Geocoding().placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-      if (marks.isEmpty) {
-        return const LocationDetectResult.failed(
-          LocationDetectFailure.noPlaceFound,
-        );
+      final lat = position.latitude, lng = position.longitude;
+      List<geo.Placemark> marks;
+      try {
+        marks = await geo.Geocoding().placemarkFromCoordinates(lat, lng);
+      } catch (_) {
+        marks = const [];
       }
-
       final place = placeFromMarks(marks);
       if (place.isEmpty) {
-        return const LocationDetectResult.failed(
-          LocationDetectFailure.noPlaceFound,
-        );
+        return LocationDetectResult.unnamed(latitude: lat, longitude: lng);
       }
-      return LocationDetectResult.success(place);
+      return LocationDetectResult.success(place,
+          latitude: lat, longitude: lng);
     } on LocationServiceDisabledException {
       return const LocationDetectResult.failed(
         LocationDetectFailure.serviceDisabled,

@@ -72,7 +72,19 @@ class LocationProvider extends ChangeNotifier {
     notifyListeners();
 
     final result = await detector.detect();
-    if (!result.isSuccess) {
+
+    // The backend's nearest mapped village, from the GPS fix itself — exact
+    // where village coordinates are loaded, and it works even when the
+    // geocoder could not name the spot.
+    LocationSearchResult? nearest;
+    if (result.latitude != null && result.longitude != null) {
+      try {
+        nearest = await repository.nearest(
+            result.latitude!, result.longitude!);
+      } catch (_) {}
+    }
+
+    if (!result.isSuccess && nearest == null) {
       if (result.failure == LocationDetectFailure.permissionDenied) {
         AppState.instance.markLocationPermissionDenied();
       } else if (result.failure ==
@@ -85,7 +97,14 @@ class LocationProvider extends ChangeNotifier {
       return;
     }
 
-    final place = result.place!;
+    final place = result.place ??
+        DetectedPlace(
+          state: nearest!.state,
+          district: nearest.district,
+          subdistrict: nearest.subdistrict,
+          village: nearest.nameEn,
+          names: [nearest.nameEn],
+        );
     _detectedPlace = place;
 
     // Every detected name is searched and the results ranked together. The
@@ -112,13 +131,32 @@ class LocationProvider extends ChangeNotifier {
         found.addAll(await repository.search(term, limit: 50));
       } catch (_) {}
     }
-    _detectMatches = rankDetectedMatches(place, found);
+    _detectMatches = withNearestFirst(
+        nearest, rankDetectedMatches(place, found));
 
     if (_detectMatches.isEmpty) {
       _detectFailure = LocationDetectFailure.noPlaceFound;
     }
     _isDetecting = false;
     notifyListeners();
+  }
+
+  /// [nearest] (the backend's GPS match) as the first suggestion, followed
+  /// by the name-ranked ones without repeating it.
+  @visibleForTesting
+  static List<LocationSearchResult> withNearestFirst(
+    LocationSearchResult? nearest,
+    List<LocationSearchResult> ranked, {
+    int limit = 6,
+  }) {
+    if (nearest == null) return ranked;
+    String key(LocationSearchResult r) =>
+        '${r.type.name}|${r.nameEn.toLowerCase()}|${r.district.toLowerCase()}';
+    return [
+      nearest,
+      ...ranked.where((r) =>
+          (nearest.id.isEmpty || r.id != nearest.id) && key(r) != key(nearest)),
+    ].take(limit).toList();
   }
 
   /// Orders backend search results by how well they agree with what the
