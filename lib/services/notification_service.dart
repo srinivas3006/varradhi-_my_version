@@ -30,6 +30,7 @@ import '../screens/notification_settings_screen.dart';
 import '../screens/poll_detail_screen.dart';
 import '../screens/poster_detail_screen.dart';
 import '../screens/spotlight_screen.dart';
+import '../screens/submission_status_screen.dart';
 import '../spotlight/spotlight_controller.dart';
 import '../features/reels/reel_model.dart';
 import '../features/reels/reels_screen.dart';
@@ -854,6 +855,24 @@ class NotificationService {
             );
           } else if (target.identifier != null &&
               target.identifier!.isNotEmpty) {
+            // "Your post is pending / approved / rejected": the reporter's
+            // own submission, which the public endpoint does not serve
+            // until it is approved (and then only in its area). Opening it
+            // as a public post gave an empty story page.
+            if (target.screenName == 'status' ||
+                isSubmissionStatusNotice(target.originalPayload)) {
+              _openRoute(
+                navContext,
+                MaterialPageRoute(
+                  builder: (_) => SubmissionStatusScreen(
+                    submissionId: target.identifier!,
+                    initialTitle:
+                        (target.originalPayload?['title'] ?? '').toString(),
+                  ),
+                ),
+              );
+              break;
+            }
             // The citizen post in Spotlight, like a news notification.
             _showLoadingIndicator(navContext);
             try {
@@ -864,22 +883,28 @@ class NotificationService {
               if (navContext.mounted) _openInSpotlight(navContext, post);
               break;
             } catch (e) {
-              // Not loadable here (offline, or outside the reader's area):
-              // the detail screen below retries it and shows the state.
               _dismissLoadingIndicator();
               debugPrint('[NotificationService] UGC load error for '
                   '"${target.identifier}": $e');
+              if (!navContext.mounted) break;
+              final article = _ugcArticleFromTarget(target);
+              if (article != null && article.title.trim().isNotEmpty) {
+                // The notification carried the post's text: show that,
+                // and the detail screen retries the full post.
+                _openRoute(
+                  navContext,
+                  MaterialPageRoute(
+                      builder: (_) => NewsDetailScreen(article: article)),
+                );
+              } else {
+                // Only an id, and the post is not available to this reader
+                // (removed, not approved, outside their area) or the
+                // connection failed. Say so, with Retry when it may help,
+                // rather than opening an empty story page.
+                _showLoadFailure(navContext, e,
+                    retry: () => navigateToTarget(target));
+              }
             }
-            if (!navContext.mounted) break;
-            final article = _ugcArticleFromTarget(target);
-            _openRoute(
-              navContext,
-              MaterialPageRoute(
-                builder: (_) => article != null
-                    ? NewsDetailScreen(article: article)
-                    : const UgcFeedScreen(),
-              ),
-            );
           } else {
             _openRoute(
               navContext,
@@ -1010,6 +1035,13 @@ class NotificationService {
     }
   }
 
+  /// True for a citizen reporter's submission-status notification ("your
+  /// post is pending / approved / rejected"), as opposed to news about a
+  /// published citizen post.
+  @visibleForTesting
+  static bool isSubmissionStatusNotice(Map<String, dynamic>? payload) =>
+      NotificationDeepLinkResolver.isSubmissionStatusNotice(payload);
+
   /// Opens Spotlight with [article] as the first card, the reader's feed
   /// following it. A district/mandal/village story opens the Local tab
   /// when the reader has a place set.
@@ -1136,7 +1168,10 @@ class NotificationService {
       'thumbnail_url': payload['thumbnail_url'] ?? payload['image_url'] ?? '',
       'feed_item_type': 'ugc',
       'category': 'UGC',
-      'published_at': payload['published_at'] ?? payload['created_at'],
+      // Without a date the story read "1 January 1970 · 20749 days ago".
+      'published_at': payload['published_at'] ??
+          payload['created_at'] ??
+          DateTime.now().toIso8601String(),
     });
   }
 }

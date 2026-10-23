@@ -112,4 +112,90 @@ void main() {
         contains('<action android:name="FLUTTER_NOTIFICATION_CLICK" />'));
     expect(manifest, contains('android:launchMode="singleTop"'));
   });
+
+  group('citizen post notifications', () {
+    test('submission status notices are told apart from news', () {
+      for (final kind in [
+        'ugc_approved',
+        'UGC_REJECTED',
+        'submission_pending',
+        'ugc_under_review',
+        'submission_status',
+      ]) {
+        expect(
+            NotificationService.isSubmissionStatusNotice(
+                {'notification_type': kind, 'content_type': 'ugc'}),
+            isTrue,
+            reason: kind);
+      }
+      for (final kind in ['ugc', 'citizen_news', 'content', 'breaking']) {
+        expect(
+            NotificationService.isSubmissionStatusNotice(
+                {'notification_type': kind, 'type': 'content'}),
+            isFalse,
+            reason: kind);
+      }
+      expect(NotificationService.isSubmissionStatusNotice(null), isFalse);
+    });
+
+    test('a status notice opens the submission status screen', () {
+      final src =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final ugc = src.substring(src.indexOf('case NotificationTargetType.ugc:'),
+          src.indexOf('case NotificationTargetType.admin:'));
+      expect(ugc, contains('isSubmissionStatusNotice('));
+      expect(ugc, contains('SubmissionStatusScreen('));
+    });
+
+    test('an unloadable bare post id shows a message, not an empty page', () {
+      final src =
+          File('lib/services/notification_service.dart').readAsStringSync();
+      final ugc = src.substring(src.indexOf('case NotificationTargetType.ugc:'),
+          src.indexOf('case NotificationTargetType.admin:'));
+      expect(ugc, contains('article.title.trim().isNotEmpty'));
+      expect(ugc, contains('_showLoadFailure(navContext, e'));
+    });
+  });
+
+  group('reporter submission notifications (backend contract)', () {
+    for (final kind in [
+      'submission_pending',
+      'ugc_under_review',
+      'ugc_approved',
+      'ugc_rejected',
+    ]) {
+      test('$kind opens the submission status, signed in', () {
+        final t = payload({
+          'notification_id': 'n-$kind',
+          'content_type': 'ugc',
+          'content_id': 'sub-1',
+          'notification_type': kind,
+          'deep_link': '/ugc/reporter/submissions/sub-1/status/',
+        });
+        expect(t.type, NotificationTargetType.ugc);
+        expect(t.identifier, 'sub-1');
+        expect(t.screenName, 'status');
+        expect(t.requiresAuth, isTrue);
+      });
+    }
+
+    test('citizen_news opens the published post', () {
+      final t = payload({
+        'content_type': 'ugc',
+        'content_id': 'sub-2',
+        'notification_type': 'citizen_news',
+        'deep_link': '/ugc/sub-2',
+      });
+      expect(t.identifier, 'sub-2');
+      expect(t.screenName, isNull);
+      expect(t.requiresAuth, isFalse);
+    });
+
+    test('the status deep link alone (inbox) resolves to the submission', () {
+      final t = link('/ugc/reporter/submissions/sub-3/status/');
+      expect(t.type, NotificationTargetType.ugc);
+      expect(t.identifier, 'sub-3');
+      expect(t.screenName, 'status');
+    });
+  });
 }
