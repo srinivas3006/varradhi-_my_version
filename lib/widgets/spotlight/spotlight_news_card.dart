@@ -187,6 +187,18 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     });
   }
 
+  /// Analytics: the reader's stay on this story (open + reading time).
+  final CardViewTracker _view = CardViewTracker();
+
+  void _trackView() {
+    if (_inWidgetTest) return;
+    if (widget.isCurrent) {
+      _view.shown(widget.article);
+    } else {
+      _view.left();
+    }
+  }
+
   void _scheduleSharePrep() {
     _scheduleImpression();
     _sharePrep?.cancel();
@@ -356,6 +368,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       _fetchArticleDetail(slugToFetch);
     }
     _scheduleSharePrep();
+    _trackView();
     // Ramabhadra / Mandali load a moment after start: re-fit the story to
     // their real sizes then (it was measured with the fallback font).
     PaintingBinding.instance.systemFonts.addListener(_fontsLoaded);
@@ -376,8 +389,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         _fetchArticleDetail(slug);
       }
       _scheduleSharePrep();
-    } else if (widget.isCurrent && !oldWidget.isCurrent) {
-      _scheduleSharePrep();
+      _trackView();
+    } else if (widget.isCurrent != oldWidget.isCurrent) {
+      if (widget.isCurrent) _scheduleSharePrep();
+      _trackView();
     }
     if ((oldWidget.isCurrent && !widget.isCurrent) ||
         (widget.isCurrent && widget.dragProgress > 0.05)) {
@@ -395,6 +410,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   void dispose() {
     _sharePrep?.cancel();
     _impression?.cancel();
+    _view.dispose();
     PaintingBinding.instance.systemFonts.removeListener(_fontsLoaded);
     final articleId =
         widget.article.id.isNotEmpty ? widget.article.id : widget.article.slug;

@@ -208,6 +208,106 @@ class ReadingTracker with WidgetsBindingObserver {
   }
 }
 
+// --- Spotlight card ---------------------------------------------------------
+
+/// One stay on a full-screen story card (Spotlight). The card shows the whole
+/// story, so it is the story view: `article_open` once the reader has stayed
+/// [openAfter] (a swipe straight past is only an impression), and the time
+/// spent on it when they leave, as on the detail screen.
+///
+/// Time counts only while the app is in the foreground.
+class CardViewTracker with WidgetsBindingObserver {
+  CardViewTracker({this.surface = 'spotlight'});
+
+  final String surface;
+  static const openAfter = Duration(seconds: 3);
+
+  NewsArticle? _story;
+  bool _openSent = false;
+  bool _foreground = true;
+  DateTime? _since;
+  Duration _seen = Duration.zero;
+  Timer? _timer;
+  bool _observing = false;
+
+  /// [story]'s card became the current one.
+  void shown(NewsArticle story, {DateTime? now}) {
+    if (identical(_story, story) && _since != null) return;
+    left(now: now);
+    _story = story;
+    _openSent = false;
+    _seen = Duration.zero;
+    if (!_observing) {
+      _observing = true;
+      WidgetsBinding.instance.addObserver(this);
+    }
+    _resume(now ?? DateTime.now());
+  }
+
+  void _resume(DateTime now) {
+    if (_story == null || !_foreground) return;
+    _since = now;
+    final remaining = openAfter - _seen;
+    if (!_openSent && !_inWidgetTest && remaining > Duration.zero) {
+      _timer?.cancel();
+      _timer = Timer(remaining, () => _accrue(DateTime.now()));
+    }
+  }
+
+  void _pause(DateTime now) {
+    _timer?.cancel();
+    _timer = null;
+    _accrue(now);
+    _since = null;
+  }
+
+  /// Adds the time since the last check, and opens once [openAfter] is
+  /// reached.
+  void _accrue(DateTime now) {
+    final since = _since;
+    if (since != null) {
+      final d = now.difference(since);
+      if (!d.isNegative) _seen += d;
+      _since = now;
+    }
+    final story = _story;
+    if (story != null && !_openSent && _seen >= openAfter) {
+      _openSent = true;
+      unawaited(AnalyticsQueue.instance.trackContent('article_open', story,
+          metadata: {'surface': surface}));
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final now = DateTime.now();
+    final fg = state == AppLifecycleState.resumed;
+    if (fg == _foreground) return;
+    _foreground = fg;
+    fg ? _resume(now) : _pause(now);
+  }
+
+  /// The card stopped being the current one (swiped away, closed).
+  void left({DateTime? now}) {
+    final story = _story;
+    if (story == null) return;
+    _pause(now ?? DateTime.now());
+    if (_openSent && _seen.inSeconds > 0) {
+      unawaited(AnalyticsQueue.instance.trackContent('scroll_depth', story,
+          dwellSeconds: _seen.inSeconds,
+          scrollDepth: 100,
+          metadata: {'surface': surface}));
+    }
+    _story = null;
+  }
+
+  void dispose() {
+    left();
+    if (_observing) WidgetsBinding.instance.removeObserver(this);
+    _observing = false;
+  }
+}
+
 // --- Video -------------------------------------------------------------------
 
 /// Watches one playback of [story]'s video: `video_start` when it really
@@ -228,8 +328,14 @@ class VideoWatchTracker with WidgetsBindingObserver {
   /// `youtube` or `s3`.
   final String source;
 
+  /// Progress events at these percentages when the video's length is
+  /// known (backend analytics handover); every [interval] of watching when
+  /// it is not (some YouTube videos never report one).
+  static const progressMilestones = [25, 50, 75];
   static const interval = Duration(seconds: 15);
   static const completeAt = 0.9;
+
+  final Set<int> _sentMilestones = {};
 
   bool _started = false;
   bool _completed = false;
@@ -313,13 +419,27 @@ class VideoWatchTracker with WidgetsBindingObserver {
     _playingSince = t;
     _sinceLastEvent += d;
     _watched += d;
-    if (_sinceLastEvent >= interval && !_completed) {
-      final dwell = _sinceLastEvent.inSeconds;
-      _sinceLastEvent -= Duration(seconds: dwell);
-      unawaited(AnalyticsQueue.instance.trackContent('video_progress', story,
-          dwellSeconds: dwell, metadata: _where));
-    }
     final dur = _durationSeconds;
+    if (!_completed) {
+      final bool due;
+      if (dur > 0) {
+        // One event for the highest milestone reached: a seek past several
+        // sends one, carrying only the time actually watched.
+        final reached = progressMilestones
+            .where((m) => _percent >= m && !_sentMilestones.contains(m))
+            .toList();
+        _sentMilestones.addAll(reached);
+        due = reached.isNotEmpty && _positionSeconds < dur * completeAt;
+      } else {
+        due = _sinceLastEvent >= interval;
+      }
+      if (due) {
+        final dwell = _sinceLastEvent.inSeconds;
+        _sinceLastEvent -= Duration(seconds: dwell);
+        unawaited(AnalyticsQueue.instance.trackContent('video_progress', story,
+            dwellSeconds: dwell, metadata: _where));
+      }
+    }
     if (dur > 0 && _positionSeconds >= dur * completeAt) _complete();
   }
 

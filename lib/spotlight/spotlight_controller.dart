@@ -9,6 +9,7 @@ import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../models/poll.dart';
 import '../services/poll_exposure.dart';
+import '../services/analytics_queue.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
@@ -580,6 +581,10 @@ class SpotlightController extends ChangeNotifier {
     // A refresh shows each story as it is now — new images included — not
     // the full-article copies fetched earlier.
     NewsArticleRepository.instance.clearCache();
+    unawaited(AnalyticsQueue.instance.track('feed_refresh', metadata: {
+      'surface': 'spotlight',
+      'scope': _state.isLocalNews ? 'local' : 'main',
+    }));
     await loadFeed(refresh: true);
   }
 

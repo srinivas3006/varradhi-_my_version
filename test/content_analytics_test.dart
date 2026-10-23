@@ -216,23 +216,30 @@ void main() {
 
   group('video', () {
     test(
-        'start once, progress every 15 s with interval dwell, complete at '
-        '90 %', () {
+        'start once, progress at 25 / 50 / 75 %, complete at 90 %, each '
+        'with only newly watched seconds', () {
       final c = _FakeVideo();
       final w =
           VideoWatchTracker(_story(id: _ugcId, kind: 'ugc'), c, source: 's3');
       expect(events(), isEmpty, reason: 'shown, not playing');
 
+      // A 100 s video watched straight through to 30 s.
       c.set(PlaybackStatus.playing, pos: 0);
       var t = DateTime.now();
-      for (var i = 1; i <= 16; i++) {
+      for (var i = 1; i <= 30; i++) {
         t = t.add(const Duration(seconds: 1));
         c.set(PlaybackStatus.playing, pos: i);
         w.advance(now: t);
       }
-      // Paused: no time counts.
-      c.set(PlaybackStatus.paused, pos: 16);
-      // Resumed near the end.
+      final first =
+          events().firstWhere((e) => e['event_type'] == 'video_progress');
+      expect(first['metadata']['progress_percent'], 25);
+      expect(first['dwell_seconds'], 25);
+      expect(first['submission_id'], _ugcId);
+
+      // Paused: no time counts. Then a seek to 90 %: one progress event at
+      // most for the milestones skipped, and no watching time invented.
+      c.set(PlaybackStatus.paused, pos: 30);
       c.set(PlaybackStatus.playing, pos: 90);
       t = DateTime.now().add(const Duration(seconds: 1));
       w.advance(now: t);
@@ -240,16 +247,114 @@ void main() {
 
       final types = events().map((e) => e['event_type']).toList();
       expect(types.where((x) => x == 'video_start'), hasLength(1));
-      final progress =
-          events().firstWhere((e) => e['event_type'] == 'video_progress');
-      expect(progress['dwell_seconds'], 15);
-      expect(progress['submission_id'], _ugcId);
+      expect(types.where((x) => x == 'video_progress').length,
+          lessThanOrEqualTo(2));
       expect(types.where((x) => x == 'video_complete'), hasLength(1));
       final complete =
           events().firstWhere((e) => e['event_type'] == 'video_complete');
       expect(
           complete['metadata']['progress_percent'], greaterThanOrEqualTo(90));
-      expect(complete['dwell_seconds'], lessThan(15));
+      final watched = events()
+          .where((e) => e['dwell_seconds'] != null)
+          .fold<int>(0, (a, e) => a + (e['dwell_seconds'] as int));
+      expect(watched, lessThanOrEqualTo(31), reason: 'no overcounting');
+    });
+
+    test('without a known length, progress every 15 s of watching', () {
+      final c = _FakeVideo();
+      final w = VideoWatchTracker(_story(), c, source: 'youtube');
+      c.set(PlaybackStatus.playing, pos: 0, dur: 0);
+      var t = DateTime.now();
+      for (var i = 1; i <= 16; i++) {
+        t = t.add(const Duration(seconds: 1));
+        w.advance(now: t);
+      }
+      final p = events().firstWhere((e) => e['event_type'] == 'video_progress');
+      expect(p['dwell_seconds'], 15);
+      w.dispose();
+    });
+  });
+
+  group('spotlight card', () {
+    test('open after 3 s on the card, then the reading time on leaving', () {
+      final v = CardViewTracker();
+      final t0 = DateTime.now();
+      v.shown(_story(), now: t0);
+      v.left(now: t0.add(const Duration(seconds: 2)));
+      expect(events(), isEmpty, reason: 'swiped past: only an impression');
+
+      v.shown(_story(), now: t0);
+      v.left(now: t0.add(const Duration(seconds: 12)));
+      expect(events().map((e) => e['event_type']),
+          ['article_open', 'scroll_depth']);
+      expect(events()[0]['metadata'], {'surface': 'spotlight'});
+      expect(events()[1]['dwell_seconds'], 12);
+      v.dispose();
+    });
+
+    test('time in the background is not reading', () {
+      final v = CardViewTracker();
+      final t0 = DateTime.now();
+      v.shown(_story(), now: t0);
+      v.didChangeAppLifecycleState(AppLifecycleState.paused);
+      v.left(now: t0.add(const Duration(hours: 1)));
+      final dwell = events()
+          .where((e) => e['dwell_seconds'] != null)
+          .map((e) => e['dwell_seconds'] as int);
+      expect(dwell.every((d) => d < 60), isTrue);
+      v.dispose();
+    });
+  });
+
+  group('app and comment events', () {
+    test('search_query and feed_refresh carry no content id', () async {
+      await AnalyticsQueue.instance.track('search_query',
+          metadata: {'q': 'సూర్యాపేట', 'result_count': 4});
+      await AnalyticsQueue.instance.track('feed_refresh');
+      await AnalyticsQueue.instance.track('made_up_event');
+      expect(events().map((e) => e['event_type']),
+          ['search_query', 'feed_refresh']);
+      expect(events()[0]['metadata'], {'q': 'సూర్యాపేట', 'result_count': 4});
+      for (final e in events()) {
+        expect(e.containsKey('article_id') || e.containsKey('submission_id'),
+            isFalse);
+        expect(e['session_id'], isNotNull);
+      }
+    });
+
+    test('comment events carry the story id', () async {
+      for (final t in [
+        'comment_created',
+        'comment_reply_created',
+        'comment_deleted',
+        'comment_reported',
+      ]) {
+        await AnalyticsQueue.instance.trackContent(t, _story());
+      }
+      expect(events(), hasLength(4));
+      expect(events().every((e) => e['article_id'] == _articleId), isTrue);
+    });
+
+    test('notification_opened names the story it was about', () {
+      expect(
+          AnalyticsQueue.notificationContentId(
+              {'content_type': 'article', 'content_id': _articleId}),
+          isA<MapEntry<String, String>>()
+              .having((e) => e.key, 'key', 'article_id')
+              .having((e) => e.value, 'value', _articleId));
+      expect(
+          AnalyticsQueue.notificationContentId(
+                  {'content_type': 'ugc', 'content_id': _ugcId})!
+              .key,
+          'submission_id');
+      expect(
+          AnalyticsQueue.notificationContentId(
+              {'content_type': 'article', 'content_id': 'a-slug'}),
+          isNull);
+      expect(
+          AnalyticsQueue.notificationContentId(
+              {'content_type': 'poster', 'content_id': _articleId}),
+          isNull);
     });
   });
 

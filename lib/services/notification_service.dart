@@ -1024,7 +1024,8 @@ class NotificationService {
                 '')
             .toString();
         if (id.isNotEmpty) {
-          unawaited(AnalyticsQueue.instance.notificationOpened(id));
+          unawaited(AnalyticsQueue.instance
+              .notificationOpened(id, payload: target.originalPayload));
         }
       }
     } catch (e) {

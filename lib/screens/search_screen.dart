@@ -1,3 +1,4 @@
+import '../services/analytics_queue.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../state/app_state.dart';
@@ -80,10 +81,14 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     _debounce =
-        Timer(const Duration(milliseconds: 300), () => _runSearch(query));
+        Timer(const Duration(milliseconds: 300),
+            () => _runSearch(query, submitted: false));
   }
 
-  void _runSearch(String query) async {
+  /// [submitted]: the reader asked for this search (keyboard search, a
+  /// recent / trending / suggested term) — only these are reported as
+  /// `search_query`, not the live results while typing.
+  void _runSearch(String query, {bool submitted = true}) async {
     _debounce?.cancel();
     final generation = ++_queryGeneration;
     final trimmed = query.trim();
@@ -112,6 +117,13 @@ class _SearchScreenState extends State<SearchScreen> {
         SnackBar(content: Text(response.error ?? tr('no_results'))),
       );
       return;
+    }
+
+    if (submitted) {
+      unawaited(AnalyticsQueue.instance.track('search_query', metadata: {
+        'q': trimmed,
+        'result_count': response.results.length,
+      }));
     }
 
     setState(() {
