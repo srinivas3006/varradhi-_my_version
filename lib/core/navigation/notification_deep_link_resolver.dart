@@ -179,8 +179,11 @@ class NotificationDeepLinkResolver {
 
     final notificationId =
         data['notification_id']?.toString() ?? data['id']?.toString();
-    final deepLink =
-        data['deep_link']?.toString() ?? data['click_action']?.toString();
+    // click_action can be a link — or Android's FLUTTER_NOTIFICATION_CLICK
+    // action name, which only opens the app and is no destination.
+    final clickAction = data['click_action']?.toString();
+    final deepLink = data['deep_link']?.toString() ??
+        (clickAction == 'FLUTTER_NOTIFICATION_CLICK' ? null : clickAction);
 
     // 1. content_type with content_slug or content_id (schema v2). These
     // name the content directly, so they win over the deep_link string.

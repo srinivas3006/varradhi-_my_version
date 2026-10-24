@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import '../../theme/app_theme.dart';
 import 'ad_viewability_detector.dart';
+import 'full_screen_ad_image.dart';
 import 'video_ad_card.dart';
 
 /// Evaluates eligibility and displays an interstitial ad overlay at a natural break.
@@ -135,199 +135,206 @@ class _InterstitialAdScreenState extends State<_InterstitialAdScreen>
       placementZone: widget.ad.placementZone,
       exposureKey: 'interstitial_${widget.ad.id}',
       child: Scaffold(
-        backgroundColor: const Color(0xFF111827),
-        body: SafeArea(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Ad Creative Content
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _handleTap,
-                child: Center(
-                  child: SingleChildScrollView(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // The creative fills the whole phone screen, edge to edge
+            // (behind the status bar too) — see FullScreenAdImage.
+            GestureDetector(
+              key: const Key('interstitial_creative'),
+              behavior: HitTestBehavior.opaque,
+              onTap: _handleTap,
+              child: widget.ad.videoUrl.isNotEmpty
+                  ? Center(
+                      child: VideoAdCard(
+                          ad: widget.ad,
+                          placementZone: widget.ad.placementZone,
+                          exposureKey: 'interstitial_${widget.ad.id}'),
+                    )
+                  : FullScreenAdImage(
+                      imageUrl: widget.ad.imageUrl,
+                      errorBuilder: (_) => const Center(
+                        child: Icon(Icons.campaign_rounded,
+                            size: 72, color: Colors.white54),
+                      ),
+                    ),
+            ),
+            // Title and call to action on a fade at the bottom, over the
+            // creative rather than taking space from it.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  height: 260,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Color(0xE6000000), Color(0x00000000)],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned(
+                    left: 20,
+                    right: 20,
+                    bottom: 16,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.ad.title.isNotEmpty
+                              ? widget.ad.title
+                              : 'Sponsored Promotion',
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            height: 1.3,
+                            shadows: [
+                              Shadow(color: Colors.black54, blurRadius: 6)
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.ad.destinationUrl.isNotEmpty
+                              ? 'Sponsored · ${Uri.tryParse(widget.ad.destinationUrl)?.host ?? widget.ad.destinationUrl}'
+                              : 'Sponsored Partner',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12.5),
+                        ),
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _handleTap,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Learn More',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Icon(Icons.arrow_forward_rounded, size: 18),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Top Bar: "Sponsored" Tag & Close/Skip Button
+                  Positioned(
+                    top: 12,
+                    left: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white24, width: 0.8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Ad Image Banner
-                          if (widget.ad.videoUrl.isNotEmpty)
-                            VideoAdCard(
-                                ad: widget.ad,
-                                placementZone: widget.ad.placementZone,
-                                exposureKey: 'interstitial_${widget.ad.id}')
-                          else
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: CachedNetworkImage(
-                                imageUrl: widget.ad.imageUrl,
-                                fit: BoxFit.contain,
-                                placeholder: (context, url) => const SizedBox(
-                                  height: 260,
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                        color: Colors.white70),
-                                  ),
-                                ),
-                                errorWidget: (context, url, error) => Container(
-                                  height: 260,
-                                  color: Colors.white10,
-                                  child: const Center(
-                                    child: Icon(Icons.campaign_rounded,
-                                        size: 72, color: Colors.white54),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 24),
-
-                          // Title
+                          Icon(Icons.campaign_rounded,
+                              color: Colors.amber, size: 14),
+                          SizedBox(width: 5),
                           Text(
-                            widget.ad.title.isNotEmpty
-                                ? widget.ad.title
-                                : 'Sponsored Promotion',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            'SPONSORED',
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 20,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w800,
-                              height: 1.3,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-
-                          // Domain attribution
-                          Text(
-                            widget.ad.destinationUrl.isNotEmpty
-                                ? 'Sponsored · ${Uri.tryParse(widget.ad.destinationUrl)?.host ?? widget.ad.destinationUrl}'
-                                : 'Sponsored Partner',
-                            style: const TextStyle(
-                                color: Colors.white60, fontSize: 13),
-                          ),
-                          const SizedBox(height: 24),
-
-                          // CTA Button
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _handleTap,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    'Learn More',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Icon(Icons.arrow_forward_rounded, size: 18),
-                                ],
-                              ),
+                              letterSpacing: 0.5,
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                ),
-              ),
 
-              // Top Bar: "Sponsored" Tag & Close/Skip Button
-              Positioned(
-                top: 12,
-                left: 16,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white24, width: 0.8),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.campaign_rounded,
-                          color: Colors.amber, size: 14),
-                      SizedBox(width: 5),
-                      Text(
-                        'SPONSORED',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              Positioned(
-                top: 12,
-                right: 16,
-                child: _canSkip
-                    ? GestureDetector(
-                        onTap: _secondsLeft == 0 ? _handleClose : _handleSkip,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _secondsLeft == 0 ? 'Close' : 'Skip Ad',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                  Positioned(
+                    top: 12,
+                    right: 16,
+                    child: _canSkip
+                        ? GestureDetector(
+                            onTap:
+                                _secondsLeft == 0 ? _handleClose : _handleSkip,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: Colors.white24),
                               ),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.close,
-                                  color: Colors.white, size: 16),
-                            ],
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _secondsLeft == 0 ? 'Close' : 'Skip Ad',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.close,
+                                      color: Colors.white, size: 16),
+                                ],
+                              ),
+                            ),
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: Text(
+                              'Ad closes in $_secondsLeft s',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                        ),
-                      )
-                    : Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white24),
-                        ),
-                        child: Text(
-                          'Ad closes in $_secondsLeft s',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

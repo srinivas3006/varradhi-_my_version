@@ -116,7 +116,7 @@ void main() {
     });
 
     test('interstitial is blocked on cold launch before minSessionAge', () {
-      // By default minSessionAgeForInterstitial is 5 minutes
+      // By default minSessionAgeForInterstitial is 2 minutes
       expect(manager.canShowInterstitial(), isFalse);
     });
 
