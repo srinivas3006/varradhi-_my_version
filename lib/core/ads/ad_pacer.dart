@@ -39,7 +39,7 @@ class AdPacer extends ChangeNotifier with WidgetsBindingObserver {
 
   static const sticky = PacedSlot(
     firstAfter: Duration(minutes: 3),
-    every: Duration(minutes: 5),
+    every: Duration(minutes: 2),
     visibleFor: Duration(seconds: 30),
   );
 

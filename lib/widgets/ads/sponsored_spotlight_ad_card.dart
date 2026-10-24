@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/ad_banner.dart';
 import '../../services/ad_manager.dart';
 import 'ad_viewability_detector.dart';
+import 'full_screen_ad_image.dart';
 import 'video_ad_card.dart';
 
 /// Full-screen sponsored ad card for Spotlight mode.
@@ -198,10 +199,14 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
               // inside that, which shrank any creative on screens taller or
               // wider than 9:16 and left a band of backdrop around it.
               child: Padding(
-                padding: EdgeInsets.only(
-                  top: topPadding + _chromeRowHeight,
-                  bottom: bottomPadding + 12,
-                ),
+                // Images use the whole page (the Ad / Skip row floats over
+                // them); video keeps clear of that row.
+                padding: widget.ad.videoUrl.isNotEmpty
+                    ? EdgeInsets.only(
+                        top: topPadding + _chromeRowHeight,
+                        bottom: bottomPadding + 12,
+                      )
+                    : EdgeInsets.zero,
                 child: widget.ad.videoUrl.isNotEmpty
                     ? Center(
                         // Video keeps a portrait frame so the player has a
@@ -217,23 +222,13 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
                                       widget.exposureKey ?? widget.ad.id)),
                         ),
                       )
-                    : CachedNetworkImage(
-                        width: double.infinity,
-                        height: double.infinity,
+                    // Fills the phone screen when the creative is (close to)
+                    // the phone's ratio; a very different one is shown whole
+                    // over a blurred copy, so its call to action near the
+                    // edge is never cropped away (FullScreenAdImage).
+                    : FullScreenAdImage(
                         imageUrl: widget.ad.imageUrl,
-                        // Contain, not cover. A full-screen creative is a
-                        // poster: its call to action — a phone number, a
-                        // WhatsApp button — sits near the edge, and cover
-                        // crops whatever does not match the device ratio, so
-                        // the one part of the ad that has to survive is the
-                        // first thing lost. The blurred backdrop behind fills
-                        // the letterbox so it still reads as full-bleed.
-                        fit: BoxFit.contain,
-                        placeholder: (context, url) => const Center(
-                          child:
-                              CircularProgressIndicator(color: Colors.white70),
-                        ),
-                        errorWidget: (context, url, error) => Column(
+                        errorBuilder: (context) => Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             const Icon(Icons.campaign_rounded,

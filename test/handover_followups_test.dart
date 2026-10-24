@@ -8,6 +8,7 @@ import 'package:vaaradhi/core/network/dio_client.dart';
 import 'package:vaaradhi/features/admin/data/models/admin_report_model.dart';
 import 'package:vaaradhi/features/admin/data/models/admin_ugc_submission_model.dart';
 import 'package:vaaradhi/features/admin/data/services/admin_ugc_api_service.dart';
+import 'package:vaaradhi/services/api_service.dart';
 import 'package:vaaradhi/features/admin/presentation/widgets/dialogs/admin_approval_dialog.dart';
 import 'package:vaaradhi/models/news_article.dart';
 import 'package:vaaradhi/models/submission_status.dart';
@@ -23,7 +24,9 @@ Future<void> _pumpStatus(WidgetTester tester,
   await tester.pumpWidget(MaterialApp(
     home: SubmissionStatusScreen(
         key: UniqueKey(),
-        submissionId: 'sub-1', initialTitle: 'Road', statusLoader: loader),
+        submissionId: 'sub-1',
+        initialTitle: 'Road',
+        statusLoader: loader),
   ));
   await tester.pump();
   await tester.pump();
@@ -83,8 +86,10 @@ void main() {
 
     test('READY / FAILED stop the polling', () {
       expect(
-          _status({'next_action': 'wait_editor_review', 'upload_status': 'READY'})
-              .isProcessing,
+          _status({
+            'next_action': 'wait_editor_review',
+            'upload_status': 'READY'
+          }).isProcessing,
           isFalse);
       expect(
           _status({
@@ -146,7 +151,8 @@ void main() {
       await _pumpStatus(tester, (_) async {
         calls++;
         return _status({
-          'next_action': calls < 3 ? 'wait_media_processing' : 'wait_editor_review',
+          'next_action':
+              calls < 3 ? 'wait_media_processing' : 'wait_editor_review',
           'upload_status': calls < 3 ? 'PROCESSING' : 'READY',
         });
       });
@@ -242,8 +248,8 @@ void main() {
       expect(find.textContaining('1200'), findsOneWidget);
       expect(find.text('Large audience'), findsOneWidget);
 
-      ElevatedButton approve() => tester
-          .widget<ElevatedButton>(find.byKey(const Key('admin_approve_submit')));
+      ElevatedButton approve() => tester.widget<ElevatedButton>(
+          find.byKey(const Key('admin_approve_submit')));
       expect(approve().onPressed, isNull, reason: 'blocked until confirmed');
 
       await tester.ensureVisible(find.byKey(const Key('admin_push_confirm')));
@@ -256,8 +262,7 @@ void main() {
       expect(approved, isTrue);
     });
 
-    testWidgets('no push → no preview, approve works directly',
-        (tester) async {
+    testWidgets('no push → no preview, approve works directly', (tester) async {
       var previews = 0;
       await tester.pumpWidget(MaterialApp(
         home: Builder(
@@ -295,8 +300,9 @@ void main() {
     });
     tearDown(() => ApiClient.instance.dio.interceptors.remove(capture));
 
-    testWidgets('never call the article comment API with a UGC id',
-        (tester) async {
+    testWidgets(
+        'a citizen post gets the comments sheet, from the UGC comment API '
+        '— never the article one', (tester) async {
       await tester.pumpWidget(MaterialApp(
         home: CommentsScreen(
           article: NewsArticle.fromJson(
@@ -304,9 +310,21 @@ void main() {
         ),
       ));
       await tester.pump();
-      expect(find.byKey(const Key('ugc_comments_unavailable')), findsOneWidget);
-      expect(capture.requests.where((r) => r.path.contains('comments')),
-          isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+      final paths = capture.requests
+          .map((r) => r.path)
+          .where((p) => p.contains('comments'))
+          .toList();
+      expect(paths, contains('/api/v1/ugc/sub-1/comments/'));
+      expect(paths.where((p) => p.contains('/articles/')), isEmpty);
+      // The normal sheet, with the comment box.
+      expect(find.byType(TextField), findsWidgets);
+    });
+
+    test('article and UGC comment paths never mix', () {
+      expect(ApiService.commentsPath('a-1'), '/api/v1/articles/a-1/comments/');
+      expect(ApiService.commentsPath('u-1', ugc: true),
+          '/api/v1/ugc/u-1/comments/');
     });
   });
 
@@ -314,7 +332,10 @@ void main() {
     test('a bare citizen-post link opens the post, loaded from the API', () {
       final src =
           File('lib/services/notification_service.dart').readAsStringSync();
-      expect(src, contains("NewsArticle.fromJson({'id': id, 'feed_item_type': 'ugc'})"));
+      expect(
+          src,
+          contains(
+              "NewsArticle.fromJson({'id': id, 'feed_item_type': 'ugc'})"));
       final detail =
           File('lib/screens/news_detail_screen.dart').readAsStringSync();
       expect(detail, contains('ApiService.instance.getUgcDetail(id)'));

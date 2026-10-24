@@ -991,11 +991,16 @@ class ApiService {
   }
 
   // --- Comments ---
+  /// Comment list path: citizen posts (UGC) have their own, an article id
+  /// never goes to the UGC one or the other way round.
+  static String commentsPath(String id, {bool ugc = false}) =>
+      ugc ? '/api/v1/ugc/$id/comments/' : '/api/v1/articles/$id/comments/';
+
   Future<List<Comment>> getComments(String articleId,
-      {String? cursor, int pageSize = 20}) async {
+      {String? cursor, int pageSize = 20, bool ugc = false}) async {
     try {
-      final response = await _dio
-          .get('/api/v1/articles/$articleId/comments/', queryParameters: {
+      final response =
+          await _dio.get(commentsPath(articleId, ugc: ugc), queryParameters: {
         if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
         'page_size': pageSize,
       });
@@ -1010,9 +1015,8 @@ class ApiService {
   }
 
   Future<Comment> postComment(String articleId, String content,
-      {String? parentId}) async {
-    final response =
-        await _dio.post('/api/v1/articles/$articleId/comments/', data: {
+      {String? parentId, bool ugc = false}) async {
+    final response = await _dio.post(commentsPath(articleId, ugc: ugc), data: {
       'content': content,
       if (parentId != null && parentId.isNotEmpty) 'parent_id': parentId,
     });

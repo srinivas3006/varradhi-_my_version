@@ -16,6 +16,7 @@ import '../core/media/media_resolver.dart';
 import '../core/media/media_source.dart';
 import '../core/media/network_video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
+import '../widgets/ads/full_screen_ad_image.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -575,32 +576,20 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
       );
     }
 
-    // Image ad — contained so it fits any screen whole, never cropped and
-    // never stretched, with the blurred backdrop behind it.
+    // Image ad — fills the phone screen when made in (or near) the phone's
+    // ratio; a very different creative is shown whole over a blurred copy,
+    // so nothing important is cropped (FullScreenAdImage).
     if (widget.ad.imageUrl.isNotEmpty) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          _backdrop(),
-          Center(
-            child: Image.network(
-              widget.ad.imageUrl,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return _spinner;
-              },
-              errorBuilder: (_, __, ___) {
-                // The only creative failed to decode; close rather than show a
-                // placeholder icon the reader has to sit through.
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) _close(widget.onFailed);
-                });
-                return const SizedBox.shrink();
-              },
-            ),
-          ),
-        ],
+      return FullScreenAdImage(
+        imageUrl: widget.ad.imageUrl,
+        errorBuilder: (_) {
+          // The only creative failed to decode; close rather than show a
+          // placeholder icon the reader has to sit through.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _close(widget.onFailed);
+          });
+          return const SizedBox.shrink();
+        },
       );
     }
 

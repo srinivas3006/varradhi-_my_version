@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vaaradhi/widgets/ads/full_screen_ad_image.dart';
 import 'package:vaaradhi/core/ads/ad_event_queue.dart';
 import 'package:vaaradhi/models/ad_banner.dart';
 import 'package:vaaradhi/widgets/ads/sponsored_spotlight_ad_card.dart';
@@ -41,20 +42,19 @@ Future<void> _teardown(WidgetTester tester) async {
 }
 
 void main() {
-  group('the creative is never cropped', () {
-    testWidgets('a full-screen ad is contained, not covered', (tester) async {
+  group('the creative fills the screen without losing its edges', () {
+    testWidgets('a full-screen ad uses the adaptive fill', (tester) async {
       await _pump(tester, _ad());
 
+      // Fills edge to edge when the creative is near the phone's ratio,
+      // otherwise shown whole over a blurred copy (full_screen_ad_test).
+      expect(find.byType(FullScreenAdImage), findsOneWidget);
       final fits = tester
           .widgetList<Image>(find.byType(Image))
           .map((i) => i.fit)
           .toList();
-
-      expect(fits, contains(BoxFit.contain),
-          reason: 'the creative itself must show whole — its phone number '
-              'and CTA sit near the edges');
       expect(fits, contains(BoxFit.cover),
-          reason: 'the blurred backdrop still covers, to fill the letterbox');
+          reason: 'the blurred backdrop covers the whole page');
 
       await _teardown(tester);
     });
