@@ -102,6 +102,40 @@ void main() {
     });
   });
 
+  group('click_action FLUTTER_NOTIFICATION_CLICK', () {
+    test('Android opens the app for it (manifest intent filter)', () {
+      final manifest =
+          File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+      final filter = RegExp(
+          r'<intent-filter>\s*<action android:name="FLUTTER_NOTIFICATION_CLICK"\s*/>\s*<category android:name="android.intent.category.DEFAULT"\s*/>\s*</intent-filter>');
+      expect(filter.hasMatch(manifest), isTrue);
+    });
+
+    test('it is not mistaken for a link; the content fields still route', () {
+      final t = payload({
+        'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+        'content_type': 'ugc',
+        'content_id': 'u-1',
+      });
+      expect(t.type, NotificationTargetType.ugc);
+      expect(t.identifier, 'u-1');
+      expect(
+          NotificationService.targetForTap(
+              {'click_action': 'FLUTTER_NOTIFICATION_CLICK'}).screenName,
+          'home');
+    });
+
+    test('duplicate guard is short-lived and in memory, not permanent', () {
+      final s = NotificationService.instance;
+      final t0 = DateTime(2026, 10, 17, 9);
+      final data = {'notification_id': 'n-tray-again'};
+      expect(s.shouldHandle(data, now: t0), isTrue);
+      // Tapped again from the tray a minute later: opens again.
+      expect(s.shouldHandle(data, now: t0.add(const Duration(minutes: 1))),
+          isTrue);
+    });
+  });
+
   group('tap handling', () {
     test('the same notification within 10 s is handled once', () {
       final s = NotificationService.instance;

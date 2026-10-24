@@ -60,11 +60,11 @@ void main() {
       expect(pacer.stickyVisible, isFalse);
     });
 
-    test('banner returns every 5 min of use, not before', () {
+    test('banner returns every 2 min of use, not before', () {
       use(180 + 30); // first appearance over
-      use(240);
+      use(60);
       expect(pacer.stickyVisible, isFalse);
-      use(45); // 5 min after the first appearance began
+      use(30); // 2 min after the first appearance began
       expect(pacer.stickyVisible, isTrue);
     });
 
@@ -94,9 +94,9 @@ void main() {
       expect(pacer.stickyVisible, isTrue);
       pacer.dismiss(AdPacer.sticky);
       expect(pacer.stickyVisible, isFalse);
-      use(200);
-      expect(pacer.stickyVisible, isFalse);
       use(100);
+      expect(pacer.stickyVisible, isFalse);
+      use(20); // a full 2-min period after it began
       expect(pacer.stickyVisible, isTrue);
     });
 

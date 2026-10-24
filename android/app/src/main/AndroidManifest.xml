@@ -50,11 +50,11 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Tray notification taps. The backend sends
-                 click_action = FLUTTER_NOTIFICATION_CLICK, so Android starts
-                 an activity for that action. Without this filter nothing
-                 matched it: the tap cleared the notification and opened
-                 nothing, from both background and terminated states. -->
+            <!-- Push taps. The backend sends click_action=FLUTTER_NOTIFICATION_CLICK;
+                 Android opens only an activity that declares this action, so
+                 without it a tap cleared the notification and opened nothing.
+                 firebase_messaging then delivers the tap through
+                 onMessageOpenedApp / getInitialMessage. -->
             <intent-filter>
                 <action android:name="FLUTTER_NOTIFICATION_CLICK" />
                 <category android:name="android.intent.category.DEFAULT" />

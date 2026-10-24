@@ -57,57 +57,22 @@ class _CommentsScreenState extends State<CommentsScreen> {
   bool _isPosting = false;
   List<Comment> _comments = [];
 
-  /// Citizen posts have no comment API yet (handover §17.4). Article comment
-  /// endpoints must never receive a UGC id, so nothing is fetched or posted.
-  bool get _commentsUnavailable => widget.article.isUgc;
+  /// Citizen posts (UGC) use their own comment API (/ugc/{id}/comments/);
+  /// an article comment endpoint never receives a UGC id. They get the same
+  /// sheet as articles.
+  bool get _isUgc => widget.article.isUgc;
 
   @override
   void initState() {
     super.initState();
-    if (_commentsUnavailable) {
-      _isLoading = false;
-      return;
-    }
     _fetchComments();
-  }
-
-  Widget _buildCommentsUnavailable(BuildContext context) {
-    final telugu = AppState.instance.language == 'Telugu';
-    final body = Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.forum_outlined, size: 48, color: Colors.grey),
-            const SizedBox(height: 12),
-            Text(
-              telugu
-                  ? 'పౌర వార్తలపై కామెంట్లు త్వరలో అందుబాటులోకి వస్తాయి.'
-                  : 'Comments on citizen posts are coming soon.',
-              key: const Key('ugc_comments_unavailable'),
-              textAlign: TextAlign.center,
-              style:
-                  const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (widget.sheetMode) {
-      return Material(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        child: body,
-      );
-    }
-    return Scaffold(appBar: AppBar(), body: body);
   }
 
   Future<void> _fetchComments() async {
     setState(() => _isLoading = true);
     try {
-      final fetched = await ApiService.instance.getComments(widget.article.id);
+      final fetched =
+          await ApiService.instance.getComments(widget.article.id, ugc: _isUgc);
       if (mounted) {
         final appState = AppState.instance;
         final filtered = fetched
@@ -162,6 +127,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
         widget.article.id,
         text,
         parentId: _replyingToCommentId,
+        ugc: _isUgc,
       );
       // Analytics: only once the API accepted it.
       unawaited(AnalyticsQueue.instance.trackContent(
@@ -206,6 +172,13 @@ class _CommentsScreenState extends State<CommentsScreen> {
         );
       }
     } catch (e) {
+      // Citizen post whose comment API is not on the server yet (404 / 405):
+      // keep the comment on this phone, as before, so it is not lost.
+      final status = e is DioException ? e.response?.statusCode : null;
+      if (mounted && _isUgc && (status == 404 || status == 405)) {
+        _keepCommentOnDevice(text);
+        return;
+      }
       if (mounted) {
         setState(() => _isPosting = false);
         String errorMsg = tr('comment_post_failed');
@@ -221,6 +194,35 @@ class _CommentsScreenState extends State<CommentsScreen> {
         );
       }
     }
+  }
+
+  /// Adds [text] to this post's comments on the phone (AppState), shows it
+  /// and clears the box — the fallback while the server has no UGC comment
+  /// API.
+  void _keepCommentOnDevice(String text) {
+    final app = AppState.instance;
+    final parentId = _replyingToCommentId;
+    if (parentId != null) {
+      app.addReply(widget.article.id, parentId, text);
+    } else {
+      app.addComment(widget.article.id, text);
+    }
+    setState(() {
+      _comments = List.of(app.getComments(widget.article.id));
+      _replyingToCommentId = null;
+      _replyingToUsername = null;
+      _isPosting = false;
+    });
+    _commentController.clear();
+    _focusNode.unfocus();
+    widget.article.comments++;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(tr('comment_posted')),
+        backgroundColor: const Color(0xFF10B981),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _onReplyTap(Comment parentComment) {
@@ -790,7 +792,6 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_commentsUnavailable) return _buildCommentsUnavailable(context);
     final body = Column(
       children: [
         Expanded(

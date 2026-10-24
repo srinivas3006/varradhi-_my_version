@@ -1,7 +1,7 @@
 name: vaaradhi
 description: VAARADHI news, video, local updates, ads, and citizen journalism mobile app.
 publish_to: 'none'
-version: 1.8.1+21
+version: 1.8.4+23
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

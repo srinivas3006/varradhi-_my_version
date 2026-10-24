@@ -47,8 +47,8 @@ class AdManager extends ChangeNotifier {
   final Map<String, int> _adImpressionCounts = {};
 
   // --- Configurable Thresholds (exposed for testing) ---
-  Duration minSessionAgeForInterstitial = const Duration(minutes: 5);
-  Duration minInterstitialCooldown = const Duration(minutes: 5);
+  Duration minSessionAgeForInterstitial = const Duration(minutes: 2);
+  Duration minInterstitialCooldown = const Duration(minutes: 2);
   int minEngagementForInterstitial = 3;
   int minArticlesBeforeFirstAd = 2;
 
