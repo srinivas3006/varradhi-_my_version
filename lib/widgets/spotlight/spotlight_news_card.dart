@@ -648,6 +648,15 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                                         .isNotEmpty)
                                                 ? article.mediaItems.first.url
                                                 : article.imageUrl,
+                                            // The story's other photos, as
+                                            // the download tries them.
+                                            fallbackUrls: [
+                                              article.imageUrl,
+                                              ...?article.imageUrls,
+                                              for (final m
+                                                  in article.orderedMedia)
+                                                if (!m.isVideo) m.url,
+                                            ],
                                           ),
                                         ),
                               // Dark-to-transparent scrim rising from the bottom
