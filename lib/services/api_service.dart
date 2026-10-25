@@ -1447,27 +1447,78 @@ class ApiService {
         : ApiResponse.success(r.results);
   }
 
-  /// `GET /api/v1/search/` → results, suggestions (for zero results),
-  /// filters and cache_ttl_seconds.
+  /// `GET /api/v1/search/` — universal, multilingual search: grouped
+  /// `sections` plus the legacy article `results` (see [SearchResult]).
+  ///
+  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it).
+  /// A 401 after the token refresh has already been tried (and failed, so
+  /// the reader is now signed out) is retried once as a guest — search
+  /// works without login. [cancelToken] drops a request the reader has
+  /// already typed past.
   Future<SearchResult> search(
     String query, {
     String? lang,
     String? category,
+    CancelToken? cancelToken,
   }) async {
-    try {
-      final response = await _dio.get('/api/v1/search/', queryParameters: {
-        'q': query,
-        if (lang != null) 'lang': lang,
-        if (category != null) 'category': category,
-      });
-      return SearchResult.parse(response.data);
-    } catch (e) {
-      return SearchResult(
-        results: const [],
-        suggestions: const [],
-        error: e is AppException ? e.message : e.toString(),
-      );
+    final q = query.trim();
+    if (q.isEmpty) {
+      return const SearchResult(results: [], suggestions: []);
     }
+    for (var attempt = 0;; attempt++) {
+      try {
+        final response = await _dio.get(
+          '/api/v1/search/',
+          queryParameters: {
+            'q': q,
+            // `lang`, not `language` (backend confirmation, Oct 2026). No
+            // page / page_size: the search API ignores them.
+            if (lang != null && lang.isNotEmpty) 'lang': lang,
+            if (category != null && category.isNotEmpty) 'category': category,
+          },
+          cancelToken: cancelToken,
+        );
+        return SearchResult.parse(response.data);
+      } catch (e) {
+        final status = _statusOf(e);
+        if (status == 401 && attempt == 0) continue;
+        return SearchResult(
+          results: const [],
+          suggestions: const [],
+          error: _backendMessage(e) ?? e.toString(),
+          errorKind: SearchResult.errorKindFor(status),
+        );
+      }
+    }
+  }
+
+  /// HTTP status of a failed call, through the client's error mapping.
+  static int? _statusOf(Object e) {
+    if (e is DioException) {
+      return e.response?.statusCode ??
+          (e.error is AppException ? (e.error as AppException).statusCode : null);
+    }
+    return e is AppException ? e.statusCode : null;
+  }
+
+  /// The backend's own message: `errors`, `errors.detail` or a field error.
+  static String? _backendMessage(Object e) {
+    final data = e is DioException ? e.response?.data : null;
+    if (data is Map && data['errors'] != null) {
+      final errors = data['errors'];
+      if (errors is String && errors.isNotEmpty) return errors;
+      if (errors is Map) {
+        for (final key in ['message', 'detail']) {
+          final v = errors[key];
+          if (v != null && v.toString().isNotEmpty) return v.toString();
+        }
+        for (final v in errors.values) {
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v is String && v.isNotEmpty) return v;
+        }
+      }
+    }
+    return null;
   }
 
   Future<List<String>> getTrendingSearches() async {

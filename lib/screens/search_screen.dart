@@ -1,15 +1,14 @@
 import '../services/analytics_queue.dart';
 import 'dart:async';
+import 'package:dio/dio.dart';
+import '../widgets/search/universal_search_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../state/app_state.dart';
 import 'package:flutter/material.dart';
 import '../localization/app_translations.dart';
 import '../models/news_article.dart';
 import '../services/api_service.dart';
-import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import 'news_detail_screen.dart';
 import '../services/ad_manager.dart';
 import '../core/ads/ad_insertion.dart';
 import '../widgets/ads/unified_ad_widget.dart';
@@ -70,40 +69,68 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _isLoading = false;
   Timer? _debounce;
 
+  /// The latest completed search (kept on screen while the next one loads).
+  SearchResult? _response;
+  String _shownQuery = '';
+
+  /// Why the latest search failed; the query stays in the box for Retry.
+  SearchErrorKind? _errorKind;
+  CancelToken? _inFlight;
+
+  /// Typing pause before a live search (search handover: 400-500 ms).
+  static const debounce = Duration(milliseconds: 450);
+
+  void _clearResults() {
+    _inFlight?.cancel();
+    _results = [];
+    _presentedResults = [];
+    _response = null;
+    _errorKind = null;
+    _isLoading = false;
+  }
+
   void _onQueryChanged(String query) {
     _debounce?.cancel();
     ++_queryGeneration;
-    if (query.trim().length < 2) {
-      setState(() {
-        _results = [];
-        _isLoading = false;
-      });
+    if (query.trim().isEmpty) {
+      setState(_clearResults);
       return;
     }
-    _debounce =
-        Timer(const Duration(milliseconds: 300),
-            () => _runSearch(query, submitted: false));
+    _debounce = Timer(debounce, () => _runSearch(query, submitted: false));
+  }
+
+  /// Runs [term] as a new search from a chip (suggestion, trend).
+  void _searchTerm(String term) {
+    _controller.text = term;
+    _controller.selection = TextSelection.collapsed(offset: term.length);
+    _runSearch(term);
   }
 
   /// [submitted]: the reader asked for this search (keyboard search, a
-  /// recent / trending / suggested term) — only these are reported as
+  /// recent / trending / suggested term) - only these are reported as
   /// `search_query`, not the live results while typing.
   void _runSearch(String query, {bool submitted = true}) async {
     _debounce?.cancel();
     final generation = ++_queryGeneration;
     final trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setState(() {
-        _results = [];
-        _isLoading = false;
-      });
+    if (trimmed.isEmpty) {
+      setState(_clearResults);
       return;
     }
-    setState(() => _isLoading = true);
+    // The previous request is dropped; its answer could not replace this
+    // one anyway (generation check below).
+    _inFlight?.cancel();
+    final cancel = _inFlight = CancelToken();
+    // Earlier results stay visible under a progress bar until this one is in.
+    setState(() {
+      _isLoading = true;
+      _errorKind = null;
+    });
 
     final futureResponse = ApiService.instance.search(
       trimmed,
       lang: AppState.instance.contentLanguage,
+      cancelToken: cancel,
     );
     final futureAds = AdManager.instance.getAdsForZone('search');
 
@@ -111,23 +138,26 @@ class _SearchScreenState extends State<SearchScreen> {
     final ads = await futureAds;
 
     if (!mounted || generation != _queryGeneration) return;
-    if (response.error != null) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(response.error ?? tr('no_results'))),
-      );
+    if (response.errorKind != null) {
+      setState(() {
+        _isLoading = false;
+        _errorKind = response.errorKind;
+      });
       return;
     }
 
     if (submitted) {
       unawaited(AnalyticsQueue.instance.track('search_query', metadata: {
         'q': trimmed,
-        'result_count': response.results.length,
+        'result_count': response.universalResultCount,
       }));
     }
 
     setState(() {
-      _results = response.results;
+      _response = response;
+      _shownQuery = trimmed;
+      // Universal search: the articles section; older backend: results.
+      _results = response.articles;
       _suggestions = response.suggestions
           .where((s) => s.toLowerCase() != trimmed.toLowerCase())
           .take(8)
@@ -139,7 +169,7 @@ class _SearchScreenState extends State<SearchScreen> {
         contentKey: (article) => 'search:${article.id}',
       );
       _isLoading = false;
-      if (!_recent.contains(trimmed)) {
+      if (submitted && !_recent.contains(trimmed)) {
         _recent.insert(0, trimmed);
         if (_recent.length > 6) _recent.removeLast();
       }
@@ -210,11 +240,8 @@ class _SearchScreenState extends State<SearchScreen> {
                       ),
                       onPressed: () {
                         _controller.clear();
-                        setState(() {
-                          _results = [];
-                          _presentedResults = [];
-                          _isLoading = false;
-                        });
+                        ++_queryGeneration;
+                        setState(_clearResults);
                       },
                     )
                   : null,
@@ -237,13 +264,9 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ],
       ),
-      body: _controller.text.isEmpty
+      body: _controller.text.trim().isEmpty
           ? _buildSuggestions(isDark, telugu)
-          : _isLoading
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                )
-              : _buildResults(isDark),
+          : _buildBody(isDark),
     );
   }
 
@@ -366,6 +389,86 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Widget _buildBody(bool isDark) {
+    if (_errorKind != null) return _buildError(isDark);
+    final response = _response;
+    if (response == null) {
+      return _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary))
+          : const SizedBox.shrink();
+    }
+    final Widget results;
+    if (!response.hasSections || response.isEmpty) {
+      // Older backend (articles only), or "No results found".
+      results = _buildResults(isDark);
+    } else {
+      results = UniversalSearchResults(
+        result: response,
+        query: _shownQuery,
+        presentedArticles: _presentedResults,
+        onSearchTerm: _searchTerm,
+      );
+    }
+    return Stack(
+      children: [
+        Positioned.fill(child: results),
+        if (_isLoading)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+                minHeight: 2, color: AppColors.primary),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildError(bool isDark) {
+    final telugu = AppState.instance.language == 'Telugu';
+    final kind = _errorKind!;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              kind == SearchErrorKind.unavailable
+                  ? Icons.cloud_off_rounded
+                  : Icons.error_outline_rounded,
+              size: 48,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              searchErrorMessage(kind),
+              key: const ValueKey('search_error_message'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? AppColors.textLight : AppColors.textDark,
+              ),
+            ),
+            // 429 gets no Retry button: the backend asks not to retry at
+            // once; the reader can search again after a moment.
+            if (kind == SearchErrorKind.unavailable) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const ValueKey('search_retry'),
+                onPressed:
+                    _isLoading ? null : () => _runSearch(_controller.text),
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildResults(bool isDark) {
     if (_results.isEmpty) {
       final telugu = AppState.instance.language == 'Telugu';
@@ -417,12 +520,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         key: ValueKey('search_suggestion_$s'),
                         avatar: const Icon(Icons.search_rounded, size: 16),
                         label: Text(s),
-                        onPressed: () {
-                          _controller.text = s;
-                          _controller.selection =
-                              TextSelection.collapsed(offset: s.length);
-                          _runSearch(s);
-                        },
+                        onPressed: () => _searchTerm(s),
                       ),
                   ],
                 ),
@@ -450,78 +548,7 @@ class _SearchScreenState extends State<SearchScreen> {
         }
 
         final article = item.content!;
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: article.imageUrl.isNotEmpty
-                ? CachedNetworkImage(
-                    imageUrl: article.imageUrl,
-                    width: 60,
-                    height: 60,
-                    memCacheWidth: 160,
-                    memCacheHeight: 160,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
-                      width: 60,
-                      height: 60,
-                      color: isDark
-                          ? AppColors.surfaceElevatedDark
-                          : Colors.black12,
-                    ),
-                    errorWidget: (_, __, ___) => Container(
-                      width: 60,
-                      height: 60,
-                      color: isDark
-                          ? AppColors.surfaceElevatedDark
-                          : Colors.black12,
-                      child: Icon(
-                        Icons.broken_image_rounded,
-                        size: 20,
-                        color: isDark ? Colors.white38 : Colors.black26,
-                      ),
-                    ),
-                  )
-                : Container(
-                    width: 60,
-                    height: 60,
-                    color:
-                        isDark ? AppColors.surfaceElevatedDark : Colors.black12,
-                    child: Icon(
-                      Icons.newspaper_rounded,
-                      size: 20,
-                      color: isDark ? Colors.white38 : Colors.black26,
-                    ),
-                  ),
-          ),
-          title: Text(
-            article.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: ArticleTypography.heading(
-              fontSize: 14.5,
-              height: 1.3,
-              color: isDark ? AppColors.textLight : AppColors.textDark,
-            ),
-          ),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 4.0),
-            child: Text(
-              '${article.source} · ${article.timeAgo}',
-              style: TextStyle(
-                fontSize: 11.5,
-                color:
-                    isDark ? AppColors.textSecondaryDark : AppColors.textMuted,
-              ),
-            ),
-          ),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => NewsDetailScreen(article: article),
-            ),
-          ),
-        );
+        return SearchArticleTile(article: article);
       },
     );
   }
@@ -529,6 +556,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _inFlight?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
