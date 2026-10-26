@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../widgets/news_action_button.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/news_article.dart';
@@ -325,7 +326,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
   void _share() {
     // The detail payload can lack a usable still; the feed article this
     // screen opened from is what Spotlight shares, so it backs it up.
-    ShareService.shareArticle(article, fallback: widget.article);
+    ShareService.shareNow(article, fallback: widget.article);
   }
 
   void _goBack() {
@@ -939,6 +940,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
               child: Row(
                 children: [
                   _barAction(
+                    action: NewsAction.like,
+                    isActive: isLiked,
                     icon: isLiked
                         ? Icons.thumb_up_rounded
                         : Icons.thumb_up_alt_outlined,
@@ -947,6 +950,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     onTap: () => _toggleReaction('like'),
                   ),
                   _barAction(
+                    action: NewsAction.dislike,
+                    isActive: isDisliked,
                     icon: isDisliked
                         ? Icons.thumb_down_rounded
                         : Icons.thumb_down_alt_outlined,
@@ -956,6 +961,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     onTap: () => _toggleReaction('dislike'),
                   ),
                   _barAction(
+                    action: NewsAction.comment,
                     icon: Icons.chat_bubble_outline_rounded,
                     label:
                         countOr(commentCount, telugu ? 'కామెంట్' : 'Comment'),
@@ -963,6 +969,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     onTap: _openComments,
                   ),
                   _barAction(
+                    action: NewsAction.share,
                     icon: Icons.share_rounded,
                     label: telugu ? 'షేర్' : 'Share',
                     color: inactiveColor,
@@ -980,31 +987,33 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     );
   }
 
+  /// One engagement-bar action: the animated pastel button, sized for the
+  /// 58 px bar. [color] is the icon colour of an inactive like / dislike;
+  /// the handlers are unchanged.
   Widget _barAction({
+    required NewsAction action,
     required IconData icon,
     required String label,
     required Color color,
-    required VoidCallback onTap,
+    required FutureOr<void> Function() onTap,
+    bool isActive = false,
   }) {
     return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-            ),
-          ],
+      child: Center(
+        child: NewsActionButton(
+          action: action,
+          icon: icon,
+          idleColor: color,
+          label: label,
+          isActive: isActive,
+          diameter: 30,
+          iconSize: 18,
+          // The bar is 58 px tall; each action's cell is a quarter of the
+          // width, so the touch area stays well over 48 px wide.
+          slot: 40,
+          guardWhileBusy: action == NewsAction.like ||
+              action == NewsAction.dislike,
+          onTap: onTap,
         ),
       ),
     );

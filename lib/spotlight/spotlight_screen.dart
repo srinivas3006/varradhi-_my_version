@@ -293,6 +293,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       }
       if (url.isEmpty || !_precachedUrls.add(url)) continue;
       unawaited(SmartFitImage.precache(context, url));
+      // The next story's share image too, so Share is instant there.
+      if (i == index + 1) unawaited(ShareService.prepareShare(article));
     }
   }
 
@@ -314,42 +316,12 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     }
   }
 
-  /// Instant feedback: the share image takes a moment to make, so a
-  /// "preparing" note shows at once and goes when the share sheet opens.
+  /// Share opens the share sheet at once — no "preparing" wait.
   Future<void> _shareArticle(NewsArticle article) async {
     HapticFeedback.selectionClick();
-    // The card prepares the share image while the story is on screen, so
-    // usually it is ready and the share sheet opens at once, no note.
-    if (ShareService.isShareReady(article)) {
-      await ShareService.shareArticle(article);
-      return;
-    }
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final preparing = messenger?.showSnackBar(
-      const SnackBar(
-        key: Key('share_preparing'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 20),
-        content: Row(
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
-            ),
-            SizedBox(width: 14),
-            Expanded(child: Text('షేర్ కోసం సిద్ధం చేస్తోంది…')),
-          ],
-        ),
-      ),
-    );
-    void hide() => preparing?.close();
-    try {
-      await ShareService.shareArticle(article, onReady: hide);
-    } finally {
-      hide();
-    }
+    // The share sheet opens at once: with the branded image when the card
+    // has already made it (usually), else with the headline and link.
+    await ShareService.shareNow(article);
   }
 
   void _openArticle(NewsArticle article) {

@@ -82,7 +82,9 @@ void main() {
       expect(card, contains('ShareService.prepareShare(widget.article)'));
       final screen =
           File('lib/spotlight/spotlight_screen.dart').readAsStringSync();
-      expect(screen, contains('if (ShareService.isShareReady(article))'));
+      expect(screen, contains('ShareService.shareNow(article)'));
+      expect(screen, isNot(contains('share_preparing')),
+          reason: 'no "preparing" wait before the share sheet');
     });
 
     test('a video download never saves an unbranded file', () {

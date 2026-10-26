@@ -14,6 +14,7 @@ import '../../state/app_state.dart';
 import '../../utils/share_service.dart';
 import '../../services/analytics_queue.dart';
 import '../../services/content_analytics.dart';
+import '../news_action_button.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/article_typography.dart';
 import '../../screens/comments_screen.dart';
@@ -203,7 +204,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     _scheduleImpression();
     _sharePrep?.cancel();
     if (!widget.isCurrent || _inWidgetTest) return;
-    _sharePrep = Timer(const Duration(milliseconds: 700), () {
+    // Soon after the story settles, so the image is ready before a tap.
+    _sharePrep = Timer(const Duration(milliseconds: 300), () {
       if (mounted && widget.isCurrent) {
         ShareService.prepareShare(widget.article);
       }
@@ -1221,20 +1223,15 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                             ],
                           ),
                         ),
-                        // In-Article Action Bar (Like, Dislike, Share, Comment, Save)
+                        // Action strip: a white bar across the full width
+                        // (like / dislike left; comment, download, more
+                        // right) with Share raised in the middle.
                         Transform.translate(
                           offset: Offset(0, bodyOffset),
                           child: RepaintBoundary(
-                            child: Padding(
-                              padding: EdgeInsets.only(
-                                bottom:
-                                    MediaQuery.of(context).padding.bottom + 16,
-                                top: 8,
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
+                            child: _ActionStrip(
+                              gutter: _bodyGutter,
+                              leading: [
                                   // Like
                                   AnimatedBuilder(
                                     animation: AppState.instance,
@@ -1254,6 +1251,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               AppState.instance
                                                   .isDisliked(article.id));
                                       return _buildActionIcon(
+                                        action: NewsAction.like,
+                                        isActive: isLiked,
+                                        guardWhileBusy: true,
                                         icon: isLiked
                                             ? Icons.thumb_up_rounded
                                             : Icons.thumb_up_alt_outlined,
@@ -1383,6 +1383,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               AppState.instance
                                                   .isLiked(article.id));
                                       return _buildActionIcon(
+                                        action: NewsAction.dislike,
+                                        isActive: isDisliked,
+                                        guardWhileBusy: true,
                                         icon: isDisliked
                                             ? Icons.thumb_down_rounded
                                             : Icons.thumb_down_alt_outlined,
@@ -1491,29 +1494,54 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             }
                                           }
 
-                                          if (mounted) {
-                                            messenger.removeCurrentSnackBar();
-                                            messenger.showSnackBar(
-                                              SnackBar(
-                                                content: Text(nextReaction ==
-                                                        'dislike'
-                                                    ? (AppState.instance
-                                                                .language ==
-                                                            'Telugu'
-                                                        ? 'మీ అభిప్రాయం నమోదు చేయబడింది'
-                                                        : 'Feedback received')
-                                                    : (AppState.instance
-                                                                .language ==
-                                                            'Telugu'
-                                                        ? 'డిస్‌లైక్ తీసివేయబడింది'
-                                                        : 'Dislike removed')),
-                                                duration:
-                                                    const Duration(seconds: 1),
-                                                behavior:
-                                                    SnackBarBehavior.floating,
-                                              ),
-                                            );
-                                          }
+                                          // No confirmation pop-up: the
+                                          // button's own state shows it,
+                                          // as for like. Failures still
+                                          // say so (above).
+                                        },
+                                      );
+                                    },
+                                  ),
+                              ],
+                              share: NewsActionButton(
+                                action: NewsAction.share,
+                                icon: Icons.share_rounded,
+                                filled: true,
+                                ringed: true,
+                                diameter: 56,
+                                iconSize: 26,
+                                slot: 60,
+                                label: AppState.instance.language == 'Telugu'
+                                    ? 'షేర్'
+                                    : 'SHARE',
+                                labelColor: isDark
+                                    ? AppColors.readingMetaDark
+                                    : const Color(0xFF6B7280),
+                                onTap: widget.onShare,
+                              ),
+                              trailing: [
+                                  // Comment (Opens directly without auth gate)
+                                  AnimatedBuilder(
+                                    animation: AppState.instance,
+                                    builder: (context, _) {
+                                      final count = AppState.instance
+                                          .getDisplayCommentCount(
+                                              article.id, article.comments);
+                                      return _buildActionIcon(
+                                        action: NewsAction.comment,
+                                        icon: Icons.chat_bubble_outline_rounded,
+                                        color: isDark
+                                            ? AppColors.readingMetaDark
+                                            : const Color(0xFF6B7280),
+                                        label: _formatCount(count),
+                                        onTap: () {
+                                          HapticFeedback.selectionClick();
+                                          // Sheet, not a pushed page: the post
+                                          // stays on screen behind it.
+                                          CommentsScreen.showSheet(
+                                            context,
+                                            _detailArticle ?? widget.article,
+                                          );
                                         },
                                       );
                                     },
@@ -1523,6 +1551,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   // an image there is nothing to put text on.
                                   if (ShareService.canGeneratePoster(article))
                                     _buildActionIcon(
+                                      action: NewsAction.download,
+                                      isActive: _posterDownloaded,
                                       icon: (_downloadingPoster || _videoBusy)
                                           ? Icons.hourglass_top_rounded
                                           : (_posterDownloaded
@@ -1543,44 +1573,6 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       // gallery. Video story: image or video.
                                       onTap: () => _onDownloadTap(article),
                                     ),
-                                  // Share (Center, Prominent Red Circle)
-                                  GestureDetector(
-                                    onTap: widget.onShare,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.primary,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const Icon(Icons.share_rounded,
-                                          color: Colors.white, size: 22),
-                                    ),
-                                  ),
-                                  // Comment (Opens directly without auth gate)
-                                  AnimatedBuilder(
-                                    animation: AppState.instance,
-                                    builder: (context, _) {
-                                      final count = AppState.instance
-                                          .getDisplayCommentCount(
-                                              article.id, article.comments);
-                                      return _buildActionIcon(
-                                        icon: Icons.chat_bubble_outline_rounded,
-                                        color: isDark
-                                            ? AppColors.readingMetaDark
-                                            : const Color(0xFF6B7280),
-                                        label: _formatCount(count),
-                                        onTap: () {
-                                          HapticFeedback.selectionClick();
-                                          // Sheet, not a pushed page: the post
-                                          // stays on screen behind it.
-                                          CommentsScreen.showSheet(
-                                            context,
-                                            _detailArticle ?? widget.article,
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
                                   // More (⋮): Report Story + Bookmark live in
                                   // a bottom sheet instead of the bar.
                                   Semantics(
@@ -1591,6 +1583,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                             : 'More options',
                                     child: _buildActionIcon(
                                       key: const Key('spotlight_more_btn'),
+                                      action: NewsAction.more,
                                       icon: Icons.more_vert_rounded,
                                       color: isDark
                                           ? AppColors.readingMetaDark
@@ -1599,8 +1592,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       onTap: () => _showMoreSheet(article),
                                     ),
                                   ),
-                                ],
-                              ),
+                              ],
                             ),
                           ),
                         ),
@@ -1760,29 +1752,31 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     );
   }
 
+  /// One action in the bar: the animated pastel button. [color] is the
+  /// icon colour of an inactive like / dislike; the handlers are unchanged.
   Widget _buildActionIcon({
     Key? key,
+    required NewsAction action,
     required IconData icon,
     required Color color,
     required String label,
-    required VoidCallback onTap,
+    required FutureOr<void> Function() onTap,
+    bool isActive = false,
+    bool guardWhileBusy = false,
   }) {
-    return GestureDetector(
+    return NewsActionButton(
       key: key,
+      action: action,
+      icon: icon,
+      idleColor: color,
+      label: label,
+      isActive: isActive,
+      guardWhileBusy: guardWhileBusy,
+      inline: true,
+      diameter: 34,
+      iconSize: 23,
+      slot: 38,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 24),
-          if (label.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(label,
-                style: TextStyle(
-                    color: color, fontSize: 12, fontWeight: FontWeight.w600)),
-          ]
-        ],
-      ),
     );
   }
 
@@ -2119,5 +2113,117 @@ class VaaradhiLogoBadge extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The white action strip under a Spotlight story: full width (it reaches
+/// past the story's side margins), a hairline on top, the actions in two
+/// groups, and Share raised over the top edge in the middle.
+///
+/// Fixed height, so nothing in it can shift the story. On a phone too
+/// narrow for the actions at full size, each group scales down a little
+/// instead of overflowing.
+class _ActionStrip extends StatelessWidget {
+  const _ActionStrip({
+    required this.gutter,
+    required this.leading,
+    required this.share,
+    required this.trailing,
+  });
+
+  final double gutter;
+  final List<Widget> leading;
+  final Widget share;
+  final List<Widget> trailing;
+
+  static const barHeight = 58.0;
+
+  /// How far Share rises above the bar.
+  static const raise = 24.0;
+
+  /// Room left in the row for the raised Share.
+  static const shareGap = 76.0;
+
+  /// The width one group needs at full size.
+  static const groupWidth = 136.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    Widget group(List<Widget> items) => Expanded(
+          child: LayoutBuilder(
+            builder: (context, c) => FittedBox(
+              fit: BoxFit.scaleDown,
+              child: SizedBox(
+                width: c.maxWidth < groupWidth ? groupWidth : c.maxWidth,
+                height: barHeight,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: items,
+                ),
+              ),
+            ),
+          ),
+        );
+
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth + gutter * 2;
+      return SizedBox(
+        height: raise + barHeight + bottom,
+        child: OverflowBox(
+          minWidth: width,
+          maxWidth: width,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: raise,
+                bottom: 0,
+                child: DecoratedBox(
+                  key: const Key('spotlight_action_strip'),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.cardDarkNavy : Colors.white,
+                    border: Border(
+                      top: BorderSide(
+                        color: isDark
+                            ? AppColors.borderDark
+                            : Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 8,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(8, 0, 8, bottom),
+                    child: Row(
+                      children: [
+                        group(leading),
+                        const SizedBox(width: shareGap),
+                        group(trailing),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Center(child: share),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 }

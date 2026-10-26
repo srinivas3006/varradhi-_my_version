@@ -159,6 +159,29 @@ class ShareService {
     }
   }
 
+  /// Share without waiting: the branded image when it is already made,
+  /// otherwise the headline and link at once — the image is then made in
+  /// the background, so the next share of this story carries it. Tapping
+  /// Share never shows a "preparing" wait.
+  static Future<void> shareNow(NewsArticle article,
+      {NewsArticle? fallback}) async {
+    if (isShareReady(article)) {
+      return shareArticle(article, fallback: fallback);
+    }
+    if (_isSharing) return;
+    _isSharing = true;
+    try {
+      unawaited(generateArticleImage(article, fallback: fallback)
+          .then<void>((_) {}, onError: (_) {}));
+      final result = await Share.share(buildShareText(article));
+      trackShare(article, result);
+    } catch (e) {
+      debugPrint('Error sharing article: $e');
+    } finally {
+      _isSharing = false;
+    }
+  }
+
   /// Analytics `share`, unless the reader closed the sheet without sharing.
   /// The channel is the app chosen when Android reports it.
   @visibleForTesting
