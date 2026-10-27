@@ -389,7 +389,7 @@ class SpotlightController extends ChangeNotifier {
         policy: AdFrequencyPolicy.spotlight,
         contentKey: (item) => '${item.type.name}:${item.id}',
       );
-      final updatedFeed = run
+      final rebuilt = run
           .where((entry) => !_dismissedSlots.contains(entry.stableKey))
           .map((entry) => entry.isAd
               ? SpotlightItem(
@@ -398,6 +398,12 @@ class SpotlightController extends ChangeNotifier {
                   adBanner: entry.ad)
               : entry.content!)
           .toList();
+      // A further page only adds to the end. Rebuilt from scratch, the list
+      // re-sorted stories by date and re-spaced posters, polls and ads, so
+      // items already shown moved: the next card, already loaded, turned
+      // into another story and reloaded — the blink while scrolling.
+      final updatedFeed =
+          refresh ? rebuilt : appendOnly(_state.feed, rebuilt);
       final hasMore = _articleHasMore || _ugcHasMore;
       if (updatedFeed.isNotEmpty && hasMore) {
         updatedFeed.add(SpotlightItem.shimmer());
@@ -452,6 +458,31 @@ class SpotlightController extends ChangeNotifier {
         unawaited(loadFeed());
       }
     }
+  }
+
+  /// The feed after a further page: [shown] kept exactly as it is (same
+  /// items, same places), then the items of [rebuilt] it does not already
+  /// hold, in their order. Stories already in the feed are never added a
+  /// second time; the loading placeholder is dropped.
+  @visibleForTesting
+  static List<SpotlightItem> appendOnly(
+      List<SpotlightItem> shown, List<SpotlightItem> rebuilt) {
+    String key(SpotlightItem i) => '${i.type.name}:${i.id}';
+    String? story(SpotlightItem i) => i.article == null
+        ? null
+        : '${i.article!.contentKind}:${i.article!.id}';
+    final kept =
+        shown.where((i) => i.type != SpotlightType.shimmer).toList();
+    final keys = {for (final i in kept) key(i)};
+    final stories = {for (final i in kept) story(i)}..remove(null);
+    return [
+      ...kept,
+      for (final i in rebuilt)
+        if (i.type != SpotlightType.shimmer &&
+            !keys.contains(key(i)) &&
+            !stories.contains(story(i)))
+          i,
+    ];
   }
 
   int _visibleStoryCount = 0;

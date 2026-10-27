@@ -48,6 +48,26 @@ class NewsArticleRepository {
     }
   }
 
+  /// The cached copy of [slug], at once (no await), even if older than
+  /// [cacheTtl]; null if never fetched. Lets a card that is built again
+  /// (swiped back to, or rebuilt by the pager) draw its final story in its
+  /// first frame instead of the feed's short summary and then the full
+  /// text a frame later.
+  NewsArticle? peekDetail(String slug) => _cache[slug]?.article;
+
+  /// Whether the cached copy of [slug] is within [cacheTtl].
+  bool isFresh(String slug) {
+    final cached = _cache[slug];
+    return cached != null && now().difference(cached.at) < cacheTtl;
+  }
+
+  /// Fetches [slug] in the background (no-op when fresh or already in
+  /// flight); errors are left for the screen that shows it.
+  void prefetchDetail(String slug) {
+    if (slug.isEmpty || isFresh(slug) || _pending.containsKey(slug)) return;
+    getDetail(slug).then<void>((_) {}, onError: (_) {});
+  }
+
   /// Alias for [getDetail].
   Future<NewsArticle> getArticleBySlug(String slug, {bool forceRefresh = false}) {
     return getDetail(slug, forceRefresh: forceRefresh);

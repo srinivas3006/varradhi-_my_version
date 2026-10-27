@@ -120,11 +120,27 @@ class _SmartFitImageState extends State<SmartFitImage> {
   @override
   void didUpdateWidget(covariant SmartFitImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl ||
-        oldWidget.maxDecodeWidth != widget.maxDecodeWidth ||
-        !_sameList(oldWidget.fallbackUrls, widget.fallbackUrls)) {
-      _start();
+    if (oldWidget.imageUrl == widget.imageUrl &&
+        oldWidget.maxDecodeWidth == widget.maxDecodeWidth &&
+        _sameList(oldWidget.fallbackUrls, widget.fallbackUrls)) {
+      return;
     }
+    // The photo on screen is still one of this story's photos (e.g. the
+    // full article arrived with a longer photo list): keep showing it —
+    // restarting cleared it to grey and reloaded it, a visible blink.
+    final next =
+        SmartFitImage.candidates(widget.imageUrl, widget.fallbackUrls);
+    final shown = _index < _candidates.length ? _candidates[_index] : null;
+    if (oldWidget.maxDecodeWidth == widget.maxDecodeWidth &&
+        shown != null &&
+        _imageAspect != null &&
+        next.isNotEmpty &&
+        next.first == shown) {
+      _candidates = next;
+      _index = 0;
+      return;
+    }
+    _start();
   }
 
   static bool _sameList(List<String> a, List<String> b) {

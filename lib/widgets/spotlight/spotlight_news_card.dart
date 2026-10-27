@@ -367,7 +367,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     // — /articles/{id}/ is a 404 — so an item without one keeps its feed copy.
     final slugToFetch = widget.article.slug;
     if (!widget.article.isUgc && slugToFetch.isNotEmpty) {
-      _fetchArticleDetail(slugToFetch);
+      _loadDetail(slugToFetch);
     }
     _scheduleSharePrep();
     _trackView();
@@ -388,7 +388,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
       _detailError = null;
       final slug = widget.article.slug;
       if (!widget.article.isUgc && slug.isNotEmpty) {
-        _fetchArticleDetail(slug);
+        _loadDetail(slug);
       }
       _scheduleSharePrep();
       _trackView();
@@ -436,14 +436,30 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     );
   }
 
+  /// The full story for [slug]: the cached copy at once when there is one,
+  /// so the card's first frame already shows its final text. The feed only
+  /// carries a short summary; drawing that and then swapping in the full
+  /// story re-fitted the text a frame later — the "already loaded, then
+  /// reloads" blink while swiping. A stale copy is refreshed quietly.
+  void _loadDetail(String slug) {
+    final repo = NewsArticleRepository.instance;
+    final cached = repo.peekDetail(slug);
+    if (cached != null) _detailArticle = cached;
+    if (cached == null || !repo.isFresh(slug)) _fetchArticleDetail(slug);
+  }
+
   Future<void> _fetchArticleDetail(String slug) async {
     if (widget.article.isUgc) return;
     final generation = ++_detailGeneration;
 
-    setState(() {
-      _isLoadingDetail = true;
-      _detailError = null;
-    });
+    // A copy already on screen stays; the spinner is only for a card with
+    // nothing to show yet.
+    if (_detailArticle == null) {
+      setState(() {
+        _isLoadingDetail = true;
+        _detailError = null;
+      });
+    }
 
     try {
       debugPrint('Spotlight: fetching detail for slug: $slug');

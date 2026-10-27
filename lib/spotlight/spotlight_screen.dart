@@ -20,6 +20,7 @@ import '../widgets/poll_card.dart';
 import '../core/widgets/fit_or_scroll.dart';
 import '../widgets/spotlight/spotlight_trending_strip.dart';
 import '../screens/news_detail_screen.dart';
+import '../repositories/news_article_repository.dart';
 import '../utils/share_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -278,6 +279,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       if (i < 0) continue;
       final article = feed[i].article;
       if (article == null) continue;
+      // The full story too (the feed has only a summary), so the card is
+      // built with its final text and never swaps it in while on screen.
+      if (i <= index + 2 && !article.isUgc && article.slug.isNotEmpty) {
+        NewsArticleRepository.instance.prefetchDetail(article.slug);
+      }
       final String url;
       final media = article.orderedMedia;
       if (media.length > 1) {
