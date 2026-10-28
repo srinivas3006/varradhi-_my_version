@@ -2,7 +2,8 @@ import 'dart:async';
 import '../repositories/ad_repository.dart';
 import '../core/ads/ad_placement.dart';
 import 'dart:io' show File, Platform;
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, kIsWeb, visibleForTesting;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
@@ -79,12 +80,13 @@ class ApiService {
       }
     }
 
-    // 2. If installation_secret is missing, ensure guest registration is performed first
-    // so backend generates and returns installation_secret before logging in.
+    // 2. No installation credential on this phone: obtain one before logging
+    // in (guest registration, or a fresh installation if this device is
+    // already registered and its credential was lost).
     if (AppState.instance.installationSecret == null ||
         AppState.instance.installationSecret!.isEmpty) {
       try {
-        await registerGuestDevice(fcmToken: token);
+        token = await recoverInstallation(token);
       } catch (e) {
         debugPrint(
             '[ApiService] Pre-login guest registration attempt failed: $e');
@@ -131,8 +133,7 @@ class ApiService {
           respStr.toLowerCase().contains('installation');
 
       if (isInstallationError) {
-        await AppState.instance.regenerateDeviceId();
-        await registerGuestDevice(fcmToken: token);
+        token = await recoverInstallation(token);
 
         final retryResponse =
             await _dio.post('/api/v1/auth/login/', data: buildPayload());
@@ -145,6 +146,52 @@ class ApiService {
         return data;
       }
       rethrow;
+    }
+  }
+
+  /// Gets this phone a valid installation credential, and returns the FCM
+  /// token now in use.
+  ///
+  /// First the same device re-registers as a guest. If the backend refuses
+  /// (it already knows this device_id and the credential on the phone was
+  /// lost — "Installation credential required."), the phone starts a fresh
+  /// installation: a new device_id and a new FCM token (the backend will
+  /// not take the old token under a new id), then registers again. Without
+  /// this step that reader could never log in on this phone again.
+  @visibleForTesting
+  Future<String?> recoverInstallation(String? token) async {
+    final first = await registerGuestDevice(fcmToken: token);
+    final secret = AppState.instance.installationSecret;
+    if (first != null && secret != null && secret.isNotEmpty) return token;
+
+    debugPrint('[ApiService] Installation credential lost: '
+        'starting a fresh installation');
+    await AppState.instance.startNewInstallation();
+    final fresh = await _freshFcmToken() ?? token;
+    await registerGuestDevice(fcmToken: fresh);
+    return fresh;
+  }
+
+  /// A new FCM token (the old one deleted). Replaceable in tests.
+  @visibleForTesting
+  static Future<String?> Function()? fcmTokenRefresher;
+
+  Future<String?> _freshFcmToken() async {
+    final refresher = fcmTokenRefresher;
+    if (refresher != null) return refresher();
+    if (kIsWeb) return null;
+    try {
+      await FirebaseMessaging.instance
+          .deleteToken()
+          .timeout(const Duration(seconds: 10));
+      final t = await FirebaseMessaging.instance
+          .getToken()
+          .timeout(const Duration(seconds: 10));
+      if (t != null && t.isNotEmpty) AppState.instance.fcmToken = t;
+      return t;
+    } catch (e) {
+      debugPrint('[ApiService] Could not get a fresh FCM token: $e');
+      return null;
     }
   }
 

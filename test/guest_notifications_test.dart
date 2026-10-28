@@ -118,14 +118,35 @@ void main() {
     });
 
     test('logout never deletes the FCM token', () {
-      final all = Directory('lib')
+      final files = Directory('lib')
           .listSync(recursive: true)
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))
-          .map((f) => f.readAsStringSync())
-          .join('\n');
-      expect(all, isNot(contains('deleteToken(')),
-          reason: 'a logged-out device must stay notification-capable');
+          .toList();
+      for (final f in files) {
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
+        // No logout path deletes the token.
+        for (final m
+            in RegExp(r'Future<void> \w*[lL]ogout\w*\(').allMatches(src)) {
+          final rest = src.substring(m.start);
+          final end = rest.indexOf('\n  }\n');
+          expect(rest.substring(0, end < 0 ? rest.length : end),
+              isNot(contains('deleteToken(')),
+              reason: 'a logged-out device must stay notification-capable '
+                  '(${f.path})');
+        }
+      }
+      // The one deleteToken in the app (recovering a lost installation
+      // credential at login) fetches a new token straight away, so the
+      // device never ends up without one.
+      final api = File('lib/services/api_service.dart').readAsStringSync();
+      final at = api.indexOf('deleteToken(');
+      expect(at, isNot(-1));
+      expect(api.substring(at, at + 400), contains('getToken('));
+      final others = files
+          .where((f) => !f.path.endsWith('api_service.dart'))
+          .where((f) => f.readAsStringSync().contains('deleteToken('));
+      expect(others, isEmpty);
     });
   });
 }
