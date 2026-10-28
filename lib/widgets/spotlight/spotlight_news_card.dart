@@ -205,7 +205,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     _sharePrep?.cancel();
     if (!widget.isCurrent || _inWidgetTest) return;
     // Soon after the story settles, so the image is ready before a tap.
-    _sharePrep = Timer(const Duration(milliseconds: 300), () {
+    _sharePrep = Timer(const Duration(milliseconds: 150), () {
       if (mounted && widget.isCurrent) {
         ShareService.prepareShare(widget.article);
       }

@@ -159,28 +159,37 @@ class ShareService {
     }
   }
 
-  /// Share without waiting: the branded image when it is already made,
-  /// otherwise the headline and link at once — the image is then made in
-  /// the background, so the next share of this story carries it. Tapping
-  /// Share never shows a "preparing" wait.
-  static Future<void> shareNow(NewsArticle article,
-      {NewsArticle? fallback}) async {
+  /// Shares the branded image card — always, so every share of a story
+  /// looks the same. (Sending only the link when the card was not ready yet
+  /// made shares arrive in two different forms: the card, or WhatsApp's
+  /// own link preview.)
+  ///
+  /// The card is normally made ahead (see [prepareShare]), so the share
+  /// sheet opens at once. If it is still being made, [onSlow] runs after
+  /// [slowAfter] (e.g. a brief "preparing" note) and [onReady] when the
+  /// sheet opens.
+  static Future<void> shareNow(
+    NewsArticle article, {
+    NewsArticle? fallback,
+    VoidCallback? onSlow,
+    VoidCallback? onReady,
+  }) async {
     if (isShareReady(article)) {
-      return shareArticle(article, fallback: fallback);
+      return shareArticle(article, fallback: fallback, onReady: onReady);
     }
-    if (_isSharing) return;
-    _isSharing = true;
+    final slow = onSlow == null ? null : Timer(slowAfter, onSlow);
     try {
-      unawaited(generateArticleImage(article, fallback: fallback)
-          .then<void>((_) {}, onError: (_) {}));
-      final result = await Share.share(buildShareText(article));
-      trackShare(article, result);
-    } catch (e) {
-      debugPrint('Error sharing article: $e');
+      await shareArticle(article, fallback: fallback, onReady: () {
+        slow?.cancel();
+        onReady?.call();
+      });
     } finally {
-      _isSharing = false;
+      slow?.cancel();
     }
   }
+
+  /// How long a share may take before a "preparing" note is shown.
+  static const slowAfter = Duration(milliseconds: 400);
 
   /// Analytics `share`, unless the reader closed the sheet without sharing.
   /// The channel is the app chosen when Android reports it.
@@ -258,13 +267,17 @@ class ShareService {
       // 1. First candidate that downloads AND decodes wins (checked at card
       // width, memory-safe on low-end phones). None → branded placeholder.
       Uint8List? photo;
+      double? photoAspect;
       for (final url in candidates) {
         final bytes = await _fetchImageBytes(url);
         if (bytes == null || bytes.isEmpty) continue;
         try {
           final codec = await ui.instantiateImageCodec(bytes,
               targetWidth: NewsShareCard.width.toInt());
-          (await codec.getNextFrame()).image.dispose();
+          final frame = (await codec.getNextFrame()).image;
+          // Its shape, so the card shows the whole photo.
+          if (frame.height > 0) photoAspect = frame.width / frame.height;
+          frame.dispose();
           photo = bytes;
           break;
         } catch (e) {
@@ -285,6 +298,7 @@ class ShareService {
         headline: article.title.trim(),
         meta: shareMeta(article),
         photo: photo,
+        photoAspect: photoAspect,
         summary: forDownload ? shareSummary(source) : '',
         portrait: forDownload,
       );

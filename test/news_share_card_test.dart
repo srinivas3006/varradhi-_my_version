@@ -124,6 +124,60 @@ void main() {
       expect(find.byKey(const Key('share_card_summary')), findsNothing);
     });
 
+    testWidgets('the brand banner: icon, wordmark, tagline, store badges',
+        (tester) async {
+      for (final portrait in [false, true]) {
+        await pump(
+            tester,
+            NewsShareCard(
+                headline: 'h',
+                meta: 'Sports  |  06 Oct 2026',
+                portrait: portrait));
+        final strip = find.byKey(const Key('share_card_brand'));
+        bool inStrip(Finder f) =>
+            find.descendant(of: strip, matching: f).evaluate().isNotEmpty;
+        expect(inStrip(find.byType(Image)), isTrue, reason: 'app icon');
+        expect(inStrip(find.text('వారధి')), isTrue);
+        expect(
+            inStrip(find.textContaining('మీ ప్రాంతం', findRichText: true)),
+            isTrue);
+        expect(
+            inStrip(find.textContaining('మీ వార్తలు', findRichText: true)),
+            isTrue);
+        expect(inStrip(find.text('ఇప్పుడే డౌన్‌లోడ్ చేయండి')), isTrue);
+        expect(inStrip(find.byIcon(Icons.apple)), isTrue, reason: 'App Store');
+        // Full card width, unchanged height.
+        final rect = tester.getRect(strip);
+        expect(rect.width, portrait ? 1080 : 1600);
+        expect(rect.height, portrait ? 96 : 84);
+        expect(tester.takeException(), isNull);
+      }
+    });
+
+    testWidgets('the whole photo: the area takes the photo\'s shape',
+        (tester) async {
+      final photo =
+          Uint8List.fromList(img.encodePng(img.Image(width: 30, height: 40)));
+      for (final (aspect, expected) in [
+        (0.75, 1600 / 0.8), // portrait: 4:5 at most, top kept
+        (1.5, 1600 / 1.5), // landscape: exactly its shape
+        (3.0, 1600 / 1.91), // panorama: 1.91:1 at most
+      ]) {
+        await pump(
+            tester,
+            NewsShareCard(
+                headline: 'h',
+                meta: 'Sports  |  06 Oct 2026',
+                photo: photo,
+                photoAspect: aspect));
+        final area = tester.getRect(find.byKey(const Key('share_card_photo')));
+        expect(area.height, closeTo(expected, 0.5), reason: '$aspect');
+        expect(tester.getRect(find.byKey(const Key('share_card_brand'))).top,
+            closeTo(expected, 0.5),
+            reason: 'banner right under the photo');
+      }
+    });
+
     testWidgets('no red banner and no tagline any more', (tester) async {
       await pump(tester,
           const NewsShareCard(headline: 'h', meta: 'Sports  |  06 Oct 2026'));
