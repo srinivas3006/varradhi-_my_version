@@ -73,6 +73,12 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
+            // Native debug symbols in the bundle, so Play Console can
+            // symbolicate native crashes and does not warn about missing
+            // symbols.
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
