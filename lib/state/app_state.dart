@@ -221,6 +221,16 @@ class AppState extends ChangeNotifier {
     return deviceId;
   }
 
+  /// Starts a new installation identity: a new device_id and no credential.
+  /// Only for recovering a lost installation credential, together with a
+  /// new FCM token (the backend will not take the old token under a new id).
+  Future<void> startNewInstallation() async {
+    final now = DateTime.now();
+    await setDeviceId(
+        'dev_${now.millisecondsSinceEpoch}_${now.microsecondsSinceEpoch % 100000}');
+    await setInstallationSecret(null);
+  }
+
   Future<void> setSessionId(String? id) async {
     sessionId = id;
     try {
@@ -240,11 +250,21 @@ class AppState extends ChangeNotifier {
   /// User preferred font size for reading Telugu and article bodies (defaults to 19.0 px).
   double readingFontSize = 19.0;
 
+  /// The reading size was picked by the reader in Settings. Only then does
+  /// it differ from the 19 pt default.
+  bool readingFontSizeChosen = false;
+
+  /// The reader's own choice (Settings). This phone's display setting:
+  /// logging in or out never changes it.
   Future<void> setReadingFontSize(double size) async {
     // 12-24 matches what PATCH /auth/me/ accepts, so a size stored here is
     // always one the server will keep.
     final clamped = size.clamp(12.0, 24.0);
-    if ((clamped - readingFontSize).abs() < 0.1) return;
+    readingFontSizeChosen = true;
+    if ((clamped - readingFontSize).abs() < 0.1) {
+      await _persist();
+      return;
+    }
     readingFontSize = clamped;
     notifyListeners();
     await _persist();
@@ -409,7 +429,13 @@ class AppState extends ChangeNotifier {
     // number, so it proves nothing about the real mobile. Drop it.
     await prefs.remove('uploadVerified');
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
-    readingFontSize = prefs.getDouble('readingFontSize') ?? 19.0;
+    readingFontSizeChosen = prefs.getBool('readingFontSizeChosen') ?? false;
+    // A size the reader never chose came from an account's font_size at
+    // login (backend default 16): it shrank every story for logged-in
+    // readers and stayed after logout. Back to the default.
+    readingFontSize = readingFontSizeChosen
+        ? (prefs.getDouble('readingFontSize') ?? 19.0)
+        : 19.0;
     notifications = _decodeLocalInbox(prefs.getString(_localInboxKey));
     _loadDeviceSavedStories(prefs);
 
@@ -619,6 +645,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool('hasValidLocation', hasValidLocation);
     await prefs.setBool('pushNotificationsEnabled', pushNotificationsEnabled);
     await prefs.setDouble('readingFontSize', readingFontSize);
+    await prefs.setBool('readingFontSizeChosen', readingFontSizeChosen);
     // Deliberately no authToken here — see setAuthToken/_clearAuthToken.
   }
 
@@ -762,11 +789,11 @@ class AppState extends ChangeNotifier {
       // Instead, keep the current theme and sync it to the backend profile.
       unawaited(_syncProfileToBackend(theme: themeMode.name));
 
-      final serverFont = me['font_size'];
-      if (serverFont != null) {
-        final parsed = double.tryParse(serverFont.toString());
-        if (parsed != null) await setReadingFontSize(parsed);
-      }
+      // The account's font_size is not applied here: it is the backend
+      // default (16) for anyone who never chose one, and applying it made
+      // every story smaller once a reader logged in — guest and logged-in
+      // readers must see the same layout. The reading size is this phone's
+      // setting (Settings > reading font size), synced up from there.
 
       await _restoreReporterStatus(me);
       if (me['tokens'] != null) {

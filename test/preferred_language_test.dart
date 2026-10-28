@@ -105,13 +105,16 @@ void main() {
       expect(body, isNot(contains('} catch (_) {\n      // Backend error')));
     });
 
-    // The phone's theme wins after login: the server default used to flip a
-    // reader's light theme to dark, so the active theme is pushed to the
-    // profile instead of read from it. Font size is still read back.
-    test('font size is read back; the phone theme is synced, not overwritten',
+    // The phone's display settings win after login: the server defaults
+    // flipped a reader's light theme to dark, and its font_size (16 vs the
+    // app's 19) shrank every Spotlight story once a reader logged in. Guest
+    // and logged-in readers see the same layout, so neither is read back.
+    test('the phone theme and reading size stay; neither is overwritten',
         () {
       final fn = state2.substring(state2.indexOf('Future<void> refreshRolesFromServer'));
-      expect(fn, contains("me['font_size']"));
+      final body = fn.substring(0, fn.indexOf('_restoreReporterStatus(me)'));
+      expect(body, isNot(contains("me['font_size']")));
+      expect(body, isNot(contains('setReadingFontSize(')));
       expect(fn, contains('_syncProfileToBackend(theme: themeMode.name)'));
       expect(fn, isNot(contains("me['theme']")));
     });
