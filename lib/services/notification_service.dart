@@ -39,6 +39,7 @@ import '../state/app_state.dart';
 import 'analytics_queue.dart';
 import '../models/app_notification.dart';
 import '../theme/app_theme.dart';
+import '../widgets/in_app_news_pill.dart';
 import 'api_service.dart';
 
 @pragma('vm:entry-point')
@@ -81,6 +82,19 @@ class NotificationService {
     importance: Importance.high,
   );
 
+  /// Pushes that arrive while the app is open: into the tray silently — no
+  /// sound, vibration or heads-up popup over the story being read. The
+  /// small in-app pill (InAppNewsPill) is the only alert then.
+  static const AndroidNotificationChannel _quietChannel =
+      AndroidNotificationChannel(
+    'vaaradhi_news_quiet',
+    'News while reading',
+    description: 'News that arrives while you are using the app',
+    importance: Importance.low,
+    playSound: false,
+    enableVibration: false,
+  );
+
   /// Creates the channel and wires taps on locally-shown notifications.
   Future<void> _initLocalNotifications() async {
     await _localNotifications.initialize(
@@ -107,10 +121,10 @@ class NotificationService {
       },
     );
 
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    final android = _localNotifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(_channel);
+    await android?.createNotificationChannel(_quietChannel);
 
     // A notification the app showed itself (it arrived while the app was
     // open) and was tapped after the app had been closed: the app starts
@@ -172,16 +186,25 @@ class NotificationService {
       id: message.hashCode,
       title: title,
       body: body,
+      // The app is open: silent (quiet channel, no heads-up); it waits in
+      // the tray, and the in-app pill is the alert.
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
-          importance: Importance.high,
-          priority: Priority.high,
+          _quietChannel.id,
+          _quietChannel.name,
+          channelDescription: _quietChannel.description,
+          importance: Importance.low,
+          priority: Priority.low,
+          playSound: false,
+          enableVibration: false,
           icon: '@mipmap/ic_launcher',
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: false,
+          presentBanner: false,
+          presentSound: false,
+          presentList: true,
+        ),
       ),
       payload: jsonEncode(data),
     );
@@ -316,8 +339,8 @@ class NotificationService {
           }
         }
 
-        // Show it in the tray. The in-app banner below stays as well: it is
-        // the affordance for someone already looking at the screen.
+        // Into the tray silently; the small pill below is the only alert
+        // while the reader is in the app.
         unawaited(_showLocalNotification(message));
 
         final title = message.notification?.title ??
@@ -341,36 +364,17 @@ class NotificationService {
           unawaited(AppState.instance.refreshReporterDashboard());
         }
 
-        messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: InkWell(
-              onTap: () {
-                messengerKey.currentState?.hideCurrentSnackBar();
-                unawaited(_handleTap(Map<String, dynamic>.from(data)));
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  if (body.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(body, style: const TextStyle(color: Colors.white70)),
-                  ],
-                ],
-              ),
-            ),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(top: 50, left: 16, right: 16),
-            backgroundColor: AppColors.primary,
-            duration: const Duration(seconds: 4),
-            dismissDirection: DismissDirection.up,
-          ),
-        );
+        // One small line at the top — title only, ~3 s, tap opens, swipe up
+        // dismisses. The full-text banner at the bottom covered a third of
+        // the story being read, on top of the system popup.
+        final overlay = _navigatorKey?.currentState?.overlay;
+        if (overlay != null) {
+          InAppNewsPill.show(
+            overlay,
+            title: title,
+            onTap: () => unawaited(_handleTap(Map<String, dynamic>.from(data))),
+          );
+        }
       });
     } catch (e) {
       debugPrint('NotificationService early init error: $e');
