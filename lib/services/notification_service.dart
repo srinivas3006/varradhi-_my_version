@@ -156,31 +156,68 @@ class NotificationService {
   /// Adds a tray-opened push to the in-app inbox, already read (the reader
   /// just tapped it). Works without login.
   /// The push's picture: FCM's notification image, else one in `data`.
-  static String? _pushImage(RemoteMessage message) =>
-      message.notification?.android?.imageUrl ??
-      message.notification?.apple?.imageUrl ??
-      AppNotification.imageFrom(Map<String, dynamic>.from(message.data));
+  static String? _pushImage(RemoteMessage message) {
+    for (final url in [
+      message.notification?.android?.imageUrl,
+      message.notification?.apple?.imageUrl,
+    ]) {
+      final u = _clean(url);
+      if (u.isNotEmpty) return u;
+    }
+    return AppNotification.imageFrom(Map<String, dynamic>.from(message.data));
+  }
 
+  static String _clean(dynamic v) => v?.toString().trim() ?? '';
+
+  /// The push's real title: the FCM notification's, else `data['title']`.
+  /// Empty when it has none — never a made-up one.
+  @visibleForTesting
+  static String realTitle(RemoteMessage message) {
+    final t = _clean(message.notification?.title);
+    return t.isNotEmpty ? t : _clean(message.data['title']);
+  }
+
+  /// The push's real body, like [realTitle].
+  @visibleForTesting
+  static String realBody(RemoteMessage message) {
+    final b = _clean(message.notification?.body);
+    return b.isNotEmpty ? b : _clean(message.data['body']);
+  }
+
+  /// One push, whichever path delivers it: the backend's notification_id,
+  /// else Firebase's messageId.
+  @visibleForTesting
+  static String dedupeKey(RemoteMessage message) {
+    final id = _clean(message.data['notification_id']);
+    return id.isNotEmpty ? id : _clean(message.messageId);
+  }
+
+  /// A push opened from the tray: into the inbox once (it is skipped when
+  /// the same notification_id is already there), marked read, then the
+  /// server inbox is merged in for the authoritative copy and its row id.
   Future<void> _recordInInbox(RemoteMessage message) async {
     final data = Map<String, dynamic>.from(message.data);
     await AppState.instance.recordPushNotification(
       data: data,
-      title: message.notification?.title ?? data['title']?.toString(),
-      body: message.notification?.body ?? data['body']?.toString(),
+      title: realTitle(message),
+      body: realBody(message),
       messageId: message.messageId,
       imageUrl: _pushImage(message),
     );
-    final id =
-        data['notification_id']?.toString() ?? 'push_${message.messageId}';
-    AppState.instance.markNotificationRead(id);
+    final key = dedupeKey(message);
+    AppState.instance.markNotificationReadByNotificationId(
+        _clean(data['notification_id']).isNotEmpty ? key : 'push_$key');
+    if (AppState.instance.isLoggedIn) {
+      unawaited(AppState.instance.fetchNotifications());
+    }
   }
 
-  Future<void> _showLocalNotification(RemoteMessage message) async {
+  Future<void> _showLocalNotification(
+    RemoteMessage message, {
+    required String title,
+    required String body,
+  }) async {
     final data = message.data;
-    final title = message.notification?.title ??
-        data['title']?.toString() ??
-        'Vaaradhi News';
-    final body = message.notification?.body ?? data['body']?.toString() ?? '';
 
     await _localNotifications.show(
       id: message.hashCode,
@@ -327,11 +364,21 @@ class NotificationService {
               'dataKeys=${message.data.keys.toList()}');
         }
         final data = message.data;
-        final notificationId =
-            data['notification_id']?.toString() ?? message.messageId;
+
+        // Validate before anything else: a push with neither a real title
+        // nor a real body (silent or invalid) gets no tray entry, no pill
+        // and no inbox card. A fallback title used to turn these into
+        // "New Notification" cards.
+        final title = realTitle(message);
+        final body = realBody(message);
+        if (title.isEmpty && body.isEmpty) {
+          debugPrint('[Notifications] push without title/body ignored');
+          return;
+        }
 
         // Deduplicate foreground notifications
-        if (notificationId != null) {
+        final notificationId = dedupeKey(message);
+        if (notificationId.isNotEmpty) {
           if (_seenNotificationIds.contains(notificationId)) return;
           _seenNotificationIds.add(notificationId);
           if (_seenNotificationIds.length > 100) {
@@ -339,15 +386,13 @@ class NotificationService {
           }
         }
 
+        // Only for display; never stored as the title.
+        final displayTitle = title.isNotEmpty ? title : 'Vaaradhi News';
+
         // Into the tray silently; the small pill below is the only alert
         // while the reader is in the app.
-        unawaited(_showLocalNotification(message));
-
-        final title = message.notification?.title ??
-            data['title']?.toString() ??
-            'New Notification';
-        final body =
-            message.notification?.body ?? data['body']?.toString() ?? '';
+        unawaited(
+            _showLocalNotification(message, title: displayTitle, body: body));
 
         // Keep it in the in-app inbox — for guests too.
         unawaited(AppState.instance.recordPushNotification(
@@ -371,7 +416,7 @@ class NotificationService {
         if (overlay != null) {
           InAppNewsPill.show(
             overlay,
-            title: title,
+            title: displayTitle,
             onTap: () => unawaited(_handleTap(Map<String, dynamic>.from(data))),
           );
         }
@@ -705,13 +750,12 @@ class NotificationService {
 
     _routeOpened = false;
     try {
-      // Mark as read asynchronously on backend if notification ID is available
+      // Mark it read. The read endpoint takes the inbox row id, not the
+      // push's notification_id: AppState maps one to the other (a
+      // device-only copy is synced at the next inbox merge).
       if (target.notificationId != null && target.notificationId!.isNotEmpty) {
-        unawaited(
-          ApiService.instance
-              .markNotificationRead(target.notificationId!)
-              .catchError((_) => false),
-        );
+        AppState.instance
+            .markNotificationReadByNotificationId(target.notificationId!);
       }
 
       // Handle authentication gate for protected targets

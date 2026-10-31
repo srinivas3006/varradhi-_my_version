@@ -436,7 +436,12 @@ class AppState extends ChangeNotifier {
     readingFontSize = readingFontSizeChosen
         ? (prefs.getDouble('readingFontSize') ?? 19.0)
         : 19.0;
-    notifications = _decodeLocalInbox(prefs.getString(_localInboxKey));
+    final storedInbox = _decodeLocalInbox(prefs.getString(_localInboxKey));
+    notifications = cleanLocalInbox(storedInbox);
+    if (notifications.length != storedInbox.length ||
+        notifications.any((n) => !storedInbox.contains(n))) {
+      unawaited(_saveLocalInbox());
+    }
     _loadDeviceSavedStories(prefs);
 
     // Read deviceId from secure storage first, fallback to shared_preferences
@@ -1368,24 +1373,73 @@ class AppState extends ChangeNotifier {
   static String _inboxKey(AppNotification n) =>
       (n.notificationId?.isNotEmpty ?? false) ? n.notificationId! : n.id;
 
+  /// The stored inbox, cleaned (notification contract §10):
+  /// - drops the fake "New Notification" cards an older build saved for
+  ///   pushes with no title or body (no body and no notification_id);
+  /// - gives device-only pushes that older builds keyed by notification_id
+  ///   a `push_` id, so that id is never sent as a server inbox row id;
+  /// - keeps one entry per notification_id (the server copy if there is
+  ///   one), read if any copy was read.
+  @visibleForTesting
+  static List<AppNotification> cleanLocalInbox(List<AppNotification> stored) {
+    final byKey = <String, AppNotification>{};
+    final order = <String>[];
+    for (var n in stored) {
+      final malformed = n.title.trim() == 'New Notification' &&
+          n.message.trim().isEmpty &&
+          (n.notificationId?.trim().isEmpty ?? true);
+      if (malformed) continue;
+      if (!n.isLocal && n.notificationId != null && n.id == n.notificationId) {
+        n = AppNotification.fromJson(
+            {...n.toJson(), 'id': 'push_${n.notificationId}'});
+      }
+      final key = _inboxKey(n);
+      final kept = byKey[key];
+      if (kept == null) {
+        byKey[key] = n;
+        order.add(key);
+        continue;
+      }
+      final read = kept.isRead || n.isRead;
+      if (kept.isLocal && !n.isLocal) byKey[key] = n;
+      byKey[key]!.isRead = read;
+    }
+    return [for (final k in order) byKey[k]!];
+  }
+
+  static String _clean(dynamic v) => v?.toString().trim() ?? '';
+
   /// Records a push the app just received (foreground, or opened from the
-  /// tray). Safe to call twice for the same message.
-  Future<void> recordPushNotification({
+  /// tray). Safe to call twice for the same message. A push with neither a
+  /// real title nor a real body is not a notification (silent or invalid)
+  /// and is never saved; returns whether it was a valid one.
+  Future<bool> recordPushNotification({
     required Map<String, dynamic> data,
     String? title,
     String? body,
     String? messageId,
     String? imageUrl,
   }) async {
-    final notificationId = data['notification_id']?.toString();
-    final id = notificationId ??
-        'push_${messageId ?? DateTime.now().millisecondsSinceEpoch}';
+    final realTitle =
+        _clean(title).isNotEmpty ? _clean(title) : _clean(data['title']);
+    final realBody =
+        _clean(body).isNotEmpty ? _clean(body) : _clean(data['body']);
+    if (realTitle.isEmpty && realBody.isEmpty) return false;
+
+    final notificationId = _clean(data['notification_id']);
+    final dedupeKey = notificationId.isNotEmpty
+        ? notificationId
+        : (_clean(messageId).isNotEmpty
+            ? _clean(messageId)
+            : '${DateTime.now().millisecondsSinceEpoch}');
+    // Device-only until the server inbox is merged in: the id is not a
+    // server row id, so it is never sent to the read endpoint.
     final incoming = AppNotification.fromJson({
       ...data,
-      'id': id,
-      if (notificationId != null) 'notification_id': notificationId,
-      'title': title ?? data['title']?.toString() ?? '',
-      'body': body ?? data['body']?.toString() ?? '',
+      'id': 'push_$dedupeKey',
+      if (notificationId.isNotEmpty) 'notification_id': notificationId,
+      'title': realTitle,
+      'body': realBody,
       'created_at':
           data['created_at']?.toString() ?? DateTime.now().toIso8601String(),
       // FCM's notification image is not in `data`; keep it for the inbox.
@@ -1394,18 +1448,34 @@ class AppState extends ChangeNotifier {
         'image_url': imageUrl,
       'is_read': false,
     });
-    if (incoming.title.isEmpty && incoming.message.isEmpty) return;
 
     final key = _inboxKey(incoming);
-    if (notifications.any((n) => _inboxKey(n) == key)) return;
+    if (notifications.any((n) => _inboxKey(n) == key)) return true;
     notifications = [incoming, ...notifications];
     notifyListeners();
     await _saveLocalInbox();
+    return true;
   }
 
-  /// Loads the backend inbox and merges it with pushes kept on the device.
-  /// The backend copy wins for anything both sides have; a local read mark
-  /// is never undone by a stale server flag.
+  /// Marks read the inbox entry for a push's notification_id (the common id
+  /// in the push), whichever copy the inbox holds. A server copy is marked
+  /// on the server by its row id; a device-only copy syncs at the next merge.
+  void markNotificationReadByNotificationId(String notificationId) {
+    final id = notificationId.trim();
+    if (id.isEmpty) return;
+    for (final n in notifications) {
+      if (_inboxKey(n) == id) {
+        markNotificationRead(n.id);
+        return;
+      }
+    }
+  }
+
+  /// Loads the backend inbox and merges it with pushes kept on the device,
+  /// matched by notification_id. The backend copy (content and ids) wins and
+  /// the device copy is dropped. A read mark the server has not got yet (the
+  /// push was read on the device, or the read call failed) is kept and sent
+  /// with the server row id; once the server says read, that is used.
   Future<void> fetchNotifications() async {
     try {
       final remote = await ApiService.instance.getNotifications();
@@ -1417,7 +1487,12 @@ class AppState extends ChangeNotifier {
       for (final n in remote) {
         final key = _inboxKey(n);
         remoteKeys.add(key);
-        if (readLocally.contains(key)) n.isRead = true;
+        if (!n.isRead && readLocally.contains(key)) {
+          n.isRead = true;
+          unawaited(ApiService.instance
+              .markNotificationRead(n.id)
+              .catchError((_) => false));
+        }
       }
       final merged = [
         ...remote,
@@ -1431,8 +1506,7 @@ class AppState extends ChangeNotifier {
 
   /// Only ids the backend issued can be marked read on the server; locally
   /// generated push ids stay on the device.
-  static bool _isServerNotification(AppNotification n) =>
-      !n.id.startsWith('push_');
+  static bool _isServerNotification(AppNotification n) => !n.isLocal;
 
   void markNotificationRead(String id) {
     final index = notifications.indexWhere((n) => n.id == id);

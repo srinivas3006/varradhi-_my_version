@@ -18,6 +18,10 @@ class AppNotification {
   final String? notificationType;
   final String? imageUrl;
   final String? deepLink;
+
+  /// breaking | local | alert | festival | promotion — picks the icon.
+  final String? deliveryCategory;
+  final String? schemaVersion;
   bool isRead;
 
   AppNotification({
@@ -33,14 +37,33 @@ class AppNotification {
     this.notificationType,
     this.imageUrl,
     this.deepLink,
+    this.deliveryCategory,
+    this.schemaVersion,
     this.isRead = false,
   });
 
+  /// Kept on the device only (a push not yet matched with the server inbox):
+  /// its id is not a server inbox row id.
+  bool get isLocal => id.startsWith('push_');
+
+  /// `type` in a push is targeting (all | single | segment), never the kind
+  /// of notification.
+  static const _targetingTypes = {'all', 'single', 'segment'};
+
+  static String? _clean(dynamic v) {
+    final s = v?.toString().trim() ?? '';
+    return s.isEmpty ? null : s;
+  }
+
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     NotificationType nType = NotificationType.announcement;
-    final rawType = (json['type'] ?? json['notification_type'] ?? '')
-        .toString()
-        .toLowerCase();
+    final legacyType = _clean(json['type']);
+    final kind = _clean(json['notification_type']) ??
+        _clean(json['event_type']) ??
+        (_targetingTypes.contains(legacyType?.toLowerCase())
+            ? null
+            : legacyType);
+    final rawType = (kind ?? '').toLowerCase();
     if (rawType.contains('approv')) {
       nType = NotificationType.approved;
     } else if (rawType.contains('reject')) {
@@ -67,9 +90,11 @@ class AppNotification {
       contentType: json['content_type']?.toString(),
       contentId: json['content_id']?.toString(),
       contentSlug: json['content_slug']?.toString(),
-      notificationType: (json['notification_type'] ?? json['type'])?.toString(),
+      notificationType: kind,
       imageUrl: imageFrom(json),
       deepLink: json['deep_link']?.toString(),
+      deliveryCategory: _clean(json['delivery_category'])?.toLowerCase(),
+      schemaVersion: _clean(json['schema_version']),
       isRead: json['is_read'] == true,
     );
   }
@@ -118,6 +143,8 @@ class AppNotification {
         if (contentSlug != null) 'content_slug': contentSlug,
         if (imageUrl != null) 'image_url': imageUrl,
         if (deepLink != null) 'deep_link': deepLink,
+        if (deliveryCategory != null) 'delivery_category': deliveryCategory,
+        if (schemaVersion != null) 'schema_version': schemaVersion,
         'is_read': isRead,
       };
 }

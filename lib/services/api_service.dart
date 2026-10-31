@@ -1543,7 +1543,9 @@ class ApiService {
   static int? _statusOf(Object e) {
     if (e is DioException) {
       return e.response?.statusCode ??
-          (e.error is AppException ? (e.error as AppException).statusCode : null);
+          (e.error is AppException
+              ? (e.error as AppException).statusCode
+              : null);
     }
     return e is AppException ? e.statusCode : null;
   }
@@ -2283,19 +2285,35 @@ class ApiService {
   }
 
   // --- Notifications ---
+  /// GET /api/v1/notifications/inbox/ — cursor-paginated, flat rows
+  /// (`id` is the inbox row id, `notification_id` the common one). Follows
+  /// `next` for a few pages; the inbox keeps the newest 60 anyway.
   Future<List<AppNotification>> getNotifications({bool? unread}) async {
     final Map<String, dynamic> params = {};
     if (unread != null) params['unread'] = unread;
+    final items = <AppNotification>[];
+    final seen = <String>{};
+    final visited = <String>{};
     try {
-      final response = await _dio.get('/api/v1/notifications/inbox/',
-          queryParameters: params);
-      final List data = response.data['data'] as List? ?? [];
-      return data
-          .map((json) => AppNotification.fromJson(json as Map<String, dynamic>))
-          .toList();
+      String? next;
+      var pages = 0;
+      do {
+        final response = next == null
+            ? await _dio.get('/api/v1/notifications/inbox/',
+                queryParameters: params)
+            : await _dio.get(next);
+        for (final row in _extractBookmarkList(response.data)) {
+          if (row is! Map) continue;
+          final n = AppNotification.fromJson(Map<String, dynamic>.from(row));
+          if (n.id.isNotEmpty && seen.add(n.id)) items.add(n);
+        }
+        next = _extractBookmarkNext(response.data);
+        pages++;
+      } while (next != null && visited.add(next) && pages < 3);
     } catch (_) {
-      return [];
+      // Keep what loaded; nothing on a failure.
     }
+    return items;
   }
 
   Future<int> getUnreadNotificationCount() async {
