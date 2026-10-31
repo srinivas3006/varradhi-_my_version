@@ -132,7 +132,9 @@ void main() {
     expect(items[3].id, 'poster-b');
     final adRequest =
         adapter.requests.singleWhere((r) => r.path.endsWith('/ads/'));
-    expect(adRequest.queryParameters['zone'], 'feed');
+    // placement_zone only; the backend asked for one parameter, not both.
+    expect(adRequest.queryParameters['placement_zone'], 'feed');
+    expect(adRequest.queryParameters.containsKey('zone'), isFalse);
     expect(adRequest.queryParameters['district'], 'Selected');
   });
 

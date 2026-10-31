@@ -73,9 +73,10 @@ class AdRepository {
     final effectiveSubdistrict = subdistrict ?? AppState.instance.subdistrict;
     final effectiveVillage = village ?? AppState.instance.village;
 
+    // placement_zone only: the backend's canonical parameter (it accepts
+    // `zone` too, but asks for one, not both).
     final queryParams = <String, dynamic>{
       'placement_zone': zone,
-      'zone': zone,
       if (scope != null && scope.isNotEmpty) 'scope': scope,
       if (areaId != null && areaId.isNotEmpty) 'area_id': areaId,
       if (effectiveState.isNotEmpty) 'state': effectiveState,
@@ -131,7 +132,11 @@ class AdRepository {
             return json
                 .whereType<Map<String, dynamic>>()
                 .map((i) => AdBanner.fromJson(i))
-                .where((ad) => ad.placementZone == queryParams['zone'])
+                // Only this zone's ads: an empty list means no ad here,
+                // never one borrowed from another zone.
+                .where((ad) =>
+                    ad.placementZone.trim().toLowerCase() ==
+                    queryParams['placement_zone'])
                 .toList();
           }
           return <AdBanner>[];

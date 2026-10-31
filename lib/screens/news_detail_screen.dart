@@ -14,6 +14,8 @@ import '../repositories/news_article_repository.dart';
 import '../services/ad_manager.dart';
 import '../widgets/ads/banner_ad_slot.dart';
 import '../widgets/ads/interstitial_ad_overlay.dart';
+import '../widgets/ads/zone_ad_slot.dart';
+import '../core/ads/ad_placement.dart';
 import '../widgets/article_media_carousel.dart';
 import 'comments_screen.dart';
 import '../widgets/spotlight/story_options_sheet.dart';
@@ -1011,8 +1013,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           // The bar is 58 px tall; each action's cell is a quarter of the
           // width, so the touch area stays well over 48 px wide.
           slot: 40,
-          guardWhileBusy: action == NewsAction.like ||
-              action == NewsAction.dislike,
+          guardWhileBusy:
+              action == NewsAction.like || action == NewsAction.dislike,
           onTap: onTap,
         ),
       ),
@@ -1087,10 +1089,13 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             ),
           ],
         ],
-        // Bottom article banner ad
-        const Padding(
-          padding: EdgeInsets.only(top: 8.0, bottom: 20.0),
-          child: BannerAdSlot(placementZone: 'article_bottom', maxHeight: 80),
+        // article_end: one ad right after the story, before what follows
+        // (banner, box or native; nothing when the zone has no ad).
+        ZoneAdSlot(
+          key: ValueKey('article_end_${widget.article.id}'),
+          placementZone: AdPlacement.articleEnd,
+          padding: const EdgeInsets.only(top: 8.0, bottom: 20.0),
+          exposureKey: 'article_end_${widget.article.id}',
         ),
       ],
     );

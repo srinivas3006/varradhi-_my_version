@@ -63,6 +63,47 @@ class AdFrequencyPolicy {
     firstAfter: 4,
     maxRepeatsPerAd: 2,
   );
+
+  /// Category lists (zone `category`): at least 6 stories apart, none in
+  /// the first 3, at most 4 in all.
+  static const category = AdFrequencyPolicy(
+    minGap: 6,
+    firstAfter: 3,
+    maxAdsPerList: 4,
+  );
+
+  /// Citizen News (zone `ugc_feed`): at least 5 posts apart, at most 4.
+  static const ugcFeed = AdFrequencyPolicy(minGap: 5, maxAdsPerList: 4);
+
+  /// Videos and Reels (zone `video_feed`): at least 8 videos apart, at
+  /// most 4.
+  static const videoFeed = AdFrequencyPolicy(minGap: 8, maxAdsPerList: 4);
+}
+
+/// The ad to show after each content index of [contentItems] — the same
+/// pacing as [insertAdsIntoFeed], for lists that keep their own indexes
+/// (an ad is drawn under the item it follows).
+Map<int, AdBanner> adSlotsAfter<T>({
+  required List<T> contentItems,
+  required List<AdBanner> eligibleAds,
+  required String placementZone,
+  required AdFrequencyPolicy policy,
+}) {
+  final slots = <int, AdBanner>{};
+  var contentIndex = -1;
+  for (final item in insertAdsIntoFeed<T>(
+    contentItems: contentItems,
+    eligibleAds: eligibleAds,
+    placementZone: placementZone,
+    policy: policy,
+  )) {
+    if (item.isAd) {
+      if (contentIndex >= 0) slots[contentIndex] = item.ad!;
+    } else {
+      contentIndex++;
+    }
+  }
+  return slots;
 }
 
 /// Deterministic rotation: the next ad's interval is measured in parent
@@ -84,6 +125,7 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
           ids.add(ad.id) &&
           ad.placementZone == zone &&
           AdTypeResolver.isSupported(ad) &&
+          AdPlacement.supports(zone, ad) &&
           !ad.isBottomSticky &&
           (allowTimed || (!ad.isInterstitial && !ad.isFullScreen)))
       .toList();

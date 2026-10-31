@@ -6,7 +6,11 @@ import '../services/api_service.dart';
 import '../theme/article_typography.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
-import '../widgets/ads/banner_ad_slot.dart';
+import '../core/ads/ad_insertion.dart';
+import '../core/ads/ad_placement.dart';
+import '../core/ads/zone_ads.dart';
+import '../models/ad_banner.dart';
+import '../widgets/ads/unified_ad_widget.dart';
 import 'news_detail_screen.dart';
 
 /// Screen 08: CategoryScreen
@@ -38,6 +42,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _nextCursor;
   bool _hasMore = true;
   String? _error;
+
+  /// `category` zone ads, placed between stories.
+  List<AdBanner> _zoneAds = const [];
   late String _queryIdentity;
   String get _currentQueryIdentity => [
         AppState.instance.contentLanguage,
@@ -74,8 +81,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
     _fetchArticles();
   }
 
+  Future<void> _loadZoneAds(int generation) async {
+    final ads = await ZoneAds.load(AdPlacement.category);
+    if (mounted && generation == _generation) {
+      setState(() => _zoneAds = ads);
+    }
+  }
+
   Future<void> _fetchArticles() async {
     final generation = ++_generation;
+    _loadZoneAds(generation);
     _refreshing = true;
     setState(() {
       _isLoading = _articles.isEmpty;
@@ -245,177 +260,192 @@ class _CategoryScreenState extends State<CategoryScreen> {
                           }
                           return false;
                         },
-                        child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                          itemCount: _articles.length + (_hasMore ? 1 : 0),
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 14),
-                          itemBuilder: (context, index) {
-                            if (index == _articles.length) {
-                              return const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(16.0),
-                                  child: CircularProgressIndicator(),
-                                ),
-                              );
-                            }
-
-                            final article = _articles[index];
-                            final showAd = (index > 0 && index % 5 == 0);
-
-                            final card = GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => NewsDetailScreen(
-                                      article: article,
-                                      slug: article.slug,
-                                    ),
+                        child: Builder(builder: (context) {
+                          // At least 6 stories apart, none in the first 3.
+                          final adAfter = adSlotsAfter<NewsArticle>(
+                            contentItems: _articles,
+                            eligibleAds: _zoneAds,
+                            placementZone: AdPlacement.category,
+                            policy: AdFrequencyPolicy.category,
+                          );
+                          return ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                            itemCount: _articles.length + (_hasMore ? 1 : 0),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 14),
+                            itemBuilder: (context, index) {
+                              if (index == _articles.length) {
+                                return const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(16.0),
+                                    child: CircularProgressIndicator(),
                                   ),
                                 );
-                              },
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    width: 95,
-                                    height: 95,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(16),
-                                      color: cardColor,
-                                      border: Border.all(color: borderColor),
-                                      image: article.imageUrl.isNotEmpty
-                                          ? DecorationImage(
-                                              image: CachedNetworkImageProvider(
-                                                  article.imageUrl),
-                                              fit: BoxFit.cover,
-                                            )
-                                          : null,
+                              }
+
+                              final article = _articles[index];
+                              final ad = adAfter[index];
+
+                              final card = GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => NewsDetailScreen(
+                                        article: article,
+                                        slug: article.slug,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.primary
-                                                .withValues(alpha: 0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(6),
-                                          ),
-                                          child: Text(
-                                            article.category.toUpperCase(),
-                                            style: const TextStyle(
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w900,
-                                              color: AppColors.primary,
-                                              letterSpacing: 0.8,
+                                  );
+                                },
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: 95,
+                                      height: 95,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(16),
+                                        color: cardColor,
+                                        border: Border.all(color: borderColor),
+                                        image: article.imageUrl.isNotEmpty
+                                            ? DecorationImage(
+                                                image:
+                                                    CachedNetworkImageProvider(
+                                                        article.imageUrl),
+                                                fit: BoxFit.cover,
+                                              )
+                                            : null,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.primary
+                                                  .withValues(alpha: 0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              article.category.toUpperCase(),
+                                              style: const TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w900,
+                                                color: AppColors.primary,
+                                                letterSpacing: 0.8,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          article.title,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: ArticleTypography.heading(
-                                            fontSize: 14.5,
-                                            color: Theme.of(context)
-                                                    .textTheme
-                                                    .titleMedium
-                                                    ?.color ??
-                                                (isDark
-                                                    ? AppColors.textLight
-                                                    : AppColors.textDark),
-                                            height: 1.25,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.access_time_rounded,
-                                              size: 12,
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            article.title,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: ArticleTypography.heading(
+                                              fontSize: 14.5,
                                               color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.color,
+                                                      .textTheme
+                                                      .titleMedium
+                                                      ?.color ??
+                                                  (isDark
+                                                      ? AppColors.textLight
+                                                      : AppColors.textDark),
+                                              height: 1.25,
                                             ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              article.timeAgo,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w500,
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.access_time_rounded,
+                                                size: 12,
                                                 color: Theme.of(context)
                                                     .textTheme
                                                     .bodySmall
                                                     ?.color,
                                               ),
-                                            ),
-                                            Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 6),
-                                              child: Text('•',
-                                                  style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: Theme.of(context)
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.color)),
-                                            ),
-                                            Icon(
-                                              Icons.favorite_rounded,
-                                              size: 12,
-                                              color: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.color,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              '${article.likes}',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w500,
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                article.timeAgo,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.color,
+                                                ),
+                                              ),
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6),
+                                                child: Text('•',
+                                                    style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Theme.of(context)
+                                                            .textTheme
+                                                            .bodySmall
+                                                            ?.color)),
+                                              ),
+                                              Icon(
+                                                Icons.favorite_rounded,
+                                                size: 12,
                                                 color: Theme.of(context)
                                                     .textTheme
                                                     .bodySmall
                                                     ?.color,
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '${article.likes}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.color,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (ad == null) return card;
+                              return Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  card,
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 14.0),
+                                    child: UnifiedAdWidget(
+                                      key: ValueKey(
+                                          'category_ad_${ad.id}_$index'),
+                                      ad: ad,
+                                      placementZone: AdPlacement.category,
+                                      exposureKey:
+                                          'category_${widget.categorySlug}_${ad.id}_$index',
                                     ),
                                   ),
                                 ],
-                              ),
-                            );
-
-                            if (!showAd) return card;
-                            return Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Padding(
-                                  padding: EdgeInsets.only(bottom: 14.0),
-                                  child: BannerAdSlot(
-                                      placementZone: 'category_feed',
-                                      maxHeight: 72),
-                                ),
-                                card,
-                              ],
-                            );
-                          },
-                        ),
+                              );
+                            },
+                          );
+                        }),
                       ),
                     ),
     );
