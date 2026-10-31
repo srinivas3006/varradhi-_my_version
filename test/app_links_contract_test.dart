@@ -90,6 +90,17 @@ void main() {
               'android/app/src/main/kotlin/com/vaaradhi/vaaradhi/MainActivity.kt')
           .readAsStringSync();
       expect(activity, contains('override fun onNewIntent'));
+      // Play Console: edge-to-edge on every Android version, without the
+      // Android 15-deprecated status/navigation bar colour calls that
+      // androidx.activity's enableEdgeToEdge() makes on older versions.
+      expect(activity, contains('WindowCompat.setDecorFitsSystemWindows(window, false)'));
+      expect(activity, isNot(contains('import androidx.activity.enableEdgeToEdge')));
+      final code = activity
+          .split('\n')
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
+      expect(code, isNot(contains('setStatusBarColor')));
+      expect(code, isNot(contains('setNavigationBarColor')));
       expect(activity, contains('initialLinkConsumed'),
           reason: 'the launch link is handed over once, not twice');
     });

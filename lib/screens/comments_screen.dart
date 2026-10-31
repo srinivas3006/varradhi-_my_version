@@ -1,3 +1,5 @@
+import 'dart:async';
+import '../services/analytics_queue.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../models/news_article.dart';
@@ -120,12 +122,17 @@ class _CommentsScreenState extends State<CommentsScreen> {
     setState(() => _isPosting = true);
 
     try {
+      final isReply = _replyingToCommentId != null;
       final newComment = await ApiService.instance.postComment(
         widget.article.id,
         text,
         parentId: _replyingToCommentId,
         ugc: _isUgc,
       );
+      // Analytics: only once the API accepted it.
+      unawaited(AnalyticsQueue.instance.trackContent(
+          isReply ? 'comment_reply_created' : 'comment_created',
+          widget.article));
 
       if (mounted) {
         setState(() {
@@ -453,6 +460,8 @@ class _CommentsScreenState extends State<CommentsScreen> {
               Navigator.pop(ctx);
               try {
                 await ApiService.instance.deleteComment(comment.id);
+                unawaited(AnalyticsQueue.instance
+                    .trackContent('comment_deleted', widget.article));
                 if (!mounted) return;
                 setState(() {
                   _comments.removeWhere((c) => c.id == comment.id);
@@ -547,6 +556,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
                           try {
                             await ApiService.instance
                                 .reportComment(comment.id, reason: r.$1);
+                            unawaited(AnalyticsQueue.instance.trackContent(
+                                'comment_reported', widget.article,
+                                metadata: {'reason': r.$1}));
                             if (!mounted) return;
                             setState(() => comment.isReported = true);
                             ScaffoldMessenger.of(context).showSnackBar(

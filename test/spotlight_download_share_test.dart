@@ -82,7 +82,13 @@ void main() {
       expect(card, contains('ShareService.prepareShare(widget.article)'));
       final screen =
           File('lib/spotlight/spotlight_screen.dart').readAsStringSync();
-      expect(screen, contains('if (ShareService.isShareReady(article))'));
+      expect(screen, contains('ShareService.shareNow('));
+      final svc = File('lib/utils/share_service.dart').readAsStringSync();
+      final fn = svc.substring(svc.indexOf('static Future<void> shareNow('),
+          svc.indexOf('static const slowAfter'));
+      expect(fn, isNot(contains('Share.share(')),
+          reason: 'never a bare link instead of the card');
+      expect(fn, contains('shareArticle('));
     });
 
     test('a video download never saves an unbranded file', () {

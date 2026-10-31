@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../core/ads/ad_insertion.dart';
+import '../core/ads/ad_placement.dart';
+import '../core/ads/zone_ads.dart';
 import '../core/media/media_source.dart';
 import '../core/media/video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
 import '../core/widgets/flip_page_view.dart';
+import '../models/ad_banner.dart';
 import '../models/video_item.dart';
+import '../widgets/ads/video_feed_ad_page.dart';
 
 /// Full-screen vertical Shorts feed: one 9:16 Short at a time, swipe up for
 /// the next and down for the previous.
@@ -48,18 +53,66 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
       PageController(initialPage: widget.initialIndex);
 
   /// Controllers for the visible Short and its immediate neighbours only.
+  /// Keyed by page index.
   final Map<int, VideoPlaybackController> _controllers = {};
   late int _current = widget.initialIndex;
+
+  /// `video_feed` ads in use, and the pages: each a [VideoItem] or an
+  /// [AdBanner] (at least 8 videos apart).
+  List<AdBanner> _ads = const [];
+  late List<Object> _pages = _buildPages(_ads);
+
+  List<Object> _buildPages(List<AdBanner> ads) {
+    if (ads.isEmpty) return List<Object>.of(widget.shorts);
+    return [
+      for (final item in insertAdsIntoFeed<VideoItem>(
+        contentItems: widget.shorts,
+        eligibleAds: ads,
+        placementZone: AdPlacement.videoFeed,
+        policy: AdFrequencyPolicy.videoFeed,
+        contentKey: (v) => v.id,
+      ))
+        item.isAd ? item.ad! : item.content as VideoItem,
+    ];
+  }
+
+  /// Ads arrive after the first Shorts are on screen. They are used only if
+  /// the reader has not reached the first ad position yet, so the page on
+  /// screen never shifts under them.
+  Future<void> _loadAds() async {
+    final ads = await ZoneAds.load(AdPlacement.videoFeed);
+    if (!mounted || ads.isEmpty) return;
+    final pages = _buildPages(ads);
+    final firstAd = pages.indexWhere((p) => p is AdBanner);
+    if (firstAd < 0 || _current >= firstAd) return;
+    setState(() {
+      _ads = ads;
+      _pages = pages;
+    });
+  }
+
+  void _skipAd() {
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
     if (widget.isActive) _syncControllers();
+    _loadAds();
   }
 
   @override
   void didUpdateWidget(covariant ShortsViewerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // More Shorts: the pages before them keep their places.
+    if (widget.shorts.length != oldWidget.shorts.length ||
+        !identical(widget.shorts, oldWidget.shorts)) {
+      _pages = _buildPages(_ads);
+    }
 
     // Leaving the tab releases the player outright rather than pausing it —
     // a backgrounded Short holding a webview is the thing that keeps audio
@@ -132,9 +185,11 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
     }
 
     if (_controllers.containsKey(_current)) return;
-    if (_current < 0 || _current >= widget.shorts.length) return;
+    if (_current < 0 || _current >= _pages.length) return;
+    final page = _pages[_current];
+    if (page is! VideoItem) return; // an ad page plays its own creative
 
-    final source = _sourceFor(widget.shorts[_current]);
+    final source = _sourceFor(page);
     if (source == null) return;
 
     // autoPlay is correct here and is not feed autoplay: this screen is only
@@ -158,7 +213,7 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
     _syncControllers();
 
     // Fetch ahead so the feed does not stall at the last card.
-    if (widget.hasMore && index >= widget.shorts.length - 3) {
+    if (widget.hasMore && index >= _pages.length - 3) {
       widget.onLoadMore?.call();
     }
   }
@@ -183,17 +238,26 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
             controller: _pageController,
             // One extra page while more are loading, so the feed ends on a
             // spinner rather than a wall.
-            itemCount: widget.shorts.length + (widget.hasMore ? 1 : 0),
+            itemCount: _pages.length + (widget.hasMore ? 1 : 0),
             onPageChanged: _onPageChanged,
             itemBuilder: (context, index) {
-              if (index >= widget.shorts.length) {
+              if (index >= _pages.length) {
                 return const Center(
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white70),
                 );
               }
 
-              final short = widget.shorts[index];
+              final page = _pages[index];
+              if (page is AdBanner) {
+                return VideoFeedAdPage(
+                  ad: page,
+                  active: widget.isActive && index == _current,
+                  onSkip: _skipAd,
+                  exposureKey: 'video_feed_${page.id}_$index',
+                );
+              }
+              final short = page as VideoItem;
               final controller = _controllers[index];
 
               return Center(
@@ -236,8 +300,8 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
             child: SafeArea(
               top: false,
               child: Text(
-                _current < widget.shorts.length
-                    ? widget.shorts[_current].title
+                _current < _pages.length && _pages[_current] is VideoItem
+                    ? (_pages[_current] as VideoItem).title
                     : '',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

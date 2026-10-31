@@ -225,12 +225,12 @@ void main() {
 
     test('more load before the reader hits the end', () {
       final fn = viewer.substring(viewer.indexOf('void _onPageChanged('));
-      expect(fn.substring(0, 600), contains('widget.shorts.length - 3'));
+      expect(fn.substring(0, 600), contains('_pages.length - 3'));
     });
 
     test('a loading page is appended while more are coming', () {
       expect(viewer,
-          contains('widget.shorts.length + (widget.hasMore ? 1 : 0)'));
+          contains('_pages.length + (widget.hasMore ? 1 : 0)'));
     });
   });
 }

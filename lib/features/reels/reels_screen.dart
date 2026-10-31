@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/ads/ad_insertion.dart';
+import '../../core/ads/ad_placement.dart';
+import '../../core/ads/zone_ads.dart';
+import '../../models/ad_banner.dart';
+import '../../widgets/ads/video_feed_ad_page.dart';
 import '../../services/sharing/share_content_builder.dart';
 import '../../services/sharing/share_models.dart';
 import '../../state/app_state.dart';
@@ -70,28 +75,28 @@ class ReelsScreen extends StatefulWidget {
   /// helper (e.g. a debounced push).
   static Route<void> route({Reel? initialReel}) {
     return PageRouteBuilder<void>(
-        settings: const RouteSettings(name: '/reels'),
-        opaque: true,
-        transitionDuration: const Duration(milliseconds: 320),
-        reverseTransitionDuration: const Duration(milliseconds: 240),
-        pageBuilder: (_, __, ___) => ReelsScreen(initialReel: initialReel),
-        transitionsBuilder: (_, animation, __, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return FadeTransition(
-            opacity: curved,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.08),
-                end: Offset.zero,
-              ).animate(curved),
-              child: child,
-            ),
-          );
-        },
+      settings: const RouteSettings(name: '/reels'),
+      opaque: true,
+      transitionDuration: const Duration(milliseconds: 320),
+      reverseTransitionDuration: const Duration(milliseconds: 240),
+      pageBuilder: (_, __, ___) => ReelsScreen(initialReel: initialReel),
+      transitionsBuilder: (_, animation, __, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.08),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -108,11 +113,43 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
   final PageController _page = PageController();
   bool _appVisible = true;
 
+  /// `video_feed` ads between reels (at least 8 apart) and the page on
+  /// screen — a page is a [Reel] or an [AdBanner].
+  List<AdBanner> _ads = const [];
+  int _currentPage = 0;
+
+  List<Object> _pagesFor(List<Reel> reels, List<AdBanner> ads) {
+    if (ads.isEmpty) return List<Object>.of(reels);
+    return [
+      for (final item in insertAdsIntoFeed<Reel>(
+        contentItems: reels,
+        eligibleAds: ads,
+        placementZone: AdPlacement.videoFeed,
+        policy: AdFrequencyPolicy.videoFeed,
+        contentKey: (r) => r.id,
+      ))
+        item.isAd ? item.ad! : item.content as Reel,
+    ];
+  }
+
+  /// Used only while the reader is before the first ad position, so the
+  /// reel on screen never shifts.
+  Future<void> _loadAds() async {
+    final ads = await ZoneAds.load(AdPlacement.videoFeed);
+    if (!mounted || ads.isEmpty) return;
+    final firstAd =
+        _pagesFor(_ctrl.reels, ads).indexWhere((p) => p is AdBanner);
+    final firstPossible = AdFrequencyPolicy.videoFeed.minGap;
+    if (_currentPage >= (firstAd < 0 ? firstPossible : firstAd)) return;
+    setState(() => _ads = ads);
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _ctrl.loadFirstPage();
+    _loadAds();
   }
 
   @override
@@ -128,13 +165,25 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  void _onPageChanged(int i) {
+  void _onPageChanged(int page) {
+    setState(() => _currentPage = page);
+    final pages = _pagesFor(_ctrl.reels, _ads);
+    if (page >= pages.length || pages[page] is! Reel) return; // an ad page
+    final i = _ctrl.reels.indexOf(pages[page] as Reel);
+    if (i < 0) return;
     _ctrl.onPageChanged(i);
     final reels = _ctrl.reels;
     // The next reel's thumbnail is ready before the swipe lands.
     if (i + 1 < reels.length && reels[i + 1].thumbnailUrl.isNotEmpty) {
       precacheImage(NetworkImage(reels[i + 1].thumbnailUrl), context);
     }
+  }
+
+  void _skipAd() {
+    _page.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   /// The app's share sheet, with the backend's share_url.
@@ -172,14 +221,14 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
           builder: (context, _) {
             final c = _ctrl;
             final canPlay = onTop && _appVisible;
+            final pages = _pagesFor(c.reels, _ads);
 
             return Stack(
               children: [
                 if (c.reels.isEmpty)
                   c.isLoadingFirst
                       ? const Center(
-                          child:
-                              CircularProgressIndicator(color: Colors.white))
+                          child: CircularProgressIndicator(color: Colors.white))
                       : _FullScreenMessage(
                           icon: c.firstPageError != null
                               ? Icons.wifi_off_rounded
@@ -198,14 +247,27 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
                         const ReelPagePhysics(parent: ClampingScrollPhysics()),
                     // Keeps the next reel built, so it is ready to show.
                     allowImplicitScrolling: true,
-                    itemCount: c.reels.length,
+                    itemCount: pages.length,
                     onPageChanged: _onPageChanged,
                     itemBuilder: (context, i) {
-                      final r = c.reels[i];
+                      final page = pages[i];
+                      if (page is AdBanner) {
+                        return VideoFeedAdPage(
+                          key: ValueKey('ad_${page.id}_$i'),
+                          ad: page,
+                          active: canPlay && i == _currentPage,
+                          onSkip: _skipAd,
+                          exposureKey: 'reels_${page.id}_$i',
+                        );
+                      }
+                      final r = page as Reel;
                       return ReelItem(
                         key: ValueKey(r.id),
                         reel: r,
-                        isActive: canPlay && i == c.currentIndex,
+                        isActive: canPlay &&
+                            (_ads.isEmpty
+                                ? i == c.currentIndex
+                                : i == _currentPage),
                         isMuted: c.isMuted,
                         onToggleMute: c.toggleMute,
                         onShare: () => _share(r),
@@ -252,10 +314,10 @@ class _ReelsScreenState extends State<ReelsScreen> with WidgetsBindingObserver {
                     padding: const EdgeInsets.all(4),
                     child: IconButton(
                       key: const Key('reels_back'),
-                      tooltip: MaterialLocalizations.of(context)
-                          .backButtonTooltip,
-                      style: IconButton.styleFrom(
-                          backgroundColor: Colors.black26),
+                      tooltip:
+                          MaterialLocalizations.of(context).backButtonTooltip,
+                      style:
+                          IconButton.styleFrom(backgroundColor: Colors.black26),
                       icon: const Icon(Icons.arrow_back_rounded,
                           color: Colors.white),
                       onPressed: () => Navigator.of(context).maybePop(),

@@ -15,10 +15,12 @@ import '../widgets/spotlight/news_language_sheet.dart';
 import '../services/location_permission_coordinator.dart';
 import '../widgets/poster_card.dart';
 import '../widgets/info_card.dart';
+import '../widgets/smart_fit_image.dart';
 import '../widgets/poll_card.dart';
 import '../core/widgets/fit_or_scroll.dart';
 import '../widgets/spotlight/spotlight_trending_strip.dart';
 import '../screens/news_detail_screen.dart';
+import '../repositories/news_article_repository.dart';
 import '../utils/share_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -40,6 +42,10 @@ class SpotlightScreenView extends StatefulWidget {
   final String? initialCategory;
   final bool isLocal;
 
+  /// A story opened from a notification: shown as the first card at once,
+  /// and kept there when the feed arrives.
+  final NewsArticle? pinnedArticle;
+
   /// True when this is Home's persistent tab content rather than a pushed
   /// route. Suppresses the internal back-button handling and redirects the
   /// header's Profile/Post buttons through [onOpenProfile]/[onOpenPost]
@@ -55,6 +61,7 @@ class SpotlightScreenView extends StatefulWidget {
     this.initialStoryIndex,
     this.initialCategory,
     this.isLocal = false,
+    this.pinnedArticle,
     this.embedded = false,
     this.onOpenProfile,
     this.onOpenPost,
@@ -93,6 +100,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       initialCategory: widget.initialCategory,
       isLocal: widget.isLocal,
       initialStoryId: widget.initialStoryId,
+      pinnedArticle: widget.pinnedArticle,
     );
     // Ask which news language before anything location-related: it decides
     // what the very first feed request asks for.
@@ -108,7 +116,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     // A deep link can ask for a specific story. The feed is empty at this
     // point, so jump once as soon as it arrives.
     _controller.addListener(_jumpToInitialStoryOnce);
+    // New feed pages: get the photos around the reader ready.
+    _controller.addListener(_precacheAroundCurrent);
   }
+
+  void _precacheAroundCurrent() => _precacheUpcoming(_currentPage.value);
 
   bool _jumpedToInitialStory = false;
 
@@ -148,6 +160,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     _dwellTimer?.cancel();
     _locationPromptTimer?.cancel();
     _controller.removeListener(_jumpToInitialStoryOnce);
+    _controller.removeListener(_precacheAroundCurrent);
     _currentPage.dispose();
     _pageController.dispose();
     _controller.dispose();
@@ -233,6 +246,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
     // Debounced early prefetch to avoid network burst spikes on rapid swipes
     _controller.prefetchNextPageIfNeeded(index);
+    _precacheUpcoming(index);
 
     _dwellTimer?.cancel();
 
@@ -248,6 +262,49 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
           _maybeShowGentleLocationPrompt();
         });
       }
+    }
+  }
+
+  /// Photos already requested ahead of time (each is fetched once).
+  final Set<String> _precachedUrls = {};
+
+  /// Starts downloading the photos of the next few story cards while the
+  /// reader is on [index], so a swipe lands on a ready image rather than an
+  /// empty frame that fills in later. Uses the card's own cache key
+  /// ([SmartFitImage.precache]); video cards load their own player.
+  void _precacheUpcoming(int index) {
+    if (!mounted) return;
+    final feed = _controller.state.feed;
+    for (var i = index; i <= index + 3 && i < feed.length; i++) {
+      if (i < 0) continue;
+      final article = feed[i].article;
+      if (article == null) continue;
+      // The full story too (the feed has only a summary), so the card is
+      // built with its final text and never swaps it in while on screen.
+      if (i <= index + 2 && !article.isUgc && article.slug.isNotEmpty) {
+        NewsArticleRepository.instance.prefetchDetail(article.slug);
+      }
+      final String url;
+      final media = article.orderedMedia;
+      if (media.length > 1) {
+        if (media.first.isVideo) continue;
+        url = media.first.url;
+      } else if (article.isVideo) {
+        continue;
+      } else {
+        url = (article.mediaItems.isNotEmpty &&
+                article.mediaItems.first.url.isNotEmpty)
+            ? article.mediaItems.first.url
+            : article.imageUrl;
+      }
+      if (url.isEmpty || !_precachedUrls.add(url)) continue;
+      unawaited(SmartFitImage.precache(context, url));
+    }
+    // The share cards of the next two stories (any kind: photo, video,
+    // citizen post), so Share opens at once with the card there too.
+    for (var i = index + 1; i <= index + 2 && i < feed.length; i++) {
+      final article = feed[i].article;
+      if (article != null) unawaited(ShareService.prepareShare(article));
     }
   }
 
@@ -269,39 +326,40 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     }
   }
 
-  /// Instant feedback: the share image takes a moment to make, so a
-  /// "preparing" note shows at once and goes when the share sheet opens.
+  /// Share always sends the branded card. It is made ahead, so the sheet
+  /// usually opens at once; a short "preparing" note appears only when it
+  /// takes longer than [ShareService.slowAfter].
   Future<void> _shareArticle(NewsArticle article) async {
     HapticFeedback.selectionClick();
-    // The card prepares the share image while the story is on screen, so
-    // usually it is ready and the share sheet opens at once, no note.
-    if (ShareService.isShareReady(article)) {
-      await ShareService.shareArticle(article);
-      return;
-    }
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final preparing = messenger?.showSnackBar(
-      const SnackBar(
-        key: Key('share_preparing'),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 20),
-        content: Row(
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
-            ),
-            SizedBox(width: 14),
-            Expanded(child: Text('షేర్ కోసం సిద్ధం చేస్తోంది…')),
-          ],
-        ),
-      ),
-    );
-    void hide() => preparing?.close();
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? note;
+    void hide() => note?.close();
     try {
-      await ShareService.shareArticle(article, onReady: hide);
+      await ShareService.shareNow(
+        article,
+        onSlow: () {
+          note = messenger?.showSnackBar(
+            const SnackBar(
+              key: Key('share_preparing'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 20),
+              content: Row(
+                children: [
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  ),
+                  SizedBox(width: 14),
+                  Expanded(child: Text('షేర్ కోసం సిద్ధం చేస్తోంది…')),
+                ],
+              ),
+            ),
+          );
+        },
+        onReady: hide,
+      );
     } finally {
       hide();
     }

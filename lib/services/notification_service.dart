@@ -29,6 +29,9 @@ import '../screens/notifications_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/poll_detail_screen.dart';
 import '../screens/poster_detail_screen.dart';
+import '../screens/spotlight_screen.dart';
+import '../screens/submission_status_screen.dart';
+import '../spotlight/spotlight_controller.dart';
 import '../features/reels/reel_model.dart';
 import '../features/reels/reels_screen.dart';
 import '../screens/ugc_feed_screen.dart';
@@ -36,6 +39,7 @@ import '../state/app_state.dart';
 import 'analytics_queue.dart';
 import '../models/app_notification.dart';
 import '../theme/app_theme.dart';
+import '../widgets/in_app_news_pill.dart';
 import 'api_service.dart';
 
 @pragma('vm:entry-point')
@@ -78,6 +82,19 @@ class NotificationService {
     importance: Importance.high,
   );
 
+  /// Pushes that arrive while the app is open: into the tray silently — no
+  /// sound, vibration or heads-up popup over the story being read. The
+  /// small in-app pill (InAppNewsPill) is the only alert then.
+  static const AndroidNotificationChannel _quietChannel =
+      AndroidNotificationChannel(
+    'vaaradhi_news_quiet',
+    'News while reading',
+    description: 'News that arrives while you are using the app',
+    importance: Importance.low,
+    playSound: false,
+    enableVibration: false,
+  );
+
   /// Creates the channel and wires taps on locally-shown notifications.
   Future<void> _initLocalNotifications() async {
     await _localNotifications.initialize(
@@ -95,19 +112,19 @@ class NotificationService {
         final payload = response.payload;
         if (payload == null || payload.isEmpty) return;
         try {
-          final data = jsonDecode(payload) as Map<String, dynamic>;
+          final data = Map<String, dynamic>.from(jsonDecode(payload) as Map);
           debugPrint('[Notifications] tap on local notification');
-          handleNotificationPayload(data);
+          unawaited(_handleTap(data));
         } catch (e) {
           debugPrint('[Notifications] could not parse tap payload: $e');
         }
       },
     );
 
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    final android = _localNotifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(_channel);
+    await android?.createNotificationChannel(_quietChannel);
 
     // A notification the app showed itself (it arrived while the app was
     // open) and was tapped after the app had been closed: the app starts
@@ -123,8 +140,7 @@ class NotificationService {
         final data = jsonDecode(payload);
         if (data is Map) {
           debugPrint('[Notifications] app launched from a local notification');
-          NotificationNavigationGate.instance
-              .setPendingTarget(targetForTap(Map<String, dynamic>.from(data)));
+          unawaited(_handleTap(Map<String, dynamic>.from(data)));
         }
       }
     } catch (e) {
@@ -140,46 +156,92 @@ class NotificationService {
   /// Adds a tray-opened push to the in-app inbox, already read (the reader
   /// just tapped it). Works without login.
   /// The push's picture: FCM's notification image, else one in `data`.
-  static String? _pushImage(RemoteMessage message) =>
-      message.notification?.android?.imageUrl ??
-      message.notification?.apple?.imageUrl ??
-      AppNotification.imageFrom(Map<String, dynamic>.from(message.data));
+  static String? _pushImage(RemoteMessage message) {
+    for (final url in [
+      message.notification?.android?.imageUrl,
+      message.notification?.apple?.imageUrl,
+    ]) {
+      final u = _clean(url);
+      if (u.isNotEmpty) return u;
+    }
+    return AppNotification.imageFrom(Map<String, dynamic>.from(message.data));
+  }
 
+  static String _clean(dynamic v) => v?.toString().trim() ?? '';
+
+  /// The push's real title: the FCM notification's, else `data['title']`.
+  /// Empty when it has none — never a made-up one.
+  @visibleForTesting
+  static String realTitle(RemoteMessage message) {
+    final t = _clean(message.notification?.title);
+    return t.isNotEmpty ? t : _clean(message.data['title']);
+  }
+
+  /// The push's real body, like [realTitle].
+  @visibleForTesting
+  static String realBody(RemoteMessage message) {
+    final b = _clean(message.notification?.body);
+    return b.isNotEmpty ? b : _clean(message.data['body']);
+  }
+
+  /// One push, whichever path delivers it: the backend's notification_id,
+  /// else Firebase's messageId.
+  @visibleForTesting
+  static String dedupeKey(RemoteMessage message) {
+    final id = _clean(message.data['notification_id']);
+    return id.isNotEmpty ? id : _clean(message.messageId);
+  }
+
+  /// A push opened from the tray: into the inbox once (it is skipped when
+  /// the same notification_id is already there), marked read, then the
+  /// server inbox is merged in for the authoritative copy and its row id.
   Future<void> _recordInInbox(RemoteMessage message) async {
     final data = Map<String, dynamic>.from(message.data);
     await AppState.instance.recordPushNotification(
       data: data,
-      title: message.notification?.title ?? data['title']?.toString(),
-      body: message.notification?.body ?? data['body']?.toString(),
+      title: realTitle(message),
+      body: realBody(message),
       messageId: message.messageId,
       imageUrl: _pushImage(message),
     );
-    final id =
-        data['notification_id']?.toString() ?? 'push_${message.messageId}';
-    AppState.instance.markNotificationRead(id);
+    final key = dedupeKey(message);
+    AppState.instance.markNotificationReadByNotificationId(
+        _clean(data['notification_id']).isNotEmpty ? key : 'push_$key');
+    if (AppState.instance.isLoggedIn) {
+      unawaited(AppState.instance.fetchNotifications());
+    }
   }
 
-  Future<void> _showLocalNotification(RemoteMessage message) async {
+  Future<void> _showLocalNotification(
+    RemoteMessage message, {
+    required String title,
+    required String body,
+  }) async {
     final data = message.data;
-    final title = message.notification?.title ??
-        data['title']?.toString() ??
-        'Vaaradhi News';
-    final body = message.notification?.body ?? data['body']?.toString() ?? '';
 
     await _localNotifications.show(
       id: message.hashCode,
       title: title,
       body: body,
+      // The app is open: silent (quiet channel, no heads-up); it waits in
+      // the tray, and the in-app pill is the alert.
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
-          importance: Importance.high,
-          priority: Priority.high,
+          _quietChannel.id,
+          _quietChannel.name,
+          channelDescription: _quietChannel.description,
+          importance: Importance.low,
+          priority: Priority.low,
+          playSound: false,
+          enableVibration: false,
           icon: '@mipmap/ic_launcher',
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: false,
+          presentBanner: false,
+          presentSound: false,
+          presentList: true,
+        ),
       ),
       payload: jsonEncode(data),
     );
@@ -200,10 +262,42 @@ class NotificationService {
       // caps this method as a whole; these caps decide which parts still get
       // a chance when one of them stalls.
       await Firebase.initializeApp().timeout(const Duration(seconds: 4));
-      await _initLocalNotifications();
+      // Bounded on its own: a failure here must not skip the FCM tap
+      // handlers below, or tray taps open nothing.
+      try {
+        await _initLocalNotifications();
+      } catch (e) {
+        debugPrint('[Notifications] local notifications init failed: $e');
+      }
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       final messaging = FirebaseMessaging.instance;
+
+      // Tray taps are wired before the token fetch below, which can take
+      // seconds without network: a tap must not wait on it.
+      //
+      // Background: the app was running and the reader tapped the tray.
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        if (kDebugMode) {
+          debugPrint('App opened from notification');
+        }
+        unawaited(_recordInInbox(message));
+        unawaited(_handleTap(Map<String, dynamic>.from(message.data)));
+      });
+
+      // Terminated: the tap launched the app. Not awaited and not timed
+      // out — a slow read used to throw and drop the tap, leaving the
+      // reader on Home. The gate holds the target until Home is ready.
+      unawaited(messaging.getInitialMessage().then((initialMessage) {
+        if (initialMessage == null) return;
+        if (kDebugMode) {
+          debugPrint('Initial notification on launch');
+        }
+        unawaited(_recordInInbox(initialMessage));
+        unawaited(_handleTap(Map<String, dynamic>.from(initialMessage.data)));
+      }).catchError((Object e) {
+        debugPrint('[Notifications] could not read initial message: $e');
+      }));
 
       // Acquire early FCM token so guest registration and login can send it immediately
       try {
@@ -270,11 +364,21 @@ class NotificationService {
               'dataKeys=${message.data.keys.toList()}');
         }
         final data = message.data;
-        final notificationId =
-            data['notification_id']?.toString() ?? message.messageId;
+
+        // Validate before anything else: a push with neither a real title
+        // nor a real body (silent or invalid) gets no tray entry, no pill
+        // and no inbox card. A fallback title used to turn these into
+        // "New Notification" cards.
+        final title = realTitle(message);
+        final body = realBody(message);
+        if (title.isEmpty && body.isEmpty) {
+          debugPrint('[Notifications] push without title/body ignored');
+          return;
+        }
 
         // Deduplicate foreground notifications
-        if (notificationId != null) {
+        final notificationId = dedupeKey(message);
+        if (notificationId.isNotEmpty) {
           if (_seenNotificationIds.contains(notificationId)) return;
           _seenNotificationIds.add(notificationId);
           if (_seenNotificationIds.length > 100) {
@@ -282,15 +386,13 @@ class NotificationService {
           }
         }
 
-        // Show it in the tray. The in-app banner below stays as well: it is
-        // the affordance for someone already looking at the screen.
-        unawaited(_showLocalNotification(message));
+        // Only for display; never stored as the title.
+        final displayTitle = title.isNotEmpty ? title : 'Vaaradhi News';
 
-        final title = message.notification?.title ??
-            data['title']?.toString() ??
-            'New Notification';
-        final body =
-            message.notification?.body ?? data['body']?.toString() ?? '';
+        // Into the tray silently; the small pill below is the only alert
+        // while the reader is in the app.
+        unawaited(
+            _showLocalNotification(message, title: displayTitle, body: body));
 
         // Keep it in the in-app inbox — for guests too.
         unawaited(AppState.instance.recordPushNotification(
@@ -307,59 +409,18 @@ class NotificationService {
           unawaited(AppState.instance.refreshReporterDashboard());
         }
 
-        messengerKey.currentState?.showSnackBar(
-          SnackBar(
-            content: InkWell(
-              onTap: () {
-                messengerKey.currentState?.hideCurrentSnackBar();
-                handleNotificationPayload(data);
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  if (body.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(body, style: const TextStyle(color: Colors.white70)),
-                  ],
-                ],
-              ),
-            ),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(top: 50, left: 16, right: 16),
-            backgroundColor: AppColors.primary,
-            duration: const Duration(seconds: 4),
-            dismissDirection: DismissDirection.up,
-          ),
-        );
-      });
-
-      // 3. Background tap notification handler (when user taps notification from system tray)
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        if (kDebugMode) {
-          debugPrint('App opened from notification');
+        // One small line at the top — title only, ~3 s, tap opens, swipe up
+        // dismisses. The full-text banner at the bottom covered a third of
+        // the story being read, on top of the system popup.
+        final overlay = _navigatorKey?.currentState?.overlay;
+        if (overlay != null) {
+          InAppNewsPill.show(
+            overlay,
+            title: displayTitle,
+            onTap: () => unawaited(_handleTap(Map<String, dynamic>.from(data))),
+          );
         }
-        unawaited(_recordInInbox(message));
-        handleNotificationPayload(message.data);
       });
-
-      // 4. Terminated state launch handler: store in navigation gate
-      final initialMessage = await messaging
-          .getInitialMessage()
-          .timeout(const Duration(seconds: 3));
-      if (initialMessage != null) {
-        if (kDebugMode) {
-          debugPrint('Initial notification on launch');
-        }
-        unawaited(_recordInInbox(initialMessage));
-        NotificationNavigationGate.instance
-            .setPendingTarget(targetForTap(initialMessage.data));
-      }
     } catch (e) {
       debugPrint('NotificationService early init error: $e');
     }
@@ -466,6 +527,48 @@ class NotificationService {
     }
 
     await navigateToTarget(target, context: context);
+  }
+
+  /// Every notification tap — tray (background or launch), app-shown
+  /// notification, in-app banner — comes through here, so one
+  /// notification_id opens its content once. Before Home is ready the
+  /// target is held by [NotificationNavigationGate].
+  Future<void> _handleTap(Map<String, dynamic> data) async {
+    if (!await claimNotificationTap(data)) {
+      debugPrint('[NotificationService] notification already opened, '
+          'ignoring tap');
+      return;
+    }
+    await handleNotificationPayload(data);
+  }
+
+  static const _openedIdsKey = 'opened_notification_ids';
+  final Set<String> _openedNotificationIds = {};
+
+  /// False when this notification_id was already opened. Remembered across
+  /// launches: Android re-delivers the launch notification when the app is
+  /// reopened from Recents, which reopened a story already read.
+  /// Payloads without an id are always handled.
+  @visibleForTesting
+  Future<bool> claimNotificationTap(Map<String, dynamic> data) async {
+    final id = (data['notification_id'] ?? '').toString().trim();
+    if (id.isEmpty) return true;
+    // Claimed in memory first (synchronously), so two callbacks for the
+    // same tap cannot both pass while prefs load.
+    if (!_openedNotificationIds.add(id)) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final opened = prefs.getStringList(_openedIdsKey) ?? <String>[];
+      if (opened.contains(id)) return false;
+      opened.add(id);
+      await prefs.setStringList(
+        _openedIdsKey,
+        opened.length > 100 ? opened.sublist(opened.length - 100) : opened,
+      );
+    } catch (e) {
+      debugPrint('[NotificationService] could not persist opened id: $e');
+    }
+    return true;
   }
 
   String? _lastHandledId;
@@ -647,13 +750,12 @@ class NotificationService {
 
     _routeOpened = false;
     try {
-      // Mark as read asynchronously on backend if notification ID is available
+      // Mark it read. The read endpoint takes the inbox row id, not the
+      // push's notification_id: AppState maps one to the other (a
+      // device-only copy is synced at the next inbox merge).
       if (target.notificationId != null && target.notificationId!.isNotEmpty) {
-        unawaited(
-          ApiService.instance
-              .markNotificationRead(target.notificationId!)
-              .catchError((_) => false),
-        );
+        AppState.instance
+            .markNotificationReadByNotificationId(target.notificationId!);
       }
 
       // Handle authentication gate for protected targets
@@ -683,13 +785,7 @@ class NotificationService {
               _dismissLoadingIndicator();
 
               if (navContext.mounted) {
-                _openRoute(
-                  navContext,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        NewsDetailScreen(article: article, slug: slug),
-                  ),
-                );
+                _openInSpotlight(navContext, article);
               }
             } catch (e) {
               _dismissLoadingIndicator();
@@ -807,15 +903,56 @@ class NotificationService {
             );
           } else if (target.identifier != null &&
               target.identifier!.isNotEmpty) {
-            final article = _ugcArticleFromTarget(target);
-            _openRoute(
-              navContext,
-              MaterialPageRoute(
-                builder: (_) => article != null
-                    ? NewsDetailScreen(article: article)
-                    : const UgcFeedScreen(),
-              ),
-            );
+            // "Your post is pending / approved / rejected": the reporter's
+            // own submission, which the public endpoint does not serve
+            // until it is approved (and then only in its area). Opening it
+            // as a public post gave an empty story page.
+            if (target.screenName == 'status' ||
+                isSubmissionStatusNotice(target.originalPayload)) {
+              _openRoute(
+                navContext,
+                MaterialPageRoute(
+                  builder: (_) => SubmissionStatusScreen(
+                    submissionId: target.identifier!,
+                    initialTitle:
+                        (target.originalPayload?['title'] ?? '').toString(),
+                  ),
+                ),
+              );
+              break;
+            }
+            // The citizen post in Spotlight, like a news notification.
+            _showLoadingIndicator(navContext);
+            try {
+              final post = await ApiService.instance
+                  .getUgcDetail(target.identifier!)
+                  .timeout(const Duration(seconds: 8));
+              _dismissLoadingIndicator();
+              if (navContext.mounted) _openInSpotlight(navContext, post);
+              break;
+            } catch (e) {
+              _dismissLoadingIndicator();
+              debugPrint('[NotificationService] UGC load error for '
+                  '"${target.identifier}": $e');
+              if (!navContext.mounted) break;
+              final article = _ugcArticleFromTarget(target);
+              if (article != null && article.title.trim().isNotEmpty) {
+                // The notification carried the post's text: show that,
+                // and the detail screen retries the full post.
+                _openRoute(
+                  navContext,
+                  MaterialPageRoute(
+                      builder: (_) => NewsDetailScreen(article: article)),
+                );
+              } else {
+                // Only an id, and the post is not available to this reader
+                // (removed, not approved, outside their area) or the
+                // connection failed. Say so, with Retry when it may help,
+                // rather than opening an empty story page.
+                _showLoadFailure(navContext, e,
+                    retry: () => navigateToTarget(target));
+              }
+            }
           } else {
             _openRoute(
               navContext,
@@ -935,7 +1072,8 @@ class NotificationService {
                 '')
             .toString();
         if (id.isNotEmpty) {
-          unawaited(AnalyticsQueue.instance.notificationOpened(id));
+          unawaited(AnalyticsQueue.instance
+              .notificationOpened(id, payload: target.originalPayload));
         }
       }
     } catch (e) {
@@ -944,6 +1082,32 @@ class NotificationService {
     } finally {
       NotificationNavigationGate.instance.releaseDispatchLock();
     }
+  }
+
+  /// True for a citizen reporter's submission-status notification ("your
+  /// post is pending / approved / rejected"), as opposed to news about a
+  /// published citizen post.
+  @visibleForTesting
+  static bool isSubmissionStatusNotice(Map<String, dynamic>? payload) =>
+      NotificationDeepLinkResolver.isSubmissionStatusNotice(payload);
+
+  /// Opens Spotlight with [article] as the first card, the reader's feed
+  /// following it. A district/mandal/village story opens the Local tab
+  /// when the reader has a place set.
+  void _openInSpotlight(BuildContext context, NewsArticle article) {
+    final isLocal = AppState.instance.hasValidLocation &&
+        SpotlightController.isLocalStory(article);
+    _openRoute(
+      context,
+      MaterialPageRoute(
+        settings:
+            RouteSettings(name: isLocal ? '/spotlight/local' : '/spotlight'),
+        builder: (_) => SpotlightScreen(
+          pinnedArticle: article,
+          isLocal: isLocal,
+        ),
+      ),
+    );
   }
 
   /// Opens the Reels viewer for a /video/{id}/ link.
@@ -1053,7 +1217,10 @@ class NotificationService {
       'thumbnail_url': payload['thumbnail_url'] ?? payload['image_url'] ?? '',
       'feed_item_type': 'ugc',
       'category': 'UGC',
-      'published_at': payload['published_at'] ?? payload['created_at'],
+      // Without a date the story read "1 January 1970 · 20749 days ago".
+      'published_at': payload['published_at'] ??
+          payload['created_at'] ??
+          DateTime.now().toIso8601String(),
     });
   }
 }

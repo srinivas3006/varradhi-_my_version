@@ -221,6 +221,16 @@ class AppState extends ChangeNotifier {
     return deviceId;
   }
 
+  /// Starts a new installation identity: a new device_id and no credential.
+  /// Only for recovering a lost installation credential, together with a
+  /// new FCM token (the backend will not take the old token under a new id).
+  Future<void> startNewInstallation() async {
+    final now = DateTime.now();
+    await setDeviceId(
+        'dev_${now.millisecondsSinceEpoch}_${now.microsecondsSinceEpoch % 100000}');
+    await setInstallationSecret(null);
+  }
+
   Future<void> setSessionId(String? id) async {
     sessionId = id;
     try {
@@ -240,11 +250,21 @@ class AppState extends ChangeNotifier {
   /// User preferred font size for reading Telugu and article bodies (defaults to 19.0 px).
   double readingFontSize = 19.0;
 
+  /// The reading size was picked by the reader in Settings. Only then does
+  /// it differ from the 19 pt default.
+  bool readingFontSizeChosen = false;
+
+  /// The reader's own choice (Settings). This phone's display setting:
+  /// logging in or out never changes it.
   Future<void> setReadingFontSize(double size) async {
     // 12-24 matches what PATCH /auth/me/ accepts, so a size stored here is
     // always one the server will keep.
     final clamped = size.clamp(12.0, 24.0);
-    if ((clamped - readingFontSize).abs() < 0.1) return;
+    readingFontSizeChosen = true;
+    if ((clamped - readingFontSize).abs() < 0.1) {
+      await _persist();
+      return;
+    }
     readingFontSize = clamped;
     notifyListeners();
     await _persist();
@@ -409,8 +429,19 @@ class AppState extends ChangeNotifier {
     // number, so it proves nothing about the real mobile. Drop it.
     await prefs.remove('uploadVerified');
     reporterTokens = prefs.getInt('reporterTokens') ?? 0;
-    readingFontSize = prefs.getDouble('readingFontSize') ?? 19.0;
-    notifications = _decodeLocalInbox(prefs.getString(_localInboxKey));
+    readingFontSizeChosen = prefs.getBool('readingFontSizeChosen') ?? false;
+    // A size the reader never chose came from an account's font_size at
+    // login (backend default 16): it shrank every story for logged-in
+    // readers and stayed after logout. Back to the default.
+    readingFontSize = readingFontSizeChosen
+        ? (prefs.getDouble('readingFontSize') ?? 19.0)
+        : 19.0;
+    final storedInbox = _decodeLocalInbox(prefs.getString(_localInboxKey));
+    notifications = cleanLocalInbox(storedInbox);
+    if (notifications.length != storedInbox.length ||
+        notifications.any((n) => !storedInbox.contains(n))) {
+      unawaited(_saveLocalInbox());
+    }
     _loadDeviceSavedStories(prefs);
 
     // Read deviceId from secure storage first, fallback to shared_preferences
@@ -619,6 +650,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool('hasValidLocation', hasValidLocation);
     await prefs.setBool('pushNotificationsEnabled', pushNotificationsEnabled);
     await prefs.setDouble('readingFontSize', readingFontSize);
+    await prefs.setBool('readingFontSizeChosen', readingFontSizeChosen);
     // Deliberately no authToken here — see setAuthToken/_clearAuthToken.
   }
 
@@ -643,6 +675,11 @@ class AppState extends ChangeNotifier {
     unawaited(ContentEngagementService.instance
         .syncGuestBookmarks()
         .catchError((Object e) => debugPrint('[Bookmark] guest copy: $e')));
+    // Categories chosen as a guest go to the account as well.
+    if (preferredCategories.isNotEmpty) {
+      unawaited(syncPreferredCategories().catchError(
+          (Object e) => debugPrint('[Preferences] guest copy: $e')));
+    }
   }
 
   /// Called by the Dio interceptor after a successful silent token refresh.
@@ -757,11 +794,11 @@ class AppState extends ChangeNotifier {
       // Instead, keep the current theme and sync it to the backend profile.
       unawaited(_syncProfileToBackend(theme: themeMode.name));
 
-      final serverFont = me['font_size'];
-      if (serverFont != null) {
-        final parsed = double.tryParse(serverFont.toString());
-        if (parsed != null) await setReadingFontSize(parsed);
-      }
+      // The account's font_size is not applied here: it is the backend
+      // default (16) for anyone who never chose one, and applying it made
+      // every story smaller once a reader logged in — guest and logged-in
+      // readers must see the same layout. The reading size is this phone's
+      // setting (Settings > reading font size), synced up from there.
 
       await _restoreReporterStatus(me);
       if (me['tokens'] != null) {
@@ -1003,45 +1040,65 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<void> setPreferredCategories(List<String> categories) async {
-    preferredCategories = categories;
+  /// Saves the reader's chosen categories (backend slugs) on the device.
+  /// A signed-in reader's choice is sent to the backend separately with
+  /// [syncPreferredCategories], so the screen can tell whether it worked.
+  Future<void> setPreferredCategories(List<String> categorySlugs) async {
+    preferredCategories = List<String>.from(categorySlugs);
     hasPromptedPreferences = true;
     notifyListeners();
     await _persist();
-
-    if (isLoggedIn) {
-      try {
-        // The on-device list mixes real content categories with location
-        // and format filters (e.g. "Andhra Pradesh", "Videos") that are not
-        // valid category slugs server-side. Sending an unknown slug makes
-        // the whole PATCH fail validation, so only forward slugs that
-        // actually exist in the backend's active category list.
-        final validSlugs = (await ApiService.instance.getCategories())
-            .map((c) => c.slug)
-            .toSet();
-        final Map<String, double> weights = {};
-        for (var cat in categories) {
-          final slug = _categoryToSlug(cat);
-          if (slug.isNotEmpty && validSlugs.contains(slug)) {
-            weights[slug] = 1.0;
-          }
-        }
-        if (weights.isNotEmpty) {
-          await ApiService.instance.updateCategoryPreferences(weights);
-        }
-      } catch (e) {
-        debugPrint('Failed to sync category preferences to backend: $e');
-      }
-    }
   }
 
-  static String _categoryToSlug(String cat) {
-    return cat
-        .trim()
-        .toLowerCase()
-        .replaceAll('&', 'and')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
+  /// Sends the saved categories to `PATCH /api/v1/users/me/preferences/`.
+  /// Throws when the reader is signed out or the request fails.
+  ///
+  /// Every active category is sent — chosen ones 1.0, the rest 0.0 — so
+  /// unticking a category also reaches the backend. Before, only ticked
+  /// names went, and only those whose English name happened to equal a
+  /// slug (5 of the 16 chips), so most choices never arrived and none could
+  /// be removed.
+  Future<void> syncPreferredCategories() async {
+    if (!isLoggedIn) throw StateError('Not signed in');
+    final active = (await ApiService.instance.getCategories())
+        .where((c) => c.isActive && c.slug.isNotEmpty)
+        .map((c) => c.slug)
+        .toSet();
+    if (active.isEmpty) throw StateError('Categories unavailable');
+    final chosen = resolvePreferenceSlugs(preferredCategories, active);
+    await ApiService.instance.updateCategoryPreferences({
+      for (final slug in active) slug: chosen.contains(slug) ? 1.0 : 0.0,
+    });
+  }
+
+  /// Maps saved entries onto [activeSlugs]. Entries are slugs now; older
+  /// installs saved the screen's English chip names, which are translated
+  /// here so nobody's earlier choice is lost.
+  static Set<String> resolvePreferenceSlugs(
+      Iterable<String> saved, Set<String> activeSlugs) {
+    const legacy = <String, List<String>>{
+      'national': ['national-news'],
+      'andhra pradesh': ['state-news'],
+      'telangana': ['state-news'],
+      'cinema': ['cinema', 'cinima'],
+      'education & jobs': ['education', 'jobs-careers'],
+      'spiritual': ['devotional'],
+      'latest news': ['general'],
+    };
+    final result = <String>{};
+    for (final entry in saved) {
+      if (activeSlugs.contains(entry)) {
+        result.add(entry);
+        continue;
+      }
+      final key = entry.trim().toLowerCase();
+      if (activeSlugs.contains(key)) {
+        result.add(key);
+        continue;
+      }
+      result.addAll((legacy[key] ?? const []).where(activeSlugs.contains));
+    }
+    return result;
   }
 
   void markPreferencesPrompted() {
@@ -1316,24 +1373,73 @@ class AppState extends ChangeNotifier {
   static String _inboxKey(AppNotification n) =>
       (n.notificationId?.isNotEmpty ?? false) ? n.notificationId! : n.id;
 
+  /// The stored inbox, cleaned (notification contract §10):
+  /// - drops the fake "New Notification" cards an older build saved for
+  ///   pushes with no title or body (no body and no notification_id);
+  /// - gives device-only pushes that older builds keyed by notification_id
+  ///   a `push_` id, so that id is never sent as a server inbox row id;
+  /// - keeps one entry per notification_id (the server copy if there is
+  ///   one), read if any copy was read.
+  @visibleForTesting
+  static List<AppNotification> cleanLocalInbox(List<AppNotification> stored) {
+    final byKey = <String, AppNotification>{};
+    final order = <String>[];
+    for (var n in stored) {
+      final malformed = n.title.trim() == 'New Notification' &&
+          n.message.trim().isEmpty &&
+          (n.notificationId?.trim().isEmpty ?? true);
+      if (malformed) continue;
+      if (!n.isLocal && n.notificationId != null && n.id == n.notificationId) {
+        n = AppNotification.fromJson(
+            {...n.toJson(), 'id': 'push_${n.notificationId}'});
+      }
+      final key = _inboxKey(n);
+      final kept = byKey[key];
+      if (kept == null) {
+        byKey[key] = n;
+        order.add(key);
+        continue;
+      }
+      final read = kept.isRead || n.isRead;
+      if (kept.isLocal && !n.isLocal) byKey[key] = n;
+      byKey[key]!.isRead = read;
+    }
+    return [for (final k in order) byKey[k]!];
+  }
+
+  static String _clean(dynamic v) => v?.toString().trim() ?? '';
+
   /// Records a push the app just received (foreground, or opened from the
-  /// tray). Safe to call twice for the same message.
-  Future<void> recordPushNotification({
+  /// tray). Safe to call twice for the same message. A push with neither a
+  /// real title nor a real body is not a notification (silent or invalid)
+  /// and is never saved; returns whether it was a valid one.
+  Future<bool> recordPushNotification({
     required Map<String, dynamic> data,
     String? title,
     String? body,
     String? messageId,
     String? imageUrl,
   }) async {
-    final notificationId = data['notification_id']?.toString();
-    final id = notificationId ??
-        'push_${messageId ?? DateTime.now().millisecondsSinceEpoch}';
+    final realTitle =
+        _clean(title).isNotEmpty ? _clean(title) : _clean(data['title']);
+    final realBody =
+        _clean(body).isNotEmpty ? _clean(body) : _clean(data['body']);
+    if (realTitle.isEmpty && realBody.isEmpty) return false;
+
+    final notificationId = _clean(data['notification_id']);
+    final dedupeKey = notificationId.isNotEmpty
+        ? notificationId
+        : (_clean(messageId).isNotEmpty
+            ? _clean(messageId)
+            : '${DateTime.now().millisecondsSinceEpoch}');
+    // Device-only until the server inbox is merged in: the id is not a
+    // server row id, so it is never sent to the read endpoint.
     final incoming = AppNotification.fromJson({
       ...data,
-      'id': id,
-      if (notificationId != null) 'notification_id': notificationId,
-      'title': title ?? data['title']?.toString() ?? '',
-      'body': body ?? data['body']?.toString() ?? '',
+      'id': 'push_$dedupeKey',
+      if (notificationId.isNotEmpty) 'notification_id': notificationId,
+      'title': realTitle,
+      'body': realBody,
       'created_at':
           data['created_at']?.toString() ?? DateTime.now().toIso8601String(),
       // FCM's notification image is not in `data`; keep it for the inbox.
@@ -1342,18 +1448,34 @@ class AppState extends ChangeNotifier {
         'image_url': imageUrl,
       'is_read': false,
     });
-    if (incoming.title.isEmpty && incoming.message.isEmpty) return;
 
     final key = _inboxKey(incoming);
-    if (notifications.any((n) => _inboxKey(n) == key)) return;
+    if (notifications.any((n) => _inboxKey(n) == key)) return true;
     notifications = [incoming, ...notifications];
     notifyListeners();
     await _saveLocalInbox();
+    return true;
   }
 
-  /// Loads the backend inbox and merges it with pushes kept on the device.
-  /// The backend copy wins for anything both sides have; a local read mark
-  /// is never undone by a stale server flag.
+  /// Marks read the inbox entry for a push's notification_id (the common id
+  /// in the push), whichever copy the inbox holds. A server copy is marked
+  /// on the server by its row id; a device-only copy syncs at the next merge.
+  void markNotificationReadByNotificationId(String notificationId) {
+    final id = notificationId.trim();
+    if (id.isEmpty) return;
+    for (final n in notifications) {
+      if (_inboxKey(n) == id) {
+        markNotificationRead(n.id);
+        return;
+      }
+    }
+  }
+
+  /// Loads the backend inbox and merges it with pushes kept on the device,
+  /// matched by notification_id. The backend copy (content and ids) wins and
+  /// the device copy is dropped. A read mark the server has not got yet (the
+  /// push was read on the device, or the read call failed) is kept and sent
+  /// with the server row id; once the server says read, that is used.
   Future<void> fetchNotifications() async {
     try {
       final remote = await ApiService.instance.getNotifications();
@@ -1365,7 +1487,12 @@ class AppState extends ChangeNotifier {
       for (final n in remote) {
         final key = _inboxKey(n);
         remoteKeys.add(key);
-        if (readLocally.contains(key)) n.isRead = true;
+        if (!n.isRead && readLocally.contains(key)) {
+          n.isRead = true;
+          unawaited(ApiService.instance
+              .markNotificationRead(n.id)
+              .catchError((_) => false));
+        }
       }
       final merged = [
         ...remote,
@@ -1379,8 +1506,7 @@ class AppState extends ChangeNotifier {
 
   /// Only ids the backend issued can be marked read on the server; locally
   /// generated push ids stay on the device.
-  static bool _isServerNotification(AppNotification n) =>
-      !n.id.startsWith('push_');
+  static bool _isServerNotification(AppNotification n) => !n.isLocal;
 
   void markNotificationRead(String id) {
     final index = notifications.indexWhere((n) => n.id == id);

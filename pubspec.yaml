@@ -1,7 +1,7 @@
 name: vaaradhi
 description: VAARADHI news, video, local updates, ads, and citizen journalism mobile app.
 publish_to: 'none'
-version: 1.8.3+22
+version: 1.8.6+25
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,6 +43,7 @@ dependencies:
   firebase_auth: ^6.7.0
   youtube_player_iframe: ^6.0.2
   flutter_widget_from_html_core: ^0.17.4
+  in_app_update: ^5.0.0
 
 dev_dependencies:
   flutter_test:

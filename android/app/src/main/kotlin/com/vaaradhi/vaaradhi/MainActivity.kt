@@ -1,11 +1,25 @@
 package com.vaaradhi.vaaradhi
 
 import android.content.Intent
+import android.os.Bundle
+import androidx.core.view.WindowCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Edge-to-edge on every Android version, as Android 15+ already
+        // enforces for apps targeting SDK 35+ (Play Console). Flutter's
+        // SafeArea / MediaQuery padding keep content clear of the bars.
+        //
+        // WindowCompat, not androidx.activity's enableEdgeToEdge(): that one
+        // calls Window.setStatusBarColor / setNavigationBarColor on older
+        // versions, which Play reports as deprecated Android 15 APIs.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        super.onCreate(savedInstanceState)
+    }
+
     private var deepLinkChannel: MethodChannel? = null
     private var initialLinkConsumed = false
     private var watermarkChannel: MethodChannel? = null

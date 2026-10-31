@@ -214,6 +214,71 @@ void main() {
       expect(requestedDeviceIds[0], equals('device-stale-1'));
       expect(requestedDeviceIds[1], equals('device-stale-1'));
     });
+
+    test(
+        'credential lost and the backend refuses the known device: '
+        'a fresh installation logs in',
+        () async {
+      final state = AppState.instance;
+      state.deviceId = 'device-known-1';
+      state.fcmToken = 'fcm-old';
+      state.installationSecret = null; // lost on the phone
+      ApiService.fcmTokenRefresher = () async => 'fcm-new';
+      addTearDown(() => ApiService.fcmTokenRefresher = null);
+
+      final registrations = <Map>[];
+      final logins = <Map>[];
+      ApiClient.instance.dio.httpClientAdapter =
+          ReleaseMockAdapter((options) async {
+        final body = options.data is Map ? options.data as Map : {};
+        if (options.path == '/api/v1/notifications/guest-device/') {
+          registrations.add(body);
+          // A device the backend already knows needs its old credential.
+          if (body['device_id'] == 'device-known-1') {
+            return ReleaseMockAdapter.jsonResponse({
+              'errors': {
+                'code': 403,
+                'message': 'Installation credential required.'
+              }
+            }, 403);
+          }
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {'installation_secret': 'secret-for-${body['device_id']}'}
+          }, 201);
+        }
+        if (options.path == '/api/v1/auth/login/') {
+          logins.add(body);
+          if (body['installation_secret'] == null) {
+            return ReleaseMockAdapter.jsonResponse({
+              'errors': {
+                'code': 403,
+                'message': 'Installation credential required.'
+              }
+            }, 403);
+          }
+          return ReleaseMockAdapter.jsonResponse({
+            'data': {
+              'access': 'acc',
+              'refresh': 'ref',
+              'user': {'full_name': 'Reader'}
+            }
+          }, 200);
+        }
+        return ReleaseMockAdapter.jsonResponse({'data': {}}, 200);
+      });
+
+      final result =
+          await ApiService.instance.login('reader@example.com', 'pass123');
+
+      expect(result['access'], 'acc');
+      expect(logins, hasLength(1), reason: 'credential obtained before login');
+      final login = logins.single;
+      expect(login['device_id'], isNot('device-known-1'));
+      expect(login['installation_secret'], 'secret-for-${login['device_id']}');
+      expect(login['fcm_token'], 'fcm-new',
+          reason: 'the old token is not accepted under a new device id');
+      expect(registrations.last['fcm_token'], 'fcm-new');
+    });
   });
 
 

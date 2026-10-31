@@ -9,6 +9,7 @@ import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../models/poll.dart';
 import '../services/poll_exposure.dart';
+import '../services/analytics_queue.dart';
 import '../services/api_service.dart';
 import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
@@ -23,6 +24,11 @@ import 'spotlight_state.dart';
 class SpotlightController extends ChangeNotifier {
   final FeedRepository _feedRepository;
   final String? initialStoryId;
+
+  /// The story a notification opened. Kept as the first card on every feed
+  /// build — it may be older than the first page, or outside this tab's
+  /// coverage — until the reader changes category, tab or location.
+  NewsArticle? _pinned;
 
   SpotlightState _state;
   SpotlightState get state => _state;
@@ -74,11 +80,20 @@ class SpotlightController extends ChangeNotifier {
     String? initialCategory,
     bool isLocal = false,
     this.initialStoryId,
+    NewsArticle? pinnedArticle,
   })  : _feedRepository = feedRepository ?? FeedRepository.instance,
+        _pinned = pinnedArticle,
         _state = SpotlightState.initial(
           category: initialCategory,
           locationName: AppState.instance.displayLocation,
-        ).copyWith(isLocalNews: isLocal) {
+        ).copyWith(
+          isLocalNews: isLocal,
+          // Shown at once, before the feed request returns.
+          feed: pinnedArticle == null
+              ? null
+              : [SpotlightItem.standard(pinnedArticle)],
+          isLoading: pinnedArticle == null ? null : false,
+        ) {
     _preferencesIdentity = _currentPreferencesIdentity;
     AppState.instance.addListener(_onPreferencesChanged);
     startOverlayTimer();
@@ -332,6 +347,11 @@ class SpotlightController extends ChangeNotifier {
           .where((item) => seen.add('${item.contentKind}:${item.id}'))
           .toList()
         ..sort((a, b) => b.publishedAt.compareTo(a.publishedAt));
+      final pinned = _pinned;
+      if (pinned != null) {
+        stories.removeWhere((item) =>
+            item.contentKind == pinned.contentKind && item.id == pinned.id);
+      }
       final posterIds = <String>{};
       // expand, not map: a multi-image poster becomes one page per image.
       final posters = _postersPool
@@ -360,6 +380,7 @@ class SpotlightController extends ChangeNotifier {
         }
       }
       content.addAll(posters.skip(posterIndex));
+      if (pinned != null) content.insert(0, SpotlightItem.standard(pinned));
       final run = insertAdsIntoFeed<SpotlightItem>(
         contentItems: content,
         eligibleAds: _adsPool,
@@ -368,7 +389,7 @@ class SpotlightController extends ChangeNotifier {
         policy: AdFrequencyPolicy.spotlight,
         contentKey: (item) => '${item.type.name}:${item.id}',
       );
-      final updatedFeed = run
+      final rebuilt = run
           .where((entry) => !_dismissedSlots.contains(entry.stableKey))
           .map((entry) => entry.isAd
               ? SpotlightItem(
@@ -377,6 +398,12 @@ class SpotlightController extends ChangeNotifier {
                   adBanner: entry.ad)
               : entry.content!)
           .toList();
+      // A further page only adds to the end. Rebuilt from scratch, the list
+      // re-sorted stories by date and re-spaced posters, polls and ads, so
+      // items already shown moved: the next card, already loaded, turned
+      // into another story and reloaded — the blink while scrolling.
+      final updatedFeed =
+          refresh ? rebuilt : appendOnly(_state.feed, rebuilt);
       final hasMore = _articleHasMore || _ugcHasMore;
       if (updatedFeed.isNotEmpty && hasMore) {
         updatedFeed.add(SpotlightItem.shimmer());
@@ -433,6 +460,31 @@ class SpotlightController extends ChangeNotifier {
     }
   }
 
+  /// The feed after a further page: [shown] kept exactly as it is (same
+  /// items, same places), then the items of [rebuilt] it does not already
+  /// hold, in their order. Stories already in the feed are never added a
+  /// second time; the loading placeholder is dropped.
+  @visibleForTesting
+  static List<SpotlightItem> appendOnly(
+      List<SpotlightItem> shown, List<SpotlightItem> rebuilt) {
+    String key(SpotlightItem i) => '${i.type.name}:${i.id}';
+    String? story(SpotlightItem i) => i.article == null
+        ? null
+        : '${i.article!.contentKind}:${i.article!.id}';
+    final kept =
+        shown.where((i) => i.type != SpotlightType.shimmer).toList();
+    final keys = {for (final i in kept) key(i)};
+    final stories = {for (final i in kept) story(i)}..remove(null);
+    return [
+      ...kept,
+      for (final i in rebuilt)
+        if (i.type != SpotlightType.shimmer &&
+            !keys.contains(key(i)) &&
+            !stories.contains(story(i)))
+          i,
+    ];
+  }
+
   int _visibleStoryCount = 0;
   int _emptyPageStreak = 0;
   bool _autoLoadMore = false;
@@ -453,6 +505,10 @@ class SpotlightController extends ChangeNotifier {
     'village',
     'city',
   };
+
+  /// True for a district, mandal or village story — one the Local tab shows.
+  static bool isLocalStory(NewsArticle a) =>
+      _localLevels.contains(a.coverageLevel.trim().toLowerCase());
 
   /// Main shows global and state news; Local shows district, mandal and
   /// village news of the reader's district. Uses the story's
@@ -497,6 +553,7 @@ class SpotlightController extends ChangeNotifier {
 
     HapticFeedback.selectionClick();
     ++_requestGeneration;
+    _pinned = null;
     _state = _state.copyWith(
       selectedCategory: cat,
       clearCategory: cat == null,
@@ -514,6 +571,7 @@ class SpotlightController extends ChangeNotifier {
     if (_state.isLocalNews == isLocal) return;
     HapticFeedback.selectionClick();
     ++_requestGeneration;
+    _pinned = null;
     _state = _state.copyWith(
       isLocalNews: isLocal,
       locationName: AppState.instance.displayLocation,
@@ -530,6 +588,7 @@ class SpotlightController extends ChangeNotifier {
   Future<void> updateLocation() async {
     HapticFeedback.lightImpact();
     ++_requestGeneration;
+    _pinned = null;
     _state = _state.copyWith(
       locationName: AppState.instance.displayLocation,
       feed: const [],
@@ -553,6 +612,10 @@ class SpotlightController extends ChangeNotifier {
     // A refresh shows each story as it is now — new images included — not
     // the full-article copies fetched earlier.
     NewsArticleRepository.instance.clearCache();
+    unawaited(AnalyticsQueue.instance.track('feed_refresh', metadata: {
+      'surface': 'spotlight',
+      'scope': _state.isLocalNews ? 'local' : 'main',
+    }));
     await loadFeed(refresh: true);
   }
 

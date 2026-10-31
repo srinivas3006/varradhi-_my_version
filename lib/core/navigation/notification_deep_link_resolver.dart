@@ -344,19 +344,40 @@ class NotificationDeepLinkResolver {
       );
     }
 
-    // UGC target
+    // UGC target. A status notice goes to the reporter's own submission;
+    // anything else is a published citizen post.
     if (contentType == 'ugc') {
       final uId =
           (contentId != null && contentId.isNotEmpty) ? contentId : contentSlug;
+      final status = isSubmissionStatusNotice(data) &&
+          uId != null &&
+          uId.isNotEmpty;
       return NotificationTarget.ugc(
         submissionId: uId,
+        action: status ? 'status' : null,
         notificationId: notificationId,
-        requiresAuth: false,
+        requiresAuth: status,
         originalPayload: data,
       );
     }
 
     return NotificationTarget.unknown(originalPayload: data);
+  }
+
+  /// True for a citizen reporter's submission-status notification
+  /// (`submission_pending`, `ugc_under_review`, `ugc_approved`,
+  /// `ugc_rejected`), as opposed to `citizen_news` about a published post.
+  static bool isSubmissionStatusNotice(Map<String, dynamic>? payload) {
+    if (payload == null) return false;
+    final kind = [
+      payload['notification_type'],
+      payload['type'],
+      payload['event'],
+      payload['status'],
+    ].whereType<Object>().map((v) => v.toString().toLowerCase()).join(' ');
+    return RegExp(
+            r'pend|approv|reject|review|moderat|submission|status|resubmit')
+        .hasMatch(kind);
   }
 
   /// Resolves an [AppNotification] domain model from the inbox.
@@ -461,6 +482,14 @@ class NotificationDeepLinkResolver {
         String? id;
         if (segments.isNotEmpty) {
           if (segments[0] == 'reporter' &&
+              segments.length > 2 &&
+              segments[1] == 'submissions' &&
+              segments[2].isNotEmpty) {
+            // /ugc/reporter/submissions/{id}/status/ — the reporter's own
+            // submission (pending / under review / approved / rejected).
+            id = segments[2];
+            action = 'status';
+          } else if (segments[0] == 'reporter' &&
               segments.length > 1 &&
               segments[1] == 'dashboard') {
             action = 'dashboard';

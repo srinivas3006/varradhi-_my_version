@@ -156,15 +156,23 @@ class VaaradhiApp extends StatelessWidget {
           // ads that come and go (AdPacer). Purely observes; never consumes.
           // The 3D / video corner ad sits above the Navigator, so it can
           // appear on every screen.
-          builder: (context, child) => Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: (_) => AdPacer.instance.reportActivity(),
-            onPointerMove: (_) => AdPacer.instance.reportActivity(),
-            child: Stack(
-              children: [
-                if (child != null) Positioned.fill(child: child),
-                const Positioned.fill(child: CornerThreeDAdOverlay()),
-              ],
+          //
+          // Text scaling is capped at 130% app-wide — the cap the Spotlight
+          // card and article page already use. Android's larger font
+          // settings go to 200%, which pushed labels out of fixed-height
+          // bars, chips and buttons and made them overlap on every phone.
+          builder: (context, child) => MediaQuery.withClampedTextScaling(
+            maxScaleFactor: 1.3,
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (_) => AdPacer.instance.reportActivity(),
+              onPointerMove: (_) => AdPacer.instance.reportActivity(),
+              child: Stack(
+                children: [
+                  if (child != null) Positioned.fill(child: child),
+                  const Positioned.fill(child: CornerThreeDAdOverlay()),
+                ],
+              ),
             ),
           ),
           home: const SplashScreen(),

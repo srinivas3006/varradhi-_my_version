@@ -215,8 +215,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         iconColor = Colors.amber;
         break;
       case NotificationType.announcement:
-        icon = Icons.celebration_outlined;
-        iconColor = AppColors.primary;
+        // By delivery_category; `type` is targeting (all/single/segment).
+        // Unknown: a neutral bell, not a party popper.
+        switch (notification.deliveryCategory) {
+          case 'breaking':
+            icon = Icons.bolt_rounded;
+            iconColor = Colors.red;
+            break;
+          case 'local':
+            icon = Icons.location_on_outlined;
+            iconColor = AppColors.primary;
+            break;
+          case 'alert':
+            icon = Icons.warning_amber_rounded;
+            iconColor = Colors.orange;
+            break;
+          case 'festival':
+            icon = Icons.celebration_outlined;
+            iconColor = AppColors.primary;
+            break;
+          case 'promotion':
+            icon = Icons.local_offer_outlined;
+            iconColor = AppColors.primary;
+            break;
+          default:
+            icon = Icons.notifications_none_rounded;
+            iconColor = Colors.grey;
+        }
         break;
     }
 
@@ -224,8 +249,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       onTap: () async {
         if (isUnread) {
           HapticFeedback.lightImpact();
+          // Sends the server row id; device-only copies sync at the merge.
           AppState.instance.markNotificationRead(notification.id);
-          ApiService.instance.markNotificationRead(notification.id);
         }
 
         final target = NotificationDeepLinkResolver.resolveFromAppNotification(

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -110,5 +111,31 @@ void main() {
           reason: '4:3 ratio must reclaim >50dp of vertical space for news reading body');
     });
   });
-}
 
+  group('reading size is the same for guests and logged-in readers', () {
+    test('logging in does not take the account font_size', () {
+      final src = File('lib/state/app_state.dart').readAsStringSync();
+      final sync = src.substring(src.indexOf('Future<void> refreshRolesFromServer'));
+      expect(sync.substring(0, sync.indexOf('_restoreReporterStatus(me)')),
+          isNot(contains('setReadingFontSize(')),
+          reason: 'the backend default (16) shrank every story after login');
+    });
+
+    test('a size never chosen in Settings is reset to the default', () async {
+      SharedPreferences.setMockInitialValues({
+        'readingFontSize': 16.0, // left by an earlier login
+      });
+      await AppState.instance.init();
+      expect(AppState.instance.readingFontSize, 19.0);
+    });
+
+    test('a size chosen in Settings is kept', () async {
+      SharedPreferences.setMockInitialValues({
+        'readingFontSize': 22.0,
+        'readingFontSizeChosen': true,
+      });
+      await AppState.instance.init();
+      expect(AppState.instance.readingFontSize, 22.0);
+    });
+  });
+}

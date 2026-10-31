@@ -39,8 +39,8 @@ class AnalyticsQueue with WidgetsBindingObserver {
   static const _flushAt = 20;
 
   /// Sent shortly after an event so it reaches the dashboard soon, while
-  /// still batching a burst of them.
-  static const _flushDelay = Duration(seconds: 10);
+  /// still batching a burst of them (backend: flush every 15–30 s).
+  static const _flushDelay = Duration(seconds: 15);
 
   static const retryDelays = [
     Duration(seconds: 5),
@@ -61,6 +61,18 @@ class AnalyticsQueue with WidgetsBindingObserver {
     'video_start',
     'video_progress',
     'video_complete',
+    // Sent only after the comment API succeeded.
+    'comment_created',
+    'comment_reply_created',
+    'comment_deleted',
+    'comment_reported',
+  };
+
+  /// Events about the app rather than one story: no article_id or
+  /// submission_id (backend analytics handover, Oct 2026).
+  static const appEvents = {
+    'search_query',
+    'feed_refresh',
   };
 
   static const maxDwellSeconds = 86400;
@@ -153,10 +165,39 @@ class AnalyticsQueue with WidgetsBindingObserver {
   }
 
   static bool _isValid(Map<String, dynamic> e) {
-    if (!contentEvents.contains(e['event_type'])) return false;
     final hasArticle = e['article_id'] != null;
     final hasSubmission = e['submission_id'] != null;
+    if (appEvents.contains(e['event_type'])) {
+      return !hasArticle && !hasSubmission;
+    }
+    if (!contentEvents.contains(e['event_type'])) return false;
     return hasArticle != hasSubmission;
+  }
+
+  Map<String, dynamic> _base(String eventType) {
+    final guestId = AppState.instance.deviceId;
+    return {
+      'event_type': eventType,
+      if (guestId.isNotEmpty) 'guest_id': guestId,
+      'session_id': _sessionId,
+      'language': AppState.instance.contentLanguage ?? 'te',
+      'device_type': ApiService.deviceType,
+    };
+  }
+
+  Future<void> _enqueue(Map<String, dynamic> event) async {
+    // Queued at once (before any await) once the stored queue is loaded.
+    if (!_loaded) await _ensureLoaded();
+    _queue.add(event);
+    if (_queue.length > _maxQueued) {
+      _queue.removeRange(0, _queue.length - _maxQueued); // drop oldest
+    }
+    await _save();
+    if (_queue.length >= _flushAt) {
+      unawaited(flush());
+    } else {
+      _schedule(_flushDelay);
+    }
   }
 
   /// Queues one content event for [story]. Never throws, never blocks.
@@ -171,31 +212,15 @@ class AnalyticsQueue with WidgetsBindingObserver {
     if (!contentEvents.contains(eventType)) return;
     final id = contentIdOf(story);
     if (id == null) return;
-    // Queued at once (before any await) once the stored queue is loaded.
-    if (!_loaded) await _ensureLoaded();
-    final guestId = AppState.instance.deviceId;
-    _queue.add({
-      'event_type': eventType,
+    await _enqueue({
+      ..._base(eventType),
       id.key: id.value,
-      if (guestId.isNotEmpty) 'guest_id': guestId,
-      'session_id': _sessionId,
-      'language': AppState.instance.contentLanguage ?? 'te',
-      'device_type': ApiService.deviceType,
       if (dwellSeconds != null)
         'dwell_seconds': dwellSeconds.clamp(0, maxDwellSeconds),
       if (scrollDepth != null) 'scroll_depth': scrollDepth.clamp(0, 100),
       'occurred_at': DateTime.now().toUtc().toIso8601String(),
       'metadata': metadata,
     });
-    if (_queue.length > _maxQueued) {
-      _queue.removeRange(0, _queue.length - _maxQueued); // drop oldest
-    }
-    await _save();
-    if (_queue.length >= _flushAt) {
-      unawaited(flush());
-    } else {
-      _schedule(_flushDelay);
-    }
   }
 
   static const singleEndpoint = '/api/v1/analytics/events/';
@@ -204,11 +229,16 @@ class AnalyticsQueue with WidgetsBindingObserver {
   /// opened — never when a push merely arrives (notification handover).
   /// Its own request to the single-event endpoint, retried after 5 s, 15 s
   /// and 60 s on network trouble or 5xx; never on 4xx.
+  ///
+  /// [payload] is the notification's data: its content_id goes along as
+  /// `submission_id` (citizen news) or `article_id`, so the dashboard can
+  /// tie the open to the story.
   Future<void> notificationOpened(String notificationId,
-      {int attempt = 0}) async {
+      {Map<String, dynamic>? payload, int attempt = 0}) async {
     final id = notificationId.trim();
     if (!_uuid.hasMatch(id)) return; // device-only ids (push_…) are not sent
     final guestId = AppState.instance.deviceId;
+    final content = notificationContentId(payload);
     int? status;
     try {
       final r = await _dio.post(
@@ -216,6 +246,7 @@ class AnalyticsQueue with WidgetsBindingObserver {
         data: {
           'event_type': 'notification_opened',
           'notification_id': id,
+          if (content != null) content.key: content.value,
           if (guestId.isNotEmpty) 'guest_id': guestId,
           'session_id': _sessionId,
           'device_type': ApiService.deviceType,
@@ -229,14 +260,38 @@ class AnalyticsQueue with WidgetsBindingObserver {
     final retry = status == null || status >= 500 || status == 429;
     if (retry && attempt < retryDelays.length && timersEnabled) {
       Timer(retryDelays[attempt],
-          () => unawaited(notificationOpened(id, attempt: attempt + 1)));
+          () => unawaited(notificationOpened(id,
+              payload: payload, attempt: attempt + 1)));
     }
   }
 
-  /// Older call sites (feed refresh, category chips): not content events,
-  /// so the backend has nothing to record them as — kept as a no-op.
+  /// The story a notification is about, as the analytics id field:
+  /// `submission_id` for UGC, `article_id` otherwise. UUIDs only.
+  @visibleForTesting
+  static MapEntry<String, String>? notificationContentId(
+      Map<String, dynamic>? payload) {
+    if (payload == null) return null;
+    final id = (payload['content_id'] ?? '').toString().trim();
+    if (!_uuid.hasMatch(id)) return null;
+    final type = (payload['content_type'] ?? '').toString().toLowerCase();
+    if (type == 'ugc') return MapEntry('submission_id', id);
+    if (const {'article', 'news', 'breaking', ''}.contains(type)) {
+      return MapEntry('article_id', id);
+    }
+    return null; // posters, polls, videos: not article analytics
+  }
+
+  /// An app-level event ([appEvents]: search_query, feed_refresh), not
+  /// about one story. Anything else is ignored.
   Future<void> track(String eventType,
-      {Map<String, dynamic> metadata = const {}}) async {}
+      {Map<String, dynamic> metadata = const {}}) async {
+    if (!appEvents.contains(eventType)) return;
+    await _enqueue({
+      ..._base(eventType),
+      'occurred_at': DateTime.now().toUtc().toIso8601String(),
+      'metadata': metadata,
+    });
+  }
 
   /// Off in widget tests: a pending timer at the end of a test fails it.
   @visibleForTesting

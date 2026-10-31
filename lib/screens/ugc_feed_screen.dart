@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import '../core/ads/ad_insertion.dart';
+import '../core/ads/ad_placement.dart';
+import '../core/ads/zone_ads.dart';
+import '../models/ad_banner.dart';
 import '../models/news_article.dart';
+import '../widgets/ads/unified_ad_widget.dart';
 import '../state/app_state.dart';
 import '../widgets/article_media_carousel.dart';
 import '../localization/app_translations.dart';
@@ -37,11 +42,23 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
   bool _hasMore = true;
   final ScrollController _scrollController = ScrollController();
 
+  /// `ugc_feed` zone ads, placed between posts.
+  List<AdBanner> _zoneAds = const [];
+
+  Future<void> _loadZoneAds() async {
+    final generation = _generation;
+    final ads = await ZoneAds.load(AdPlacement.ugcFeed);
+    if (mounted && generation == _generation) {
+      setState(() => _zoneAds = ads);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _locationKey = _currentLocationKey;
     AppState.instance.addListener(_onLocationChanged);
+    _loadZoneAds();
     _loadMore();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
@@ -99,6 +116,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
       _cursor = null;
       _hasMore = true;
     });
+    _loadZoneAds();
     await _loadMore();
   }
 
@@ -111,6 +129,13 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // At least 5 posts apart.
+    final adAfter = adSlotsAfter<NewsArticle>(
+      contentItems: _reports,
+      eligibleAds: _zoneAds,
+      placementZone: AdPlacement.ugcFeed,
+      policy: AdFrequencyPolicy.ugcFeed,
+    );
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -194,7 +219,23 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
                         );
                       }
                       final report = _reports[index];
-                      return _UgcReportCard(report: report);
+                      final ad = adAfter[index];
+                      if (ad == null) return _UgcReportCard(report: report);
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _UgcReportCard(report: report),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                            child: UnifiedAdWidget(
+                              key: ValueKey('ugc_ad_${ad.id}_$index'),
+                              ad: ad,
+                              placementZone: AdPlacement.ugcFeed,
+                              exposureKey: 'ugc_feed_${ad.id}_$index',
+                            ),
+                          ),
+                        ],
+                      );
                     },
                   ),
       ),

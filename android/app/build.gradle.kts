@@ -19,7 +19,9 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.vaaradhi.vaaradhi"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned: Play requires target API 36 (Android 16) from 1 Nov 2026.
+    // Release 22 was built with an older Flutter whose default was 35.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -37,7 +39,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -71,6 +73,12 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
+            // Native debug symbols in the bundle, so Play Console can
+            // symbolicate native crashes and does not warn about missing
+            // symbols.
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -91,6 +99,8 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // WindowCompat (edge-to-edge) in MainActivity.
+    implementation("androidx.core:core-ktx:1.13.1")
     // Video download: stamps the Vaaradhi logo on the video (VideoWatermarker).
     // Same Media3 version video_player_android uses.
     implementation("androidx.media3:media3-transformer:1.9.2")

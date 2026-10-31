@@ -53,4 +53,12 @@ void main() {
     expect(page.slug, CmsSlugs.contact);
     await done(tester);
   });
+
+  testWidgets('Contact Us appears once, not twice', (tester) async {
+    await pump(tester);
+    expect(find.byKey(const Key('profile_contact_us_top')), findsOneWidget);
+    expect(find.byKey(const Key('profile_contact_us')), findsNothing,
+        reason: 'the duplicate row under About is gone');
+    await done(tester);
+  });
 }

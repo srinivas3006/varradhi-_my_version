@@ -367,21 +367,8 @@ class _ProfileTabState extends State<ProfileTab>
                           MaterialPageRoute(
                               builder: (_) => const TermsScreen())),
                     ),
-                    _buildListTile(
-                      key: const Key('profile_contact_us'),
-                      isDark: isDark,
-                      icon: Icons.support_agent_rounded,
-                      title: tr('contact_us'),
-                      trailing: Icon(Icons.arrow_forward_ios_rounded,
-                          color: isDark ? Colors.white38 : Colors.black26,
-                          size: 16),
-                      onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => CMSPageScreen(
-                                  slug: CmsSlugs.contact,
-                                  initialTitle: tr('contact_us')))),
-                    ),
+                    // Contact Us is the card at the top of Profile only
+                    // (one entry, where Play reviewers look first).
                     // Account deletion request (Play policy: an in-app path
                     // to delete the account). Logged-in readers only.
                     if (state.isLoggedIn)

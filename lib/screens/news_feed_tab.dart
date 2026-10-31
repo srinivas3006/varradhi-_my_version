@@ -16,6 +16,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/ad_banner.dart';
 import '../widgets/ads/unified_ad_widget.dart';
 import '../widgets/ads/rotating_breaking_strip.dart';
+import '../widgets/ads/home_top_ad_strip.dart';
+import '../core/ads/ad_placement.dart';
+import '../core/ads/zone_ads.dart';
 import '../services/ad_delivery_service.dart';
 import '../services/ad_manager.dart';
 import '../repositories/ad_repository.dart';
@@ -91,6 +94,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// The ticker strip's own pool. It holds a fixed place above the feed and
   /// rotates through these, so they are kept out of the in-feed ad pool.
   List<AdBanner> get _breakingStripAds => HomeAds.breakingStrip(_feedAds);
+
+  /// The `home_top` ad of this Home load (one; the next load shows the next
+  /// eligible one). Null when the zone has none or the reader closed it.
+  AdBanner? _homeTopAd;
+  static int _homeTopRotation = 0;
+
+  /// A strip sits under the app bar: home_top's, else the breaking strip.
+  bool get _topStripShown => _homeTopAd != null || _breakingStripAds.isNotEmpty;
   Map<String, dynamic>? _dailyQuote;
   String? get _feedLang => AppState.instance.contentLanguage;
   bool _isProgressivelyHydrated = false;
@@ -326,6 +337,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// The non-news widgets, in parallel. Each hides itself on failure.
   void _loadWidgets(int generation, {bool forceRefresh = false}) {
     _loadFeedAds(generation, forceRefresh: forceRefresh);
+    _loadHomeTopAd(generation);
     _loadPoll(generation);
     _loadPosters(generation);
     _loadHomeVideos(generation);
@@ -398,6 +410,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         setState(() => _posters = posters);
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadHomeTopAd(int generation) async {
+    final ads = await ZoneAds.load(AdPlacement.homeTop);
+    if (!mounted || generation != _generation) return;
+    setState(() =>
+        _homeTopAd = ads.isEmpty ? null : ads[_homeTopRotation++ % ads.length]);
   }
 
   /// The one `/ads/` request of this Home load. Inline slots, the breaking
@@ -2135,7 +2154,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                       // below it (and below the breaking strip when shown);
                       // from the very top it appeared hidden behind the header.
                       edgeOffset: MediaQuery.of(context).padding.top +
-                          (_breakingStripAds.isNotEmpty ? 118 : 68),
+                          (_topStripShown ? 118 : 68),
                       displacement: 32,
                       child: NotificationListener<ScrollNotification>(
                         onNotification: (ScrollNotification scrollInfo) {
@@ -2187,7 +2206,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                 SliverPadding(
                                   padding: EdgeInsets.only(
                                     top: MediaQuery.of(context).padding.top +
-                                        (_breakingStripAds.isNotEmpty
+                                        (_topStripShown
                                             ? 120
                                             : 70), // Space for floating app bar & breaking strip
                                   ),
@@ -2335,7 +2354,13 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _buildTopAppBar(),
-                    if (_breakingStripAds.isNotEmpty)
+                    if (_homeTopAd != null)
+                      HomeTopAdStrip(
+                        key: ValueKey('home_top_${_homeTopAd!.id}'),
+                        ad: _homeTopAd!,
+                        onClose: () => setState(() => _homeTopAd = null),
+                      )
+                    else if (_breakingStripAds.isNotEmpty)
                       RotatingBreakingStrip(
                         ads: _breakingStripAds,
                         placementZone: 'feed',

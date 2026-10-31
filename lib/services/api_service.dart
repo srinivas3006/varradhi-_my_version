@@ -2,7 +2,8 @@ import 'dart:async';
 import '../repositories/ad_repository.dart';
 import '../core/ads/ad_placement.dart';
 import 'dart:io' show File, Platform;
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, kIsWeb, visibleForTesting;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:dio/dio.dart';
 import '../models/api_response.dart';
@@ -79,12 +80,13 @@ class ApiService {
       }
     }
 
-    // 2. If installation_secret is missing, ensure guest registration is performed first
-    // so backend generates and returns installation_secret before logging in.
+    // 2. No installation credential on this phone: obtain one before logging
+    // in (guest registration, or a fresh installation if this device is
+    // already registered and its credential was lost).
     if (AppState.instance.installationSecret == null ||
         AppState.instance.installationSecret!.isEmpty) {
       try {
-        await registerGuestDevice(fcmToken: token);
+        token = await recoverInstallation(token);
       } catch (e) {
         debugPrint(
             '[ApiService] Pre-login guest registration attempt failed: $e');
@@ -131,8 +133,7 @@ class ApiService {
           respStr.toLowerCase().contains('installation');
 
       if (isInstallationError) {
-        await AppState.instance.regenerateDeviceId();
-        await registerGuestDevice(fcmToken: token);
+        token = await recoverInstallation(token);
 
         final retryResponse =
             await _dio.post('/api/v1/auth/login/', data: buildPayload());
@@ -145,6 +146,52 @@ class ApiService {
         return data;
       }
       rethrow;
+    }
+  }
+
+  /// Gets this phone a valid installation credential, and returns the FCM
+  /// token now in use.
+  ///
+  /// First the same device re-registers as a guest. If the backend refuses
+  /// (it already knows this device_id and the credential on the phone was
+  /// lost — "Installation credential required."), the phone starts a fresh
+  /// installation: a new device_id and a new FCM token (the backend will
+  /// not take the old token under a new id), then registers again. Without
+  /// this step that reader could never log in on this phone again.
+  @visibleForTesting
+  Future<String?> recoverInstallation(String? token) async {
+    final first = await registerGuestDevice(fcmToken: token);
+    final secret = AppState.instance.installationSecret;
+    if (first != null && secret != null && secret.isNotEmpty) return token;
+
+    debugPrint('[ApiService] Installation credential lost: '
+        'starting a fresh installation');
+    await AppState.instance.startNewInstallation();
+    final fresh = await _freshFcmToken() ?? token;
+    await registerGuestDevice(fcmToken: fresh);
+    return fresh;
+  }
+
+  /// A new FCM token (the old one deleted). Replaceable in tests.
+  @visibleForTesting
+  static Future<String?> Function()? fcmTokenRefresher;
+
+  Future<String?> _freshFcmToken() async {
+    final refresher = fcmTokenRefresher;
+    if (refresher != null) return refresher();
+    if (kIsWeb) return null;
+    try {
+      await FirebaseMessaging.instance
+          .deleteToken()
+          .timeout(const Duration(seconds: 10));
+      final t = await FirebaseMessaging.instance
+          .getToken()
+          .timeout(const Duration(seconds: 10));
+      if (t != null && t.isNotEmpty) AppState.instance.fcmToken = t;
+      return t;
+    } catch (e) {
+      debugPrint('[ApiService] Could not get a fresh FCM token: $e');
+      return null;
     }
   }
 
@@ -771,6 +818,34 @@ class ApiService {
       return (response.data['data'] as List?) ?? [];
     } catch (_) {
       return [];
+    }
+  }
+
+  /// `GET /api/v1/locations/nearest/?lat=&lng=` — the mapped village
+  /// closest to a GPS fix, with its mandal, district and state. Null when
+  /// none is mapped within [maxDistanceKm] (404) or the call fails.
+  ///
+  /// Kept to 5 km: only villages with coordinates take part, and many have
+  /// none yet (Oct 2026: 0 of 15 in Jajireddygudem mandal), so a wider
+  /// radius offered a village in another district — 16 km away — as the
+  /// reader's own. Villages are a few km apart; beyond 5 km the name
+  /// matching is the better guess.
+  Future<Map<String, dynamic>?> getNearestLocation(
+    double lat,
+    double lng, {
+    double maxDistanceKm = 5,
+  }) async {
+    try {
+      final response =
+          await _dio.get('/api/v1/locations/nearest/', queryParameters: {
+        'lat': lat.toStringAsFixed(6),
+        'lng': lng.toStringAsFixed(6),
+        'max_distance_km': maxDistanceKm,
+      });
+      final data = response.data is Map ? response.data['data'] : null;
+      return data is Map ? Map<String, dynamic>.from(data) : null;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1419,27 +1494,80 @@ class ApiService {
         : ApiResponse.success(r.results);
   }
 
-  /// `GET /api/v1/search/` → results, suggestions (for zero results),
-  /// filters and cache_ttl_seconds.
+  /// `GET /api/v1/search/` — universal, multilingual search: grouped
+  /// `sections` plus the legacy article `results` (see [SearchResult]).
+  ///
+  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it).
+  /// A 401 after the token refresh has already been tried (and failed, so
+  /// the reader is now signed out) is retried once as a guest — search
+  /// works without login. [cancelToken] drops a request the reader has
+  /// already typed past.
   Future<SearchResult> search(
     String query, {
     String? lang,
     String? category,
+    CancelToken? cancelToken,
   }) async {
-    try {
-      final response = await _dio.get('/api/v1/search/', queryParameters: {
-        'q': query,
-        if (lang != null) 'lang': lang,
-        if (category != null) 'category': category,
-      });
-      return SearchResult.parse(response.data);
-    } catch (e) {
-      return SearchResult(
-        results: const [],
-        suggestions: const [],
-        error: e is AppException ? e.message : e.toString(),
-      );
+    final q = query.trim();
+    if (q.isEmpty) {
+      return const SearchResult(results: [], suggestions: []);
     }
+    for (var attempt = 0;; attempt++) {
+      try {
+        final response = await _dio.get(
+          '/api/v1/search/',
+          queryParameters: {
+            'q': q,
+            // `lang`, not `language` (backend confirmation, Oct 2026). No
+            // page / page_size: the search API ignores them.
+            if (lang != null && lang.isNotEmpty) 'lang': lang,
+            if (category != null && category.isNotEmpty) 'category': category,
+          },
+          cancelToken: cancelToken,
+        );
+        return SearchResult.parse(response.data);
+      } catch (e) {
+        final status = _statusOf(e);
+        if (status == 401 && attempt == 0) continue;
+        return SearchResult(
+          results: const [],
+          suggestions: const [],
+          error: _backendMessage(e) ?? e.toString(),
+          errorKind: SearchResult.errorKindFor(status),
+        );
+      }
+    }
+  }
+
+  /// HTTP status of a failed call, through the client's error mapping.
+  static int? _statusOf(Object e) {
+    if (e is DioException) {
+      return e.response?.statusCode ??
+          (e.error is AppException
+              ? (e.error as AppException).statusCode
+              : null);
+    }
+    return e is AppException ? e.statusCode : null;
+  }
+
+  /// The backend's own message: `errors`, `errors.detail` or a field error.
+  static String? _backendMessage(Object e) {
+    final data = e is DioException ? e.response?.data : null;
+    if (data is Map && data['errors'] != null) {
+      final errors = data['errors'];
+      if (errors is String && errors.isNotEmpty) return errors;
+      if (errors is Map) {
+        for (final key in ['message', 'detail']) {
+          final v = errors[key];
+          if (v != null && v.toString().isNotEmpty) return v.toString();
+        }
+        for (final v in errors.values) {
+          if (v is List && v.isNotEmpty) return v.first.toString();
+          if (v is String && v.isNotEmpty) return v;
+        }
+      }
+    }
+    return null;
   }
 
   Future<List<String>> getTrendingSearches() async {
@@ -2157,19 +2285,35 @@ class ApiService {
   }
 
   // --- Notifications ---
+  /// GET /api/v1/notifications/inbox/ — cursor-paginated, flat rows
+  /// (`id` is the inbox row id, `notification_id` the common one). Follows
+  /// `next` for a few pages; the inbox keeps the newest 60 anyway.
   Future<List<AppNotification>> getNotifications({bool? unread}) async {
     final Map<String, dynamic> params = {};
     if (unread != null) params['unread'] = unread;
+    final items = <AppNotification>[];
+    final seen = <String>{};
+    final visited = <String>{};
     try {
-      final response = await _dio.get('/api/v1/notifications/inbox/',
-          queryParameters: params);
-      final List data = response.data['data'] as List? ?? [];
-      return data
-          .map((json) => AppNotification.fromJson(json as Map<String, dynamic>))
-          .toList();
+      String? next;
+      var pages = 0;
+      do {
+        final response = next == null
+            ? await _dio.get('/api/v1/notifications/inbox/',
+                queryParameters: params)
+            : await _dio.get(next);
+        for (final row in _extractBookmarkList(response.data)) {
+          if (row is! Map) continue;
+          final n = AppNotification.fromJson(Map<String, dynamic>.from(row));
+          if (n.id.isNotEmpty && seen.add(n.id)) items.add(n);
+        }
+        next = _extractBookmarkNext(response.data);
+        pages++;
+      } while (next != null && visited.add(next) && pages < 3);
     } catch (_) {
-      return [];
+      // Keep what loaded; nothing on a failure.
     }
+    return items;
   }
 
   Future<int> getUnreadNotificationCount() async {

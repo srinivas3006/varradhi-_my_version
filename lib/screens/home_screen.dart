@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/navigation/app_navigator.dart';
@@ -8,6 +9,7 @@ import 'create_post_screen.dart';
 import 'news_feed_tab.dart';
 import '../features/reels/reels_screen.dart';
 import 'spotlight_screen.dart';
+import '../services/app_update_service.dart';
 import '../services/notification_service.dart';
 import '../state/app_state.dart';
 
@@ -52,6 +54,19 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) _openSpotlight(isLocal: false);
       });
     }
+
+    // A newer version on Play: offer it, once the first screen has settled.
+    _updateCheckTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) AppUpdateService.instance.checkAndPrompt(context);
+    });
+  }
+
+  Timer? _updateCheckTimer;
+
+  @override
+  void dispose() {
+    _updateCheckTimer?.cancel();
+    super.dispose();
   }
 
   void _handleBack(bool didPop) {
