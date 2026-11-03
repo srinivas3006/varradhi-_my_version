@@ -136,9 +136,9 @@ void main() {
                   '(${f.path})');
         }
       }
-      // The one deleteToken in the app (recovering a lost installation
-      // credential at login) fetches a new token straight away, so the
-      // device never ends up without one.
+      // Recovering a lost installation credential at login fetches a new
+      // token straight away. The only other deleteToken is dropFcmToken, for
+      // a reader who turned notifications off.
       final api = File('lib/services/api_service.dart').readAsStringSync();
       final at = api.indexOf('deleteToken(');
       expect(at, isNot(-1));

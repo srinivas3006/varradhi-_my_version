@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../core/navigation/auth_guard.dart';
+import '../services/notification_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../core/utils/indian_mobile.dart';
@@ -273,8 +274,8 @@ class _ProfileTabState extends State<ProfileTab>
                       trailing: GestureDetector(
                         onTap: () {
                           HapticFeedback.selectionClick();
-                          state.togglePushNotifications(
-                              !state.pushNotificationsEnabled);
+                          NotificationService.instance
+                              .setPushEnabled(!state.pushNotificationsEnabled);
                         },
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),

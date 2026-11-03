@@ -68,8 +68,10 @@ class ApiService {
       {String? fcmToken}) async {
     var token = fcmToken ?? AppState.instance.fcmToken;
 
-    // 1. Resolve FCM token if not yet cached in AppState
-    if (token == null || token.isEmpty) {
+    // 1. Resolve FCM token if not yet cached in AppState. Not while the reader
+    // has notifications off: a new token would bring pushes back.
+    if ((token == null || token.isEmpty) &&
+        AppState.instance.pushNotificationsEnabled) {
       if (!kIsWeb) {
         try {
           token = await FirebaseMessaging.instance.getToken();
@@ -100,7 +102,10 @@ class ApiService {
           'device_name': 'Mobile Device',
           'device_type': deviceType,
           'app_version': '1.0.0',
-          if (token != null && token.isNotEmpty) 'fcm_token': token,
+          if (AppState.instance.pushNotificationsEnabled &&
+              token != null &&
+              token.isNotEmpty)
+            'fcm_token': token,
           if (AppState.instance.installationSecret != null &&
               AppState.instance.installationSecret!.isNotEmpty)
             'installation_secret': AppState.instance.installationSecret,
@@ -160,7 +165,8 @@ class ApiService {
   /// this step that reader could never log in on this phone again.
   @visibleForTesting
   Future<String?> recoverInstallation(String? token) async {
-    final first = await registerGuestDevice(fcmToken: token);
+    final first =
+        await registerGuestDevice(fcmToken: token, forCredential: true);
     final secret = AppState.instance.installationSecret;
     if (first != null && secret != null && secret.isNotEmpty) return token;
 
@@ -168,7 +174,7 @@ class ApiService {
         'starting a fresh installation');
     await AppState.instance.startNewInstallation();
     final fresh = await _freshFcmToken() ?? token;
-    await registerGuestDevice(fcmToken: fresh);
+    await registerGuestDevice(fcmToken: fresh, forCredential: true);
     return fresh;
   }
 
@@ -195,12 +201,56 @@ class ApiService {
     }
   }
 
+  /// Replaceable in tests.
+  @visibleForTesting
+  static Future<void> Function()? fcmTokenDropper;
+
+  /// Removes this phone's FCM token: with notifications off nothing can reach
+  /// it, including the pushes Android shows by itself while the app is closed.
+  Future<void> dropFcmToken() async {
+    AppState.instance.fcmToken = null;
+    final dropper = fcmTokenDropper;
+    if (dropper != null) return dropper();
+    if (kIsWeb) return;
+    try {
+      await FirebaseMessaging.instance
+          .deleteToken()
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      // Tried again at the next app start.
+      debugPrint('[ApiService] Could not remove the FCM token: $e');
+    }
+  }
+
   /// 1. APK Guest Notification Flow: POST /api/v1/notifications/guest-device/
+  ///
+  /// With notifications off, a device that already has its installation
+  /// credential does not register. Registration needs an FCM token, so when
+  /// the credential is what is missing ([forCredential], or none on the
+  /// phone) it still goes ahead, and the token is removed again afterwards.
   Future<Map<String, dynamic>?> registerGuestDevice({
     String? deviceId,
     String? fcmToken,
     String? installationSecret,
+    bool forCredential = false,
   }) async {
+    if (AppState.instance.pushNotificationsEnabled) {
+      return _postGuestDevice(deviceId, fcmToken, installationSecret);
+    }
+    final secret = installationSecret ?? AppState.instance.installationSecret;
+    if (!forCredential && secret != null && secret.isNotEmpty) return null;
+    try {
+      return await _postGuestDevice(deviceId, fcmToken, installationSecret);
+    } finally {
+      await dropFcmToken();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _postGuestDevice(
+    String? deviceId,
+    String? fcmToken,
+    String? installationSecret,
+  ) async {
     final devId = deviceId ?? AppState.instance.deviceId;
     var token = fcmToken ?? AppState.instance.fcmToken;
     final secret = installationSecret ?? AppState.instance.installationSecret;
@@ -235,7 +285,7 @@ class ApiService {
         'village': AppState.instance.village,
         'country': AppState.instance.country,
         'preferences': {
-          'enabled': true,
+          'enabled': AppState.instance.pushNotificationsEnabled,
           'content_language': lang,
           'articles': true,
           'posters': true,
@@ -246,8 +296,7 @@ class ApiService {
           'quiet_hours_start': '22:00:00',
           'quiet_hours_end': '06:00:00',
           'timezone': 'Asia/Kolkata',
-          'max_per_hour': 5,
-          'max_per_day': 25,
+          // No max_per_hour / max_per_day: the backend's defaults decide.
         },
       });
 
@@ -283,6 +332,7 @@ class ApiService {
     try {
       final response =
           await _dio.post('/api/v1/notifications/device-token/', data: {
+    if (!AppState.instance.pushNotificationsEnabled) return null;
         if (sessId != null && sessId.isNotEmpty) 'session_id': sessId,
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,

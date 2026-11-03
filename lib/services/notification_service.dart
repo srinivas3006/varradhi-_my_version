@@ -96,6 +96,60 @@ class NotificationService {
     enableVibration: false,
   );
 
+  Future<void> _pushChange = Future<void>.value();
+
+  /// The reader's on/off for all notifications on this phone, with or without
+  /// an account. Off removes the FCM token, because the app cannot hide a push
+  /// Android shows by itself while the app is closed; on gets a new one and
+  /// registers it. [syncAccount] also tells the backend, for a logged-in
+  /// reader, unless the caller is saving the preferences itself.
+  Future<void> setPushEnabled(bool enabled, {bool syncAccount = true}) {
+    AppState.instance.togglePushNotifications(enabled);
+    // In order: off then on again must not end with the new token removed.
+    _pushChange = _pushChange.then((_) => _applyPushSetting(tellBackend: true));
+    if (syncAccount && AppState.instance.isLoggedIn) {
+      unawaited(ApiService.instance
+          .updateNotificationPreferences({'enabled': enabled}));
+    }
+    return _pushChange;
+  }
+
+  /// Brings the phone in line with the current setting. [tellBackend]: the
+  /// reader just turned it off. A guest's preferences live in the device
+  /// registration, so it goes with `enabled: false` while the token still
+  /// identifies the device; a logged-in reader's go through [setPushEnabled].
+  Future<void> _applyPushSetting({bool tellBackend = false}) async {
+    if (kIsWeb) return;
+    final enabled = AppState.instance.pushNotificationsEnabled;
+    try {
+      final currentToken = AppState.instance.fcmToken;
+      if (!enabled &&
+          tellBackend &&
+          !AppState.instance.isLoggedIn &&
+          (currentToken?.isNotEmpty ?? false)) {
+        await ApiService.instance
+            .registerGuestDevice(fcmToken: currentToken, forCredential: true);
+      }
+      final messaging = FirebaseMessaging.instance;
+      // Otherwise FCM makes itself a new token at the next start.
+      await messaging.setAutoInitEnabled(enabled);
+      if (!enabled) {
+        await ApiService.instance.dropFcmToken();
+        return;
+      }
+      final token =
+          await messaging.getToken().timeout(const Duration(seconds: 10));
+      if (token != null && token.isNotEmpty) {
+        AppState.instance.fcmToken = token;
+        await ApiService.instance.updateFcmToken(token);
+      }
+      // Turned on before the app ever asked for the permission.
+      unawaited(requestPermissionAfterArticlesLoaded());
+    } catch (e) {
+      debugPrint('[Notifications] applying the on/off setting failed: $e');
+    }
+  }
+
   /// Creates the channel and wires taps on locally-shown notifications.
   Future<void> _initLocalNotifications() async {
     await _localNotifications.initialize(
@@ -300,12 +354,18 @@ class NotificationService {
         debugPrint('[Notifications] could not read initial message: $e');
       }));
 
+      // Notifications off: no token. Removed again in case the network was
+      // down when the reader turned them off.
+      if (!AppState.instance.pushNotificationsEnabled) {
+        unawaited(_applyPushSetting());
+      }
       // Acquire early FCM token so guest registration and login can send it immediately
       try {
         // Known to hang without network or Play Services. A missing token is
         // recoverable — onTokenRefresh below still delivers one later.
-        final token =
-            await messaging.getToken().timeout(const Duration(seconds: 3));
+        final token = AppState.instance.pushNotificationsEnabled
+            ? await messaging.getToken().timeout(const Duration(seconds: 3))
+            : null;
         if (kDebugMode) {
           debugPrint('[Notifications] token acquired: ${token != null}');
         }
@@ -342,6 +402,7 @@ class NotificationService {
 
       // 1. Listen to token refreshes
       messaging.onTokenRefresh.listen((newToken) {
+        if (!AppState.instance.pushNotificationsEnabled) return;
         if (kDebugMode) {
           debugPrint('[Notifications] token refreshed, re-registering');
         }
@@ -364,6 +425,9 @@ class NotificationService {
               'notification=${message.notification != null} '
               'dataKeys=${message.data.keys.toList()}');
         }
+        // Turned off: one still on its way when the token was removed.
+        if (!AppState.instance.pushNotificationsEnabled) return;
+
         final data = message.data;
 
         // Validate before anything else: a push with neither a real title
@@ -408,6 +472,7 @@ class NotificationService {
             NotificationDeepLinkResolver.resolveFromPayload(data);
         if (pushTarget.type == NotificationTargetType.ugc) {
           unawaited(AppState.instance.refreshReporterDashboard());
+          UgcFeedFreshness.notifyPublished();
         }
 
         // One small line at the top — title only, ~3 s, tap opens, swipe up
@@ -430,7 +495,7 @@ class NotificationService {
   /// Prompts notification permission ONLY AFTER the user is viewing articles.
   /// Persists permission request status to avoid showing repeated prompts across app launches.
   Future<void> requestPermissionAfterArticlesLoaded() async {
-    if (kIsWeb) return;
+    if (kIsWeb || !AppState.instance.pushNotificationsEnabled) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -472,7 +537,6 @@ class NotificationService {
         debugPrint(
             '[Notifications] DENIED — no push will arrive on this device');
       }
-          UgcFeedFreshness.notifyPublished();
 
       final token = await messaging.getToken();
       debugPrint('[Notifications] token after permission: ${token != null}');
@@ -500,14 +564,13 @@ class NotificationService {
 
   /// Called after user logout to re-register the device as a guest device.
   Future<void> registerAsGuest() async {
-    final token = AppState.instance.fcmToken;
-    if (token != null && token.isNotEmpty) {
-      await ApiService.instance.registerGuestDevice(
-        deviceId: AppState.instance.deviceId,
-        fcmToken: token,
-        installationSecret: AppState.instance.installationSecret,
-      );
-    }
+    // With no token yet, registerGuestDevice gets one: a device missing from
+    // the backend's sessions cannot receive pushes.
+    await ApiService.instance.registerGuestDevice(
+      deviceId: AppState.instance.deviceId,
+      fcmToken: AppState.instance.fcmToken,
+      installationSecret: AppState.instance.installationSecret,
+    );
   }
 
   /// Entry point for parsing and dispatching notification payloads.
@@ -890,6 +953,7 @@ class NotificationService {
 
         case NotificationTargetType.ugc:
           unawaited(AppState.instance.refreshReporterDashboard());
+          UgcFeedFreshness.notifyPublished();
           if (target.screenName == 'dashboard') {
             _openRoute(
               navContext,
@@ -953,7 +1017,6 @@ class NotificationService {
                 // rather than opening an empty story page.
                 _showLoadFailure(navContext, e,
                     retry: () => navigateToTarget(target));
-          UgcFeedFreshness.notifyPublished();
               }
             }
           } else {
