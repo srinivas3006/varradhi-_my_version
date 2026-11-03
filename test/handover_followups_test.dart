@@ -207,32 +207,21 @@ void main() {
     });
   });
 
-  group('push target preview before approve (handover §15)', () {
-    AdminUgcSubmissionModel submission() => AdminUgcSubmissionModel.fromJson({
-          'id': 's1',
-          'title': 'Road repair',
-          'state': 'Telangana',
-          'district': 'Suryapet',
-        });
-
-    testWidgets('warnings require explicit confirmation', (tester) async {
-      var approved = false;
-      Map<String, dynamic>? sentPreview;
+  group('approving sends no push of its own', () {
+    testWidgets('approve only: no switch, one call', (tester) async {
+      var approved = 0;
       await tester.pumpWidget(MaterialApp(
         home: Builder(
           builder: (context) => TextButton(
             onPressed: () => showAdminApprovalDialog(
               context,
-              submission: submission(),
-              onApprove: (_, __, ___) async => approved = true,
-              onPreview: (req) async {
-                sentPreview = req;
-                return {
-                  'target_count': 1200,
-                  'target_scope': 'district',
-                  'warnings': ['Large audience'],
-                };
-              },
+              submission: AdminUgcSubmissionModel.fromJson({
+                'id': 's1',
+                'title': 'Road repair',
+                'state': 'Telangana',
+                'district': 'Suryapet',
+              }),
+              onApprove: (_, __) async => approved++,
             ),
             child: const Text('open'),
           ),
@@ -240,55 +229,18 @@ void main() {
       ));
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
-
-      await tester.tap(find.byType(Switch));
-      await tester.pumpAndSettle();
-
-      expect(sentPreview?['district'], 'Suryapet');
-      expect(find.textContaining('1200'), findsOneWidget);
-      expect(find.text('Large audience'), findsOneWidget);
-
-      ElevatedButton approve() => tester.widget<ElevatedButton>(
-          find.byKey(const Key('admin_approve_submit')));
-      expect(approve().onPressed, isNull, reason: 'blocked until confirmed');
-
-      await tester.ensureVisible(find.byKey(const Key('admin_push_confirm')));
-      await tester.tap(find.byKey(const Key('admin_push_confirm')));
-      await tester.pumpAndSettle();
-      expect(approve().onPressed, isNotNull);
+      expect(find.byType(Switch), findsNothing);
 
       await tester.tap(find.byKey(const Key('admin_approve_submit')));
       await tester.pumpAndSettle();
-      expect(approved, isTrue);
+      expect(approved, 1);
     });
 
-    testWidgets('no push → no preview, approve works directly', (tester) async {
-      var previews = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Builder(
-          builder: (context) => TextButton(
-            onPressed: () => showAdminApprovalDialog(
-              context,
-              submission: submission(),
-              onApprove: (_, __, ___) async {},
-              onPreview: (_) async {
-                previews++;
-                return {};
-              },
-            ),
-            child: const Text('open'),
-          ),
-        ),
-      ));
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      expect(previews, 0);
-      expect(
-          tester
-              .widget<ElevatedButton>(
-                  find.byKey(const Key('admin_approve_submit')))
-              .onPressed,
-          isNotNull);
+    test('the approve request cannot carry a push', () {
+      final src = File('lib/features/admin/data/services/'
+              'admin_ugc_api_service.dart')
+          .readAsStringSync();
+      expect(src, isNot(contains('push_notification')));
     });
   });
 

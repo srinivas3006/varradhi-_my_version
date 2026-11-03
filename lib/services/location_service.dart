@@ -74,9 +74,9 @@ class CanonicalLocationMatch {
         latitude: detected.latitude,
         longitude: detected.longitude,
         accuracyMeters: detected.accuracyMeters,
-        city: village.isNotEmpty
-            ? village
-            : (subdistrict.isNotEmpty ? subdistrict : district),
+        // The location database has no city level; a district, mandal or
+        // village is not sent as one.
+        city: '',
         district: district,
         state: state,
         country: detected.country,
@@ -418,7 +418,7 @@ class LocationService {
         country = place.country ?? 'India';
         district =
             (rawDistrict != null && rawDistrict.isNotEmpty) ? rawDistrict : '';
-        city = (rawCity != null && rawCity.isNotEmpty) ? rawCity : district;
+        city = (rawCity != null && rawCity.isNotEmpty) ? rawCity : '';
         // Android geocoders commonly expose a village or neighbourhood as
         // subLocality. A road/thoroughfare must never be treated as a village.
         village =

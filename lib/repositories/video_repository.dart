@@ -83,9 +83,11 @@ class VideoRepository {
     String? scope,
   }) async {
     final effectiveLang = lang ?? AppState.instance.contentLanguage;
+    final place = AppState.instance.feedPlace;
+    final feedCity = AppState.instance.feedCity;
     final key = 'videos:$effectiveLang:${scope ?? "all"}:'
-        '${AppState.instance.stateName}:${AppState.instance.district}:'
-        '${AppState.instance.city}:${AppState.instance.subdistrict}:${AppState.instance.village}';
+        '${place.state}:${place.district}:'
+        '$feedCity:${place.subdistrict}:${place.village}';
 
     try {
       final response = await ApiService.instance.getVideoFeed(
@@ -93,11 +95,11 @@ class VideoRepository {
         pageSize: pageSize,
         lang: effectiveLang,
         scope: scope,
-        state: AppState.instance.stateName,
-        district: AppState.instance.district,
-        city: AppState.instance.city,
-        subdistrict: AppState.instance.subdistrict,
-        village: AppState.instance.village,
+        state: place.state,
+        district: place.district,
+        city: feedCity,
+        subdistrict: place.subdistrict,
+        village: place.village,
       );
 
       if (response.hasErrors) {

@@ -212,11 +212,11 @@ class SpotlightController extends ChangeNotifier {
       // With no place chosen, main sends none (broad feed) rather than the
       // placeholder state.
       final place = app.feedPlace;
-      final selectedState = isLocal ? app.stateName : place.state;
-      final district = isLocal ? app.district : place.district;
-      final city = isLocal || app.hasValidLocation ? app.city : '';
-      final subdistrict = isLocal ? app.subdistrict : place.subdistrict;
-      final village = isLocal ? app.village : place.village;
+      final selectedState = place.state;
+      final district = place.district;
+      final city = app.feedCity;
+      final subdistrict = place.subdistrict;
+      final village = place.village;
       final scope = isLocal ? 'local' : 'main';
       final currentArticles = _state.feed
           .map((item) => item.article)

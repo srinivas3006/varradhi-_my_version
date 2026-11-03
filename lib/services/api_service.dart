@@ -269,6 +269,7 @@ class ApiService {
     if (token == null || token.isEmpty) return null;
 
     final lang = AppState.instance.language == 'English' ? 'en' : 'te';
+    final place = AppState.instance.feedPlace;
 
     try {
       final response =
@@ -279,10 +280,14 @@ class ApiService {
         'app_version': '1.0.0',
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
-        'state': AppState.instance.stateName,
-        'district': AppState.instance.district,
-        'subdistrict': AppState.instance.subdistrict,
-        'village': AppState.instance.village,
+        // Only a place the reader really has: the starting Telangana /
+        // Hyderabad would match them to Hyderabad's local notifications.
+        if (place.state.isNotEmpty) 'state': place.state,
+        if (place.district.isNotEmpty) 'district': place.district,
+        if (AppState.instance.feedCity.isNotEmpty)
+          'city': AppState.instance.feedCity,
+        if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+        if (place.village.isNotEmpty) 'village': place.village,
         'country': AppState.instance.country,
         'preferences': {
           'enabled': AppState.instance.pushNotificationsEnabled,
@@ -327,12 +332,12 @@ class ApiService {
     final token = fcmToken ?? AppState.instance.fcmToken;
     final secret = installationSecret ?? AppState.instance.installationSecret;
 
+    if (!AppState.instance.pushNotificationsEnabled) return null;
     if (token == null || token.isEmpty) return null;
 
     try {
       final response =
           await _dio.post('/api/v1/notifications/device-token/', data: {
-    if (!AppState.instance.pushNotificationsEnabled) return null;
         if (sessId != null && sessId.isNotEmpty) 'session_id': sessId,
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
@@ -605,10 +610,12 @@ class ApiService {
     await updateUserLocation({
       'lat': location.latitude,
       'lon': location.longitude,
-      'city': location.city,
+      if (location.city.trim().isNotEmpty) 'city': location.city.trim(),
       'district': location.district,
-      'subdistrict': location.subdistrict ?? location.district,
-      'village': location.village ?? '',
+      if (location.subdistrict?.trim().isNotEmpty == true)
+        'subdistrict': location.subdistrict,
+      if (location.village?.trim().isNotEmpty == true)
+        'village': location.village,
       'state': location.state,
       'country': location.country,
       'location_source': location.source,
@@ -624,15 +631,19 @@ class ApiService {
       debugPrint('Guest mode: Skipping syncUserLocation');
       return;
     }
+    // No place chosen yet: nothing to send, not the starting Hyderabad.
+    if (!AppState.instance.hasValidLocation) return;
+    final place = AppState.instance.feedPlace;
+    final city = AppState.instance.feedCity;
     try {
       await updateUserLocation({
         'lat': AppState.instance.latitude,
         'lon': AppState.instance.longitude,
-        'city': AppState.instance.city,
-        'district': AppState.instance.district,
-        'subdistrict': AppState.instance.subdistrict,
-        'village': AppState.instance.village,
-        'state': AppState.instance.stateName,
+        if (city.isNotEmpty) 'city': city,
+        if (place.district.isNotEmpty) 'district': place.district,
+        if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+        if (place.village.isNotEmpty) 'village': place.village,
+        if (place.state.isNotEmpty) 'state': place.state,
         'country': AppState.instance.country,
         'location_source': 'gps',
       });
@@ -1027,11 +1038,11 @@ class ApiService {
         await _dio.get('/api/v1/articles/recommendations/', queryParameters: {
       if (limit != null) 'limit': limit,
       if (lang != null) 'lang': lang,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (village != null) 'village': village,
-      if (subdistrict != null) 'subdistrict': subdistrict,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (village?.isNotEmpty == true) 'village': village,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
       if (category != null) 'category': category,
     });
     return (response.data['data'] as List)
@@ -1335,29 +1346,19 @@ class ApiService {
     // Main / no-scope feeds: the reader's chosen place when the caller gave
     // none; empty (not sent) until one is chosen — backend contract.
     final place = AppState.instance.feedPlace;
-    final effectiveState = state != null
-        ? (state.isNotEmpty ? state : null)
-        : (scope == 'local' ? AppState.instance.stateName : place.state);
+    final effectiveState =
+        state != null ? (state.isNotEmpty ? state : null) : place.state;
     final effectiveDistrict = district != null
         ? (district.isNotEmpty ? district : null)
-        : (scope == 'local' ? AppState.instance.district : place.district);
+        : place.district;
     final effectiveCity = city != null
         ? (city.isNotEmpty ? city : null)
-        : (scope == 'local'
-            ? AppState.instance.city
-            : (AppState.instance.hasValidLocation
-                ? AppState.instance.city
-                : null));
+        : AppState.instance.feedCity;
     final effectiveSubdistrict = subdistrict != null
         ? (subdistrict.isNotEmpty ? subdistrict : null)
-        : (scope == 'local' && AppState.instance.subdistrict.isNotEmpty
-            ? AppState.instance.subdistrict
-            : place.subdistrict);
-    final effectiveVillage = village != null
-        ? (village.isNotEmpty ? village : null)
-        : (scope == 'local' && AppState.instance.village.isNotEmpty
-            ? AppState.instance.village
-            : place.village);
+        : place.subdistrict;
+    final effectiveVillage =
+        village != null ? (village.isNotEmpty ? village : null) : place.village;
     final effectivePageSize = pageSize ?? 25;
 
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
@@ -1455,11 +1456,11 @@ class ApiService {
       if (pageSize != null) 'page_size': pageSize,
       if (lang != null) 'lang': lang,
       if (scope != null) 'scope': scope,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+      if (village?.isNotEmpty == true) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1486,11 +1487,11 @@ class ApiService {
       if (pageSize != null) 'page_size': pageSize,
       if (lang != null) 'lang': lang,
       if (scope != null) 'scope': scope,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+      if (village?.isNotEmpty == true) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1907,6 +1908,14 @@ class ApiService {
     if (village.isNotEmpty) params['village'] = village;
     if (scope != null) params['scope'] = scope;
 
+    // The next page is meta.next, requested exactly as the backend sent it.
+    final nextUrl = cursor != null &&
+            (cursor.startsWith('http://') ||
+                cursor.startsWith('https://') ||
+                cursor.startsWith('/'))
+        ? cursor
+        : null;
+
     try {
       final response = nextUrl != null
           ? await _dio.get(nextUrl)
@@ -1962,14 +1971,6 @@ class ApiService {
                 'author_name',
                 // {id, display_name, trust_level}: the uploader shown as
                 // the post's name (was dropped here, so Spotlight showed
-    // The next page is meta.next, requested exactly as the backend sent it.
-    final nextUrl = cursor != null &&
-            (cursor.startsWith('http://') ||
-                cursor.startsWith('https://') ||
-                cursor.startsWith('/'))
-        ? cursor
-        : null;
-
                 // no name).
                 'uploader',
               ])
@@ -1978,6 +1979,16 @@ class ApiService {
           );
         }).toList();
       });
+      final next = _extractBookmarkNext(response.data);
+      if (next == null) return page;
+      return ApiResponse<List<UnifiedFeedItem>>(
+        data: page.data,
+        meta: page.meta,
+        errors: page.errors,
+        apiError: page.apiError,
+        nextCursor: next,
+        statusCode: page.statusCode,
+      );
     } catch (e) {
       return ApiResponse.error(
         message: e is AppException ? e.message : e.toString(),
@@ -2029,16 +2040,6 @@ class ApiService {
     final formData = FormData.fromMap({
       'submission_id': submissionId,
       'mobile': mobile,
-      final next = _extractBookmarkNext(response.data);
-      if (next == null) return page;
-      return ApiResponse<List<UnifiedFeedItem>>(
-        data: page.data,
-        meta: page.meta,
-        errors: page.errors,
-        apiError: page.apiError,
-        nextCursor: next,
-        statusCode: page.statusCode,
-      );
       'media_type': mediaType,
       'file': await MultipartFile.fromFile(filePath),
     });
@@ -2476,13 +2477,6 @@ class ApiService {
       if (status != null && status.isNotEmpty) 'status': status,
     });
     return response.data as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> previewAdminNotificationTarget(
-      Map<String, dynamic> data) async {
-    final response =
-        await _dio.post('/admin/api/notifications/target-preview/', data: data);
-    return response.data['data'] as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> sendAdminNotification(

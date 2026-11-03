@@ -370,7 +370,8 @@ class LocationProvider extends ChangeNotifier {
         latitude: 0,
         longitude: 0,
         accuracyMeters: 0,
-        city: result.nameEn,
+        // Picked as a state, district, mandal or village, never as a city.
+        city: '',
         district: result.district,
         state: result.state,
         country: 'India',

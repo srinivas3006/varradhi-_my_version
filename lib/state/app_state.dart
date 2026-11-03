@@ -131,6 +131,25 @@ class AppState extends ChangeNotifier {
             )
           : (state: '', district: '', subdistrict: '', village: '');
 
+  /// The reader's city, only when one is really known: never the district
+  /// (backend: a district reader must not get a city's local news).
+  String get feedCity => hasValidLocation ? city.trim() : '';
+
+  static const _placePlaceholders = {
+    'all',
+    'null',
+    'undefined',
+    '0',
+    'unknown',
+  };
+
+  /// A place name fit to send: placeholder values become empty, and empty
+  /// values are left out of requests.
+  static String cleanPlace(String? value) {
+    final trimmed = (value ?? '').trim();
+    return _placePlaceholders.contains(trimmed.toLowerCase()) ? '' : trimmed;
+  }
+
   String stateName = 'Telangana';
   String district = 'Hyderabad';
   String city = 'Hyderabad';
@@ -392,11 +411,23 @@ class AppState extends ChangeNotifier {
     _contentLanguage = prefs.getString('content_language');
     contentLanguagePrompted =
         prefs.getBool('content_language_prompted') ?? false;
-    stateName = prefs.getString('stateName') ?? stateName;
-    district = prefs.getString('district') ?? district;
-    city = prefs.getString('city') ?? city;
-    subdistrict = prefs.getString('subdistrict') ?? subdistrict;
-    village = prefs.getString('village') ?? village;
+    stateName = cleanPlace(prefs.getString('stateName') ?? stateName);
+    district = cleanPlace(prefs.getString('district') ?? district);
+    city = cleanPlace(prefs.getString('city') ?? city);
+    subdistrict = cleanPlace(prefs.getString('subdistrict') ?? subdistrict);
+    village = cleanPlace(prefs.getString('village') ?? village);
+    // Once: older builds saved the district (or state, mandal, village) as
+    // the city.
+    if (!(prefs.getBool('cityCleanedV1') ?? false)) {
+      if (city == district ||
+          city == stateName ||
+          city == subdistrict ||
+          city == village) {
+        city = '';
+        await prefs.setString('city', '');
+      }
+      await prefs.setBool('cityCleanedV1', true);
+    }
     country = prefs.getString('country') ?? country;
     stateId = prefs.getString('stateId');
     districtId = prefs.getString('districtId');
@@ -955,6 +986,10 @@ class AppState extends ChangeNotifier {
       uiLanguageCode == 'te' || language.toLowerCase().contains('telugu');
 
   String get displayLocation {
+    // Not the starting Telangana / Hyderabad.
+    if (!hasValidLocation) {
+      return showsTeluguPlaceNames ? 'ప్రాంతం ఎంచుకోండి' : 'Select location';
+    }
     if (showsTeluguPlaceNames) {
       return LocationTranslations.formatDisplayLocation(
         state: stateName,
@@ -996,11 +1031,11 @@ class AppState extends ChangeNotifier {
     String? subdistrictId,
     String? villageId,
   }) {
-    stateName = state;
-    this.district = district;
-    this.city = city ?? (district.isNotEmpty ? district : state);
-    this.subdistrict = subdistrict ?? '';
-    this.village = village ?? '';
+    stateName = cleanPlace(state);
+    this.district = cleanPlace(district);
+    this.city = cleanPlace(city);
+    this.subdistrict = cleanPlace(subdistrict);
+    this.village = cleanPlace(village);
     this.country = country ?? 'India';
     this.latitude = latitude;
     this.longitude = longitude;
@@ -1015,6 +1050,11 @@ class AppState extends ChangeNotifier {
     ApiService.instance.clearFeedCache();
     notifyListeners();
     _persist();
+    // A guest's place lives in the device registration: location-targeted
+    // notifications would otherwise follow the old one until the next start.
+    if (!isLoggedIn && (fcmToken?.isNotEmpty ?? false)) {
+      unawaited(ApiService.instance.registerGuestDevice());
+    }
   }
 
   void setDeviceLocation(

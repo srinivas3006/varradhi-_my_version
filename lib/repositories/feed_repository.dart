@@ -68,11 +68,12 @@ class FeedRepository {
         AppState.instance.feedLang;
     final s = scope ?? 'all';
     final c = category != null && category.isNotEmpty ? category.toLowerCase() : 'all';
-    final st = state ?? (scope == 'local' ? AppState.instance.stateName : 'any');
-    final dt = district ?? (scope == 'local' ? AppState.instance.district : 'any');
-    final ct = city ?? (scope == 'local' ? AppState.instance.city : 'any');
-    final sdt = subdistrict ?? (scope == 'local' && AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : 'any');
-    final v = village ?? (scope == 'local' && AppState.instance.village.isNotEmpty ? AppState.instance.village : 'any');
+    final place = AppState.instance.feedPlace;
+    final st = state ?? (scope == 'local' ? place.state : 'any');
+    final dt = district ?? (scope == 'local' ? place.district : 'any');
+    final ct = city ?? (scope == 'local' ? AppState.instance.feedCity : 'any');
+    final sdt = subdistrict ?? (scope == 'local' && place.subdistrict.isNotEmpty ? place.subdistrict : 'any');
+    final v = village ?? (scope == 'local' && place.village.isNotEmpty ? place.village : 'any');
     final brk = breaking == true ? 'breaking' : 'std';
 
     return 'feed:$effectiveLang:$s:$c:$st:$dt:$ct:$sdt:$v:$brk';
@@ -466,11 +467,12 @@ class FeedRepository {
     // readers get the same feed.
     final effectiveLang = lang ??
         AppState.instance.feedLang;
-    final effectiveState = state ?? (scope == 'local' ? AppState.instance.stateName : null);
-    final effectiveDistrict = district ?? (scope == 'local' ? AppState.instance.district : null);
-    final effectiveCity = city ?? (scope == 'local' ? AppState.instance.city : null);
-    final effectiveSubdistrict = subdistrict ?? (scope == 'local' && AppState.instance.subdistrict.isNotEmpty ? AppState.instance.subdistrict : null);
-    final effectiveVillage = village ?? (scope == 'local' && AppState.instance.village.isNotEmpty ? AppState.instance.village : null);
+    final place = AppState.instance.feedPlace;
+    final effectiveState = state ?? (scope == 'local' ? place.state : null);
+    final effectiveDistrict = district ?? (scope == 'local' ? place.district : null);
+    final effectiveCity = city ?? (scope == 'local' ? AppState.instance.feedCity : null);
+    final effectiveSubdistrict = subdistrict ?? (scope == 'local' && place.subdistrict.isNotEmpty ? place.subdistrict : null);
+    final effectiveVillage = village ?? (scope == 'local' && place.village.isNotEmpty ? place.village : null);
 
     final stopwatch = Stopwatch()..start();
 

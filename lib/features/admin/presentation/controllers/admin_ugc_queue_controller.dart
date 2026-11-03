@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../data/models/admin_bulk_action_model.dart';
 import '../../data/models/admin_paginated_response.dart';
-import '../../data/models/admin_push_notification_payload.dart';
 import '../../data/models/admin_ugc_status.dart';
 import '../../data/models/admin_ugc_submission_model.dart';
 import '../../data/repositories/admin_ugc_repository.dart';
@@ -182,9 +181,8 @@ class AdminUgcQueueController extends ChangeNotifier {
     String id, {
     required String notes,
     required String publicationLevel,
-    AdminPushNotificationPayload? push,
   }) async {
-    final updated = await _repository.approveSubmission(id, notes: notes, publicationLevel: publicationLevel, push: push);
+    final updated = await _repository.approveSubmission(id, notes: notes, publicationLevel: publicationLevel);
     _replaceItem(updated);
     AppState.instance.onPostStatusChanged(id, PostStatus.approved);
   }

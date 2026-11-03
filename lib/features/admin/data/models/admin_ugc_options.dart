@@ -17,10 +17,6 @@ class AdminUgcOptions {
     AdminPublicationLevelOption('global', 'సార్వత్రిక స్థాయి', 'యాప్ వినియోగదారులందరికీ కనిపిస్తుంది'),
   ];
 
-  static const List<String> pushNotificationTypes = ['local', 'breaking', 'alert', 'festival', 'promotion'];
-
-  static const List<String> pushNotificationTargets = ['district', 'state', 'village', 'subdistrict', 'city', 'all'];
-
   static const List<String> bulkActionTypes = ['approve', 'reject', 'flag', 'increase_trust', 'block'];
 
   static const List<String> logActionTypes = [
