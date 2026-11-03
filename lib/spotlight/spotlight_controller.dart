@@ -308,11 +308,10 @@ class SpotlightController extends ChangeNotifier {
       final ugc = results[1] as ApiResponse<List<NewsArticle>>;
       final ads = results[2] as ApiResponse<List<AdBanner>>;
       final failure = feedState.errorMessage ?? feedState.refreshErrorMessage;
-      if (refresh) {
-        _ugcItems.clear();
-        _dismissedSlots.clear();
-      }
+      if (refresh) _dismissedSlots.clear();
       if (!ugc.hasErrors) {
+        // A refreshed page one replaces the list; a failed one leaves it.
+        if (refresh) _ugcItems.clear();
         final ids = _ugcItems.map((item) => item.id).toSet();
         _ugcItems.addAll((ugc.data ?? []).where((item) => ids.add(item.id)));
         _ugcCursor = ugc.nextCursor;
@@ -402,8 +401,7 @@ class SpotlightController extends ChangeNotifier {
       // re-sorted stories by date and re-spaced posters, polls and ads, so
       // items already shown moved: the next card, already loaded, turned
       // into another story and reloaded — the blink while scrolling.
-      final updatedFeed =
-          refresh ? rebuilt : appendOnly(_state.feed, rebuilt);
+      final updatedFeed = refresh ? rebuilt : appendOnly(_state.feed, rebuilt);
       final hasMore = _articleHasMore || _ugcHasMore;
       if (updatedFeed.isNotEmpty && hasMore) {
         updatedFeed.add(SpotlightItem.shimmer());
@@ -468,11 +466,9 @@ class SpotlightController extends ChangeNotifier {
   static List<SpotlightItem> appendOnly(
       List<SpotlightItem> shown, List<SpotlightItem> rebuilt) {
     String key(SpotlightItem i) => '${i.type.name}:${i.id}';
-    String? story(SpotlightItem i) => i.article == null
-        ? null
-        : '${i.article!.contentKind}:${i.article!.id}';
-    final kept =
-        shown.where((i) => i.type != SpotlightType.shimmer).toList();
+    String? story(SpotlightItem i) =>
+        i.article == null ? null : '${i.article!.contentKind}:${i.article!.id}';
+    final kept = shown.where((i) => i.type != SpotlightType.shimmer).toList();
     final keys = {for (final i in kept) key(i)};
     final stories = {for (final i in kept) story(i)}..remove(null);
     return [

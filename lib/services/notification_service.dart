@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/feed/ugc_feed_freshness.dart';
 import '../core/navigation/auth_guard.dart';
 import '../core/navigation/notification_deep_link_resolver.dart';
 import '../core/navigation/notification_navigation_gate.dart';
@@ -471,6 +472,7 @@ class NotificationService {
         debugPrint(
             '[Notifications] DENIED — no push will arrive on this device');
       }
+          UgcFeedFreshness.notifyPublished();
 
       final token = await messaging.getToken();
       debugPrint('[Notifications] token after permission: ${token != null}');
@@ -951,6 +953,7 @@ class NotificationService {
                 // rather than opening an empty story page.
                 _showLoadFailure(navContext, e,
                     retry: () => navigateToTarget(target));
+          UgcFeedFreshness.notifyPublished();
               }
             }
           } else {

@@ -79,9 +79,10 @@ class UnifiedFeedItem {
           json['summary']?.toString() ?? json['description']?.toString() ?? '',
       thumbnailUrl: UrlNormalizer.normalize(rawThumb),
       mediaUrl: UrlNormalizer.normalize(rawMedia),
-      createdAt:
-          DateParser.tryParse(json['created_at'] ?? json['published_at']) ??
-              DateTime.now(),
+      // published_at first: an old submission approved now is new news.
+      createdAt: DateParser.tryParse(json['published_at']) ??
+          DateParser.tryParse(json['created_at']) ??
+          DateTime.now(),
       district: json['district']?.toString() ?? '',
       subdistrict: json['subdistrict']?.toString() ?? '',
       village: json['village']?.toString() ?? '',

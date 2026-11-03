@@ -1858,9 +1858,11 @@ class ApiService {
     if (scope != null) params['scope'] = scope;
 
     try {
-      final response =
-          await _dio.get('/api/v1/ugc/feed/', queryParameters: params);
-      return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
+      final response = nextUrl != null
+          ? await _dio.get(nextUrl)
+          : await _dio.get('/api/v1/ugc/feed/', queryParameters: params);
+      final page =
+          ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
         if (json is! List) return <UnifiedFeedItem>[];
         return json.map((item) {
           final map = item is Map<String, dynamic> ? item : <String, dynamic>{};
@@ -1871,9 +1873,11 @@ class ApiService {
             summary: map['description']?.toString() ?? '',
             thumbnailUrl: map['thumbnail_url']?.toString() ?? '',
             mediaUrl: map['media_url']?.toString() ?? '',
-            createdAt:
-                DateParser.tryParse(map['created_at'] ?? map['published_at']) ??
-                    DateTime.now(),
+            // The time shown: published_at, so a post approved now does not
+            // read "22 hours ago"; created_at only for older records.
+            createdAt: DateParser.tryParse(map['published_at']) ??
+                DateParser.tryParse(map['created_at']) ??
+                DateTime.now(),
             district: map['district']?.toString() ?? '',
             subdistrict: map['subdistrict']?.toString() ?? '',
             village: map['village']?.toString() ?? '',
@@ -1908,6 +1912,14 @@ class ApiService {
                 'author_name',
                 // {id, display_name, trust_level}: the uploader shown as
                 // the post's name (was dropped here, so Spotlight showed
+    // The next page is meta.next, requested exactly as the backend sent it.
+    final nextUrl = cursor != null &&
+            (cursor.startsWith('http://') ||
+                cursor.startsWith('https://') ||
+                cursor.startsWith('/'))
+        ? cursor
+        : null;
+
                 // no name).
                 'uploader',
               ])
@@ -1967,6 +1979,16 @@ class ApiService {
     final formData = FormData.fromMap({
       'submission_id': submissionId,
       'mobile': mobile,
+      final next = _extractBookmarkNext(response.data);
+      if (next == null) return page;
+      return ApiResponse<List<UnifiedFeedItem>>(
+        data: page.data,
+        meta: page.meta,
+        errors: page.errors,
+        apiError: page.apiError,
+        nextCursor: next,
+        statusCode: page.statusCode,
+      );
       'media_type': mediaType,
       'file': await MultipartFile.fromFile(filePath),
     });
