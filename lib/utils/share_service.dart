@@ -252,8 +252,21 @@ class ShareService {
   /// Makes the share image in the background while the reader is on the
   /// story, so tapping Share opens the share sheet immediately.
   static Future<void> prepareShare(NewsArticle article) async {
-    if (isShareReady(article)) return;
+    if (!canDraw || isShareReady(article)) return;
     await generateArticleImage(article);
+  }
+
+  /// Whether the app has a screen to draw with. In the background Flutter
+  /// falls back to an off-screen GPU surface to turn a widget into an image,
+  /// which crashed in the graphics driver on a low-end phone (Play vitals,
+  /// Realme C21). A card skipped here is not remembered: it is made the next
+  /// time the story is on screen, or when Share is tapped.
+  @visibleForTesting
+  static bool get canDraw {
+    final state = WidgetsBinding.instance.lifecycleState;
+    return state == null ||
+        state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.inactive;
   }
 
   static Future<File?> _makeArticleImage(NewsArticle article, String cacheKey,
@@ -394,6 +407,8 @@ class ShareService {
         ArticleTypography.body(fontSize: 40, color: Colors.black),
         watermarkStyle,
       ]).timeout(const Duration(seconds: 8), onTimeout: () => const []);
+      // The reader may have left during the downloads and the font wait.
+      if (!canDraw) return null;
       final png = await _screenshotController.captureFromLongWidget(
         MediaQuery(
           data: const MediaQueryData(),
@@ -488,6 +503,7 @@ class ShareService {
       canvas.drawImageRect(banner, bannerSrcRect, bannerDstRect, paint);
 
       final picture = recorder.endRecording();
+      if (!canDraw) return null;
       final compositeUiImg = await picture.toImage(targetWidth, totalHeight);
 
       // 5. Convert to raw RGBA for JPEG encoding
@@ -550,6 +566,7 @@ class ShareService {
     const double width = 1080;
     const double height = 1350;
 
+    if (!canDraw) return null;
     try {
       final bytes = await _screenshotController.captureFromWidget(
         const Directionality(
