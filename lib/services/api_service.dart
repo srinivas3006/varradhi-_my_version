@@ -1548,7 +1548,10 @@ class ApiService {
   /// `GET /api/v1/search/` — universal, multilingual search: grouped
   /// `sections` plus the legacy article `results` (see [SearchResult]).
   ///
-  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it).
+  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it); a
+  /// location typed into it is matched by the backend too. Omitting [lang]
+  /// searches every language. The location filters are for a reader who
+  /// explicitly filters by place, so nothing fills them in by default.
   /// A 401 after the token refresh has already been tried (and failed, so
   /// the reader is now signed out) is retried once as a guest — search
   /// works without login. [cancelToken] drops a request the reader has
@@ -1557,10 +1560,17 @@ class ApiService {
     String query, {
     String? lang,
     String? category,
+    int page = 1,
+    int pageSize = 20,
+    String? state,
+    String? district,
+    String? city,
+    String? subdistrict,
+    String? village,
     CancelToken? cancelToken,
   }) async {
     final q = query.trim();
-    if (q.isEmpty) {
+    if (q.length < SearchResult.minQueryLength) {
       return const SearchResult(results: [], suggestions: []);
     }
     for (var attempt = 0;; attempt++) {
@@ -1569,10 +1579,16 @@ class ApiService {
           '/api/v1/search/',
           queryParameters: {
             'q': q,
-            // `lang`, not `language` (backend confirmation, Oct 2026). No
-            // page / page_size: the search API ignores them.
+            // `lang`, not `language` (backend confirmation, Oct 2026).
             if (lang != null && lang.isNotEmpty) 'lang': lang,
+            'page': page,
+            'page_size': pageSize,
             if (category != null && category.isNotEmpty) 'category': category,
+            if (state?.isNotEmpty == true) 'state': state,
+            if (district?.isNotEmpty == true) 'district': district,
+            if (city?.isNotEmpty == true) 'city': city,
+            if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+            if (village?.isNotEmpty == true) 'village': village,
           },
           cancelToken: cancelToken,
         );

@@ -17,10 +17,10 @@ enum SearchErrorKind {
 
 /// `GET /api/v1/search/` response.
 ///
-/// Universal search (Oct 2026) adds `sections` (one list per content type),
-/// `counts`, `universal_result_count` and `pagination` beside the legacy
-/// `results` article list. Both are read: [hasSections] is false on an
-/// older backend, and the screen then shows [results] as before.
+/// `results` is the main article list, the one `pagination` describes;
+/// `sections` holds one list per content type and is not paged. Everything
+/// stays in the backend's order. [hasSections] is false on an older backend,
+/// and the screen then shows [results] alone.
 class SearchResult {
   const SearchResult({
     required this.results,
@@ -33,10 +33,15 @@ class SearchResult {
     this.resultCount = 0,
     this.universalResultCount = 0,
     this.sectionKeys = const {},
+    this.page = 1,
+    this.totalResults = 0,
+    this.hasNext = false,
   });
 
-  /// Legacy article results (`results`), used for the paginated
-  /// "all articles" page.
+  /// The backend answers 400 to anything shorter, so it is never sent.
+  static const minQueryLength = 2;
+
+  /// The main article list, across the pages loaded so far.
   final List<NewsArticle> results;
   final List<String> suggestions;
   final int cacheTtlSeconds;
@@ -49,8 +54,17 @@ class SearchResult {
   /// The backend sent `sections` (universal search).
   final bool hasSections;
 
-  /// Total matching articles (legacy pagination).
+  /// Matching articles in this response (`result_count`).
   final int resultCount;
+
+  /// The last page loaded (`pagination.page`).
+  final int page;
+
+  /// Every matching article (`pagination.total_results`).
+  final int totalResults;
+
+  /// More of [results] can be loaded (`pagination.has_next`).
+  final bool hasNext;
 
   /// Direct matches across every section, recommendations not included.
   final int universalResultCount;
@@ -62,12 +76,33 @@ class SearchResult {
   /// section may have more, reachable from that content's own screen.
   static const sectionLimit = 8;
 
-  /// The articles to show: `sections.articles`, or `results` when that key
-  /// is missing (backend contract) or the backend is older.
-  List<NewsArticle> get articles => hasSections &&
-          sectionKeys.contains('articles')
-      ? section('articles').map(NewsArticle.fromJson).toList()
-      : results;
+  /// The articles to show: `results`, or `sections.articles` when the backend
+  /// sends them only there.
+  List<NewsArticle> get articles => results.isNotEmpty
+      ? results
+      : section('articles').map(NewsArticle.fromJson).toList();
+
+  /// This result with the next page of articles added after what is loaded.
+  /// `sections` stay as they are: only the main list is paged.
+  SearchResult appendPage(SearchResult next) {
+    final ids = {for (final a in results) a.id};
+    final added =
+        next.results.where((a) => a.id.isEmpty || ids.add(a.id)).toList();
+    return SearchResult(
+      results: [...results, ...added],
+      suggestions: suggestions,
+      cacheTtlSeconds: cacheTtlSeconds,
+      sections: sections,
+      hasSections: hasSections,
+      resultCount: resultCount,
+      universalResultCount: universalResultCount,
+      sectionKeys: sectionKeys,
+      page: next.page,
+      totalResults: next.totalResults > 0 ? next.totalResults : totalResults,
+      // A page with nothing new must not keep asking for more.
+      hasNext: next.hasNext && added.isNotEmpty,
+    );
+  }
 
   /// Display order (search handover). `recommendations` is last and never
   /// counted as a result.
@@ -87,20 +122,25 @@ class SearchResult {
   ];
 
   /// Non-empty sections in [sectionOrder]; unknown sections are ignored.
-  List<String> get orderedSections =>
-      [for (final k in sectionOrder) if (sections[k]?.isNotEmpty ?? false) k];
+  List<String> get orderedSections => [
+        for (final k in sectionOrder)
+          if (sections[k]?.isNotEmpty ?? false) k
+      ];
 
   List<Map<String, dynamic>> section(String key) => sections[key] ?? const [];
 
   /// No direct matches (recommendations do not count).
-  bool get noDirectResults => hasSections
-      ? universalResultCount == 0 &&
-          orderedSections.every((k) => k == 'recommendations')
-      : results.isEmpty;
+  bool get noDirectResults =>
+      articles.isEmpty &&
+      (!hasSections ||
+          (universalResultCount == 0 &&
+              orderedSections.every((k) => k == 'recommendations')));
 
   /// Nothing at all to show: no matches, recommendations or suggestions.
   bool get isEmpty =>
-      noDirectResults && section('recommendations').isEmpty && suggestions.isEmpty;
+      noDirectResults &&
+      section('recommendations').isEmpty &&
+      suggestions.isEmpty;
 
   static SearchResult parse(dynamic body) {
     dynamic data = body is Map ? (body['data'] ?? body) : body;
@@ -113,13 +153,19 @@ class SearchResult {
     var resultCount = 0;
     var universal = 0;
     final keys = <String>{};
+    var page = 1;
+    var totalResults = 0;
+    var hasNext = false;
 
-    List<NewsArticle> articles(dynamic list) => list is List
-        ? list
-            .whereType<Map>()
-            .map((m) => NewsArticle.fromJson(Map<String, dynamic>.from(m)))
-            .toList()
-        : const [];
+    List<NewsArticle> articles(dynamic list) {
+      if (list is! List) return const [];
+      final ids = <String>{};
+      return list
+          .whereType<Map>()
+          .map((m) => NewsArticle.fromJson(Map<String, dynamic>.from(m)))
+          .where((a) => a.id.isEmpty || ids.add(a.id))
+          .toList();
+    }
 
     int asInt(dynamic v) =>
         v is num ? v.toInt() : int.tryParse(v?.toString() ?? '') ?? 0;
@@ -149,10 +195,14 @@ class SearchResult {
         rawSections.forEach((key, value) {
           keys.add(key.toString());
           if (value is List) {
+            final ids = <String>{};
             final items = value
                 .whereType<Map>()
                 .map((m) => Map<String, dynamic>.from(m))
-                .toList();
+                .where((m) {
+              final id = m['id']?.toString() ?? '';
+              return id.isEmpty || ids.add(id);
+            }).toList();
             if (items.isNotEmpty) sections[key.toString()] = items;
           }
         });
@@ -161,6 +211,15 @@ class SearchResult {
       universal = data['universal_result_count'] != null
           ? asInt(data['universal_result_count'])
           : resultCount;
+      totalResults = resultCount;
+      final pagination = data['pagination'];
+      if (pagination is Map) {
+        page = asInt(pagination['page'] ?? 1);
+        if (pagination['total_results'] != null) {
+          totalResults = asInt(pagination['total_results']);
+        }
+        hasNext = pagination['has_next'] == true;
+      }
     } else if (data is List) {
       results = articles(data);
       resultCount = results.length;
@@ -176,6 +235,9 @@ class SearchResult {
       resultCount: resultCount,
       universalResultCount: universal,
       sectionKeys: keys,
+      page: page,
+      totalResults: totalResults,
+      hasNext: hasNext,
     );
   }
 
