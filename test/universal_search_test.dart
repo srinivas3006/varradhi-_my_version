@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/core/network/dio_client.dart';
+import 'package:vaaradhi/repositories/ad_repository.dart';
+import 'package:vaaradhi/widgets/ads/unified_ad_widget.dart';
 import 'package:vaaradhi/screens/search_screen.dart';
 import 'package:vaaradhi/services/api_service.dart';
 import 'package:vaaradhi/state/app_state.dart';
@@ -87,7 +89,10 @@ Map<String, dynamic> _paged(
     };
 
 class _Api implements HttpClientAdapter {
-  _Api(this.reply);
+  _Api(this.reply, {this.ads = const []});
+
+  /// What `GET /api/v1/ads/` answers.
+  final List<Map<String, dynamic>> ads;
 
   /// (status, body) for each search request, in order; the last repeats.
   final List<(int, Object)> reply;
@@ -97,7 +102,8 @@ class _Api implements HttpClientAdapter {
   Future<ResponseBody> fetch(
       RequestOptions o, Stream<Uint8List>? _, Future<void>? __) async {
     if (o.path != '/api/v1/search/') {
-      return ResponseBody.fromString(jsonEncode({'data': []}), 200, headers: {
+      final data = o.path == '/api/v1/ads/' ? ads : const [];
+      return ResponseBody.fromString(jsonEncode({'data': data}), 200, headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
       });
     }
@@ -497,6 +503,38 @@ void main() {
       }
       expect(find.text('Still here'), findsOneWidget);
       expect(find.byKey(const ValueKey('search_more_retry')), findsOneWidget);
+    });
+
+    testWidgets('search ads show between the results', (t) async {
+      AdRepository.instance.clearCache();
+      addTearDown(AdRepository.instance.clearCache);
+      ApiClient.instance.dio.httpClientAdapter = _Api(
+        [
+          (
+            200,
+            _paged([_article('a1', 'First'), _article('a2', 'Second')],
+                hasNext: false)
+          )
+        ],
+        ads: [
+          {
+            'id': 'ad-1',
+            'ad_type': 'banner',
+            'placement_zone': 'search',
+            'image_url': 'https://cdn.example.com/ad.jpg',
+            'destination_url': 'https://example.com',
+            'display_frequency': 1,
+          },
+        ],
+      );
+      await t.pumpWidget(const MaterialApp(home: SearchScreen()));
+      await type(t, 'news');
+      for (var i = 0; i < 5; i++) {
+        await t.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.byType(UnifiedAdWidget), findsWidgets);
+      await t.pumpWidget(const SizedBox());
+      await t.pump(const Duration(seconds: 5));
     });
 
     testWidgets('429: the wait message, no Retry button', (t) async {

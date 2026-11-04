@@ -171,6 +171,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _presentedResults = insertAdsIntoFeed<NewsArticle>(
         contentItems: _results,
         eligibleAds: ads.cast(),
+        placementZone: 'search',
         allowTimed: false,
         contentKey: (article) => 'search:${article.id}',
       );
