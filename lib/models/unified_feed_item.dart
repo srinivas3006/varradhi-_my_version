@@ -65,6 +65,8 @@ class UnifiedFeedItem {
       'is_disliked_by_user',
       'is_bookmarked',
       'share_url',
+      // Some responses send it here rather than in metadata.
+      'language',
       // Citizen news: who uploaded it (shown as the story's byline).
       'uploader',
     ]) {

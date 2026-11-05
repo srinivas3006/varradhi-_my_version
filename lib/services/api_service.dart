@@ -1983,6 +1983,7 @@ class ApiService {
                 'is_disliked_by_user',
                 'is_bookmarked',
                 'share_url',
+                'language',
                 'uploader_name',
                 'author_name',
                 // {id, display_name, trust_level}: the uploader shown as

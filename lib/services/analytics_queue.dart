@@ -164,6 +164,14 @@ class AnalyticsQueue with WidgetsBindingObserver {
     return MapEntry(story.isUgc ? 'submission_id' : 'article_id', id);
   }
 
+  /// The story's own language, not the reader's setting. Null when the API
+  /// sent none or an unknown value: the reader's language is sent instead,
+  /// because one rejected value would fail the whole batch.
+  static String? storyLanguageOf(NewsArticle story) {
+    final language = story.language.trim().toLowerCase();
+    return const {'te', 'en', 'hi', 'ta'}.contains(language) ? language : null;
+  }
+
   static bool _isValid(Map<String, dynamic> e) {
     final hasArticle = e['article_id'] != null;
     final hasSubmission = e['submission_id'] != null;
@@ -212,8 +220,10 @@ class AnalyticsQueue with WidgetsBindingObserver {
     if (!contentEvents.contains(eventType)) return;
     final id = contentIdOf(story);
     if (id == null) return;
+    final language = storyLanguageOf(story);
     await _enqueue({
       ..._base(eventType),
+      if (language != null) 'language': language,
       id.key: id.value,
       if (dwellSeconds != null)
         'dwell_seconds': dwellSeconds.clamp(0, maxDwellSeconds),
@@ -259,9 +269,10 @@ class AnalyticsQueue with WidgetsBindingObserver {
     }
     final retry = status == null || status >= 500 || status == 429;
     if (retry && attempt < retryDelays.length && timersEnabled) {
-      Timer(retryDelays[attempt],
-          () => unawaited(notificationOpened(id,
-              payload: payload, attempt: attempt + 1)));
+      Timer(
+          retryDelays[attempt],
+          () => unawaited(
+              notificationOpened(id, payload: payload, attempt: attempt + 1)));
     }
   }
 
