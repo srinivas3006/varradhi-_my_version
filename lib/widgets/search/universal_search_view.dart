@@ -87,7 +87,8 @@ String searchItemImage(Map<String, dynamic> item) {
     for (final m in media.whereType<Map>()) {
       final thumb = norm(m['thumbnail_url']);
       if (thumb.isNotEmpty) return thumb;
-      final type = (m['media_type'] ?? m['type'] ?? '').toString().toLowerCase();
+      final type =
+          (m['media_type'] ?? m['type'] ?? '').toString().toLowerCase();
       final url = norm(m['url'] ?? m['media_url']);
       if (url.isNotEmpty && !type.contains('video')) return url;
     }
@@ -117,8 +118,8 @@ Future<void> openSearchItem(
     case 'ugc':
       // The same item shape as the citizen-news feed.
       push(NewsDetailScreen(
-          article: UnifiedFeedItem.fromJson({...item, 'type': 'ugc'})
-              .toArticle()));
+          article:
+              UnifiedFeedItem.fromJson({...item, 'type': 'ugc'}).toArticle()));
       return;
     case 'polls':
       push(PollDetailScreen(poll: Poll.fromJson(item)));
@@ -161,7 +162,8 @@ Future<void> openSearchItem(
   await _openLinked(context, item);
 }
 
-Future<void> _openLinked(BuildContext context, Map<String, dynamic> item) async {
+Future<void> _openLinked(
+    BuildContext context, Map<String, dynamic> item) async {
   final deepLink = item['deep_link']?.toString() ?? '';
   if (deepLink.isNotEmpty) {
     final target = NotificationDeepLinkResolver.resolveFromUri(deepLink);
@@ -262,27 +264,23 @@ class UniversalSearchResults extends StatelessWidget {
     final keys = [
       ...result.orderedSections,
     ];
-    // `sections` without an `articles` key: the legacy results stand in.
-    if (!result.sectionKeys.contains('articles') &&
-        result.results.isNotEmpty) {
+    // The main list comes from `results`, even with `sections.articles` empty.
+    if (result.articles.isNotEmpty && !keys.contains('articles')) {
       keys.insert(0, 'articles');
     }
     for (final key in keys) {
-      final items = key == 'articles' && !result.sectionKeys.contains('articles')
-          ? const <Map<String, dynamic>>[]
-          : result.section(key);
       if (key == 'articles') {
         final shown = presentedArticles.take(articlePreview + 1).toList();
         final all = result.articles;
         children.add(_SectionHeader(
           title: sectionTitle(key),
-          count: result.resultCount > 0 ? result.resultCount : items.length,
-          onSeeAll: all.length > articlePreview
+          count: result.totalResults > 0 ? result.totalResults : all.length,
+          onSeeAll: all.length > articlePreview || result.hasNext
               ? () => Navigator.push(
                   context,
                   MaterialPageRoute(
                       builder: (_) => SearchAllArticlesScreen(
-                          query: query, articles: all)))
+                          query: query, result: result)))
               : null,
         ));
         for (final entry in shown) {
@@ -301,6 +299,7 @@ class UniversalSearchResults extends StatelessWidget {
         }
         continue;
       }
+      final items = result.section(key);
       // Recommendations never add to the result count. A full section may
       // hold more than it shows: "See all" opens that content's own screen.
       final seeAll = items.length >= SearchResult.sectionLimit
@@ -314,8 +313,8 @@ class UniversalSearchResults extends StatelessWidget {
             : () => Navigator.push(
                 context, MaterialPageRoute(builder: (_) => seeAll)),
       ));
-      children.add(_SectionRow(
-          section: key, items: items, onSearchTerm: onSearchTerm));
+      children.add(
+          _SectionRow(section: key, items: items, onSearchTerm: onSearchTerm));
       children.add(const SizedBox(height: 12));
     }
 
@@ -625,25 +624,95 @@ Widget? seeAllScreenFor(String section) {
 
 /// "See all" for articles: every article the search returned, in one list.
 /// The search API has no pagination, so nothing more is requested.
-class SearchAllArticlesScreen extends StatelessWidget {
+class SearchAllArticlesScreen extends StatefulWidget {
   const SearchAllArticlesScreen(
-      {super.key, required this.query, required this.articles});
+      {super.key, required this.query, required this.result});
 
   final String query;
-  final List<NewsArticle> articles;
+
+  /// The search so far: its articles, in order, and where its pages stand.
+  final SearchResult result;
+
+  @override
+  State<SearchAllArticlesScreen> createState() =>
+      _SearchAllArticlesScreenState();
+}
+
+class _SearchAllArticlesScreenState extends State<SearchAllArticlesScreen> {
+  late SearchResult _result = widget.result;
+  bool _loading = false;
+  SearchErrorKind? _loadError;
+
+  /// The next page, added after what is shown. A failure keeps the list.
+  Future<void> _loadMore() async {
+    if (_loading || !_result.hasNext) return;
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    final next = await ApiService.instance.search(
+      widget.query,
+      lang: AppState.instance.contentLanguage,
+      page: _result.page + 1,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (next.errorKind != null) {
+        _loadError = next.errorKind;
+      } else {
+        _result = _result.appendPage(next);
+      }
+    });
+  }
+
+  /// The last row: it asks for the next page as it comes into view.
+  Widget _buildFooter() {
+    final error = _loadError;
+    if (error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
+          children: [
+            Text(searchErrorMessage(error), textAlign: TextAlign.center),
+            if (error == SearchErrorKind.unavailable)
+              TextButton(
+                key: const ValueKey('search_more_retry'),
+                onPressed: _loadMore,
+                child: Text(_telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+              ),
+          ],
+        ),
+      );
+    }
+    if (!_loading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _loadError == null) _loadMore();
+      });
+    }
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 16),
+      child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final articles = _result.articles;
+    final showFooter = _result.hasNext;
     return Scaffold(
-      appBar: AppBar(title: Text('${sectionTitle('articles')}: $query')),
+      appBar:
+          AppBar(title: Text('${sectionTitle('articles')}: ${widget.query}')),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: articles.length,
+        itemCount: articles.length + (showFooter ? 1 : 0),
         separatorBuilder: (_, __) => Divider(
             height: 16,
             color: isDark ? AppColors.borderDark : AppColors.borderLight),
-        itemBuilder: (context, i) => SearchArticleTile(article: articles[i]),
+        itemBuilder: (context, i) => i == articles.length
+            ? _buildFooter()
+            : SearchArticleTile(article: articles[i]),
       ),
     );
   }

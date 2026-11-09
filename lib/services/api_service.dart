@@ -68,8 +68,10 @@ class ApiService {
       {String? fcmToken}) async {
     var token = fcmToken ?? AppState.instance.fcmToken;
 
-    // 1. Resolve FCM token if not yet cached in AppState
-    if (token == null || token.isEmpty) {
+    // 1. Resolve FCM token if not yet cached in AppState. Not while the reader
+    // has notifications off: a new token would bring pushes back.
+    if ((token == null || token.isEmpty) &&
+        AppState.instance.pushNotificationsEnabled) {
       if (!kIsWeb) {
         try {
           token = await FirebaseMessaging.instance.getToken();
@@ -100,7 +102,10 @@ class ApiService {
           'device_name': 'Mobile Device',
           'device_type': deviceType,
           'app_version': '1.0.0',
-          if (token != null && token.isNotEmpty) 'fcm_token': token,
+          if (AppState.instance.pushNotificationsEnabled &&
+              token != null &&
+              token.isNotEmpty)
+            'fcm_token': token,
           if (AppState.instance.installationSecret != null &&
               AppState.instance.installationSecret!.isNotEmpty)
             'installation_secret': AppState.instance.installationSecret,
@@ -160,7 +165,8 @@ class ApiService {
   /// this step that reader could never log in on this phone again.
   @visibleForTesting
   Future<String?> recoverInstallation(String? token) async {
-    final first = await registerGuestDevice(fcmToken: token);
+    final first =
+        await registerGuestDevice(fcmToken: token, forCredential: true);
     final secret = AppState.instance.installationSecret;
     if (first != null && secret != null && secret.isNotEmpty) return token;
 
@@ -168,7 +174,7 @@ class ApiService {
         'starting a fresh installation');
     await AppState.instance.startNewInstallation();
     final fresh = await _freshFcmToken() ?? token;
-    await registerGuestDevice(fcmToken: fresh);
+    await registerGuestDevice(fcmToken: fresh, forCredential: true);
     return fresh;
   }
 
@@ -195,12 +201,56 @@ class ApiService {
     }
   }
 
+  /// Replaceable in tests.
+  @visibleForTesting
+  static Future<void> Function()? fcmTokenDropper;
+
+  /// Removes this phone's FCM token: with notifications off nothing can reach
+  /// it, including the pushes Android shows by itself while the app is closed.
+  Future<void> dropFcmToken() async {
+    AppState.instance.fcmToken = null;
+    final dropper = fcmTokenDropper;
+    if (dropper != null) return dropper();
+    if (kIsWeb) return;
+    try {
+      await FirebaseMessaging.instance
+          .deleteToken()
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      // Tried again at the next app start.
+      debugPrint('[ApiService] Could not remove the FCM token: $e');
+    }
+  }
+
   /// 1. APK Guest Notification Flow: POST /api/v1/notifications/guest-device/
+  ///
+  /// With notifications off, a device that already has its installation
+  /// credential does not register. Registration needs an FCM token, so when
+  /// the credential is what is missing ([forCredential], or none on the
+  /// phone) it still goes ahead, and the token is removed again afterwards.
   Future<Map<String, dynamic>?> registerGuestDevice({
     String? deviceId,
     String? fcmToken,
     String? installationSecret,
+    bool forCredential = false,
   }) async {
+    if (AppState.instance.pushNotificationsEnabled) {
+      return _postGuestDevice(deviceId, fcmToken, installationSecret);
+    }
+    final secret = installationSecret ?? AppState.instance.installationSecret;
+    if (!forCredential && secret != null && secret.isNotEmpty) return null;
+    try {
+      return await _postGuestDevice(deviceId, fcmToken, installationSecret);
+    } finally {
+      await dropFcmToken();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _postGuestDevice(
+    String? deviceId,
+    String? fcmToken,
+    String? installationSecret,
+  ) async {
     final devId = deviceId ?? AppState.instance.deviceId;
     var token = fcmToken ?? AppState.instance.fcmToken;
     final secret = installationSecret ?? AppState.instance.installationSecret;
@@ -219,6 +269,7 @@ class ApiService {
     if (token == null || token.isEmpty) return null;
 
     final lang = AppState.instance.language == 'English' ? 'en' : 'te';
+    final place = AppState.instance.feedPlace;
 
     try {
       final response =
@@ -229,13 +280,17 @@ class ApiService {
         'app_version': '1.0.0',
         'fcm_token': token,
         if (secret != null && secret.isNotEmpty) 'installation_secret': secret,
-        'state': AppState.instance.stateName,
-        'district': AppState.instance.district,
-        'subdistrict': AppState.instance.subdistrict,
-        'village': AppState.instance.village,
+        // Only a place the reader really has: the starting Telangana /
+        // Hyderabad would match them to Hyderabad's local notifications.
+        if (place.state.isNotEmpty) 'state': place.state,
+        if (place.district.isNotEmpty) 'district': place.district,
+        if (AppState.instance.feedCity.isNotEmpty)
+          'city': AppState.instance.feedCity,
+        if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+        if (place.village.isNotEmpty) 'village': place.village,
         'country': AppState.instance.country,
         'preferences': {
-          'enabled': true,
+          'enabled': AppState.instance.pushNotificationsEnabled,
           'content_language': lang,
           'articles': true,
           'posters': true,
@@ -246,8 +301,7 @@ class ApiService {
           'quiet_hours_start': '22:00:00',
           'quiet_hours_end': '06:00:00',
           'timezone': 'Asia/Kolkata',
-          'max_per_hour': 5,
-          'max_per_day': 25,
+          // No max_per_hour / max_per_day: the backend's defaults decide.
         },
       });
 
@@ -278,6 +332,7 @@ class ApiService {
     final token = fcmToken ?? AppState.instance.fcmToken;
     final secret = installationSecret ?? AppState.instance.installationSecret;
 
+    if (!AppState.instance.pushNotificationsEnabled) return null;
     if (token == null || token.isEmpty) return null;
 
     try {
@@ -555,10 +610,12 @@ class ApiService {
     await updateUserLocation({
       'lat': location.latitude,
       'lon': location.longitude,
-      'city': location.city,
+      if (location.city.trim().isNotEmpty) 'city': location.city.trim(),
       'district': location.district,
-      'subdistrict': location.subdistrict ?? location.district,
-      'village': location.village ?? '',
+      if (location.subdistrict?.trim().isNotEmpty == true)
+        'subdistrict': location.subdistrict,
+      if (location.village?.trim().isNotEmpty == true)
+        'village': location.village,
       'state': location.state,
       'country': location.country,
       'location_source': location.source,
@@ -574,15 +631,19 @@ class ApiService {
       debugPrint('Guest mode: Skipping syncUserLocation');
       return;
     }
+    // No place chosen yet: nothing to send, not the starting Hyderabad.
+    if (!AppState.instance.hasValidLocation) return;
+    final place = AppState.instance.feedPlace;
+    final city = AppState.instance.feedCity;
     try {
       await updateUserLocation({
         'lat': AppState.instance.latitude,
         'lon': AppState.instance.longitude,
-        'city': AppState.instance.city,
-        'district': AppState.instance.district,
-        'subdistrict': AppState.instance.subdistrict,
-        'village': AppState.instance.village,
-        'state': AppState.instance.stateName,
+        if (city.isNotEmpty) 'city': city,
+        if (place.district.isNotEmpty) 'district': place.district,
+        if (place.subdistrict.isNotEmpty) 'subdistrict': place.subdistrict,
+        if (place.village.isNotEmpty) 'village': place.village,
+        if (place.state.isNotEmpty) 'state': place.state,
         'country': AppState.instance.country,
         'location_source': 'gps',
       });
@@ -977,11 +1038,11 @@ class ApiService {
         await _dio.get('/api/v1/articles/recommendations/', queryParameters: {
       if (limit != null) 'limit': limit,
       if (lang != null) 'lang': lang,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (village != null) 'village': village,
-      if (subdistrict != null) 'subdistrict': subdistrict,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (village?.isNotEmpty == true) 'village': village,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
       if (category != null) 'category': category,
     });
     return (response.data['data'] as List)
@@ -1285,29 +1346,19 @@ class ApiService {
     // Main / no-scope feeds: the reader's chosen place when the caller gave
     // none; empty (not sent) until one is chosen — backend contract.
     final place = AppState.instance.feedPlace;
-    final effectiveState = state != null
-        ? (state.isNotEmpty ? state : null)
-        : (scope == 'local' ? AppState.instance.stateName : place.state);
+    final effectiveState =
+        state != null ? (state.isNotEmpty ? state : null) : place.state;
     final effectiveDistrict = district != null
         ? (district.isNotEmpty ? district : null)
-        : (scope == 'local' ? AppState.instance.district : place.district);
+        : place.district;
     final effectiveCity = city != null
         ? (city.isNotEmpty ? city : null)
-        : (scope == 'local'
-            ? AppState.instance.city
-            : (AppState.instance.hasValidLocation
-                ? AppState.instance.city
-                : null));
+        : AppState.instance.feedCity;
     final effectiveSubdistrict = subdistrict != null
         ? (subdistrict.isNotEmpty ? subdistrict : null)
-        : (scope == 'local' && AppState.instance.subdistrict.isNotEmpty
-            ? AppState.instance.subdistrict
-            : place.subdistrict);
-    final effectiveVillage = village != null
-        ? (village.isNotEmpty ? village : null)
-        : (scope == 'local' && AppState.instance.village.isNotEmpty
-            ? AppState.instance.village
-            : place.village);
+        : place.subdistrict;
+    final effectiveVillage =
+        village != null ? (village.isNotEmpty ? village : null) : place.village;
     final effectivePageSize = pageSize ?? 25;
 
     final response = await _dio.get('/api/v1/articles/feed/', queryParameters: {
@@ -1405,11 +1456,11 @@ class ApiService {
       if (pageSize != null) 'page_size': pageSize,
       if (lang != null) 'lang': lang,
       if (scope != null) 'scope': scope,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+      if (village?.isNotEmpty == true) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1436,11 +1487,11 @@ class ApiService {
       if (pageSize != null) 'page_size': pageSize,
       if (lang != null) 'lang': lang,
       if (scope != null) 'scope': scope,
-      if (state != null) 'state': state,
-      if (district != null) 'district': district,
-      if (city != null) 'city': city,
-      if (subdistrict != null) 'subdistrict': subdistrict,
-      if (village != null) 'village': village,
+      if (state?.isNotEmpty == true) 'state': state,
+      if (district?.isNotEmpty == true) 'district': district,
+      if (city?.isNotEmpty == true) 'city': city,
+      if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+      if (village?.isNotEmpty == true) 'village': village,
     });
     return ApiResponse<List<VideoItem>>.fromJson(response.data, (json) {
       if (json is List) {
@@ -1497,7 +1548,10 @@ class ApiService {
   /// `GET /api/v1/search/` — universal, multilingual search: grouped
   /// `sections` plus the legacy article `results` (see [SearchResult]).
   ///
-  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it).
+  /// The query goes as typed (Telugu stays UTF-8; Dio URL-encodes it); a
+  /// location typed into it is matched by the backend too. Omitting [lang]
+  /// searches every language. The location filters are for a reader who
+  /// explicitly filters by place, so nothing fills them in by default.
   /// A 401 after the token refresh has already been tried (and failed, so
   /// the reader is now signed out) is retried once as a guest — search
   /// works without login. [cancelToken] drops a request the reader has
@@ -1506,10 +1560,17 @@ class ApiService {
     String query, {
     String? lang,
     String? category,
+    int page = 1,
+    int pageSize = 20,
+    String? state,
+    String? district,
+    String? city,
+    String? subdistrict,
+    String? village,
     CancelToken? cancelToken,
   }) async {
     final q = query.trim();
-    if (q.isEmpty) {
+    if (q.length < SearchResult.minQueryLength) {
       return const SearchResult(results: [], suggestions: []);
     }
     for (var attempt = 0;; attempt++) {
@@ -1518,10 +1579,16 @@ class ApiService {
           '/api/v1/search/',
           queryParameters: {
             'q': q,
-            // `lang`, not `language` (backend confirmation, Oct 2026). No
-            // page / page_size: the search API ignores them.
+            // `lang`, not `language` (backend confirmation, Oct 2026).
             if (lang != null && lang.isNotEmpty) 'lang': lang,
+            'page': page,
+            'page_size': pageSize,
             if (category != null && category.isNotEmpty) 'category': category,
+            if (state?.isNotEmpty == true) 'state': state,
+            if (district?.isNotEmpty == true) 'district': district,
+            if (city?.isNotEmpty == true) 'city': city,
+            if (subdistrict?.isNotEmpty == true) 'subdistrict': subdistrict,
+            if (village?.isNotEmpty == true) 'village': village,
           },
           cancelToken: cancelToken,
         );
@@ -1857,10 +1924,20 @@ class ApiService {
     if (village.isNotEmpty) params['village'] = village;
     if (scope != null) params['scope'] = scope;
 
+    // The next page is meta.next, requested exactly as the backend sent it.
+    final nextUrl = cursor != null &&
+            (cursor.startsWith('http://') ||
+                cursor.startsWith('https://') ||
+                cursor.startsWith('/'))
+        ? cursor
+        : null;
+
     try {
-      final response =
-          await _dio.get('/api/v1/ugc/feed/', queryParameters: params);
-      return ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
+      final response = nextUrl != null
+          ? await _dio.get(nextUrl)
+          : await _dio.get('/api/v1/ugc/feed/', queryParameters: params);
+      final page =
+          ApiResponse<List<UnifiedFeedItem>>.fromJson(response.data, (json) {
         if (json is! List) return <UnifiedFeedItem>[];
         return json.map((item) {
           final map = item is Map<String, dynamic> ? item : <String, dynamic>{};
@@ -1871,9 +1948,11 @@ class ApiService {
             summary: map['description']?.toString() ?? '',
             thumbnailUrl: map['thumbnail_url']?.toString() ?? '',
             mediaUrl: map['media_url']?.toString() ?? '',
-            createdAt:
-                DateParser.tryParse(map['created_at'] ?? map['published_at']) ??
-                    DateTime.now(),
+            // The time shown: published_at, so a post approved now does not
+            // read "22 hours ago"; created_at only for older records.
+            createdAt: DateParser.tryParse(map['published_at']) ??
+                DateParser.tryParse(map['created_at']) ??
+                DateTime.now(),
             district: map['district']?.toString() ?? '',
             subdistrict: map['subdistrict']?.toString() ?? '',
             village: map['village']?.toString() ?? '',
@@ -1904,6 +1983,7 @@ class ApiService {
                 'is_disliked_by_user',
                 'is_bookmarked',
                 'share_url',
+                'language',
                 'uploader_name',
                 'author_name',
                 // {id, display_name, trust_level}: the uploader shown as
@@ -1916,6 +1996,16 @@ class ApiService {
           );
         }).toList();
       });
+      final next = _extractBookmarkNext(response.data);
+      if (next == null) return page;
+      return ApiResponse<List<UnifiedFeedItem>>(
+        data: page.data,
+        meta: page.meta,
+        errors: page.errors,
+        apiError: page.apiError,
+        nextCursor: next,
+        statusCode: page.statusCode,
+      );
     } catch (e) {
       return ApiResponse.error(
         message: e is AppException ? e.message : e.toString(),
@@ -2404,13 +2494,6 @@ class ApiService {
       if (status != null && status.isNotEmpty) 'status': status,
     });
     return response.data as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> previewAdminNotificationTarget(
-      Map<String, dynamic> data) async {
-    final response =
-        await _dio.post('/admin/api/notifications/target-preview/', data: data);
-    return response.data['data'] as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> sendAdminNotification(

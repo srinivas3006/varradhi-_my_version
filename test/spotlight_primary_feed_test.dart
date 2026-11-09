@@ -193,6 +193,8 @@ void main() {
       final controller = SpotlightController();
       await controller.loadFeed(refresh: true);
 
+      addTearDown(() => AppState.instance.hasValidLocation = false);
+      AppState.instance.hasValidLocation = true;
       AppState.instance.district = 'Warangal';
       AppState.instance.stateName = 'Telangana';
       await controller.updateLocation();

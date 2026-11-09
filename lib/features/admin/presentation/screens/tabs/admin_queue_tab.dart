@@ -49,7 +49,7 @@ class _AdminQueueTabState extends State<AdminQueueTab> {
     await showAdminApprovalDialog(
       context,
       submission: item,
-      onApprove: (notes, level, push) => widget.controller.approveItem(id, notes: notes, publicationLevel: level, push: push),
+      onApprove: (notes, level) => widget.controller.approveItem(id, notes: notes, publicationLevel: level),
     );
   }
 

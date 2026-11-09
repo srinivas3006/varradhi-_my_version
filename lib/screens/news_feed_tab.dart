@@ -29,6 +29,7 @@ import '../models/poll.dart';
 import '../widgets/poll_card.dart';
 import '../services/poll_exposure.dart';
 import '../repositories/home_feed_repository.dart';
+import '../repositories/most_viewed_repository.dart';
 import '../core/ads/home_ads.dart';
 import '../core/ads/ad_insertion.dart' show AdFrequencyPolicy;
 import '../services/analytics_queue.dart';
@@ -54,12 +55,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   //   GET /api/v1/feed/       — the Latest list, paged by meta.next
   // Everything else on the screen is a widget with its own API: categories,
   // ads (one request, shared through HomeAds), polls, posters, videos and
-  // the daily quote. A widget that fails hides itself; Home stays up.
+  // the daily quote. Most Viewed is one of these too, with its own API
+  // (/feed/most-viewed/). A widget that fails hides itself; Home stays up.
 
   /// From `/feed/home/`: `personalized` → For You, `local` → Near You.
   List<NewsArticle> _forYou = [];
   List<NewsArticle> _nearYou = [];
   bool _bootstrapLite = false;
+
+  /// From `/feed/most-viewed/`, in the backend's order. Empty hides the row.
+  List<MostViewedItem> _mostViewed = [];
+  Timer? _mostViewedRetryTimer;
 
   /// True once a Home response — cached or fresh — has been applied.
   bool _homeLoaded = false;
@@ -128,6 +134,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         AppState.instance.contentLanguage,
         AppState.instance.stateName,
         AppState.instance.district,
+        AppState.instance.city,
         AppState.instance.subdistrict,
         AppState.instance.village,
       ].join('|').toLowerCase();
@@ -152,6 +159,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     setState(() {
       _forYou = [];
       _nearYou = [];
+      _mostViewed = [];
       _homeLoaded = false;
       _homeFailed = false;
       _latest = [];
@@ -194,6 +202,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   void dispose() {
     AppState.instance.removeListener(_onAppStateChanged);
     _homeRetryTimer?.cancel();
+    _mostViewedRetryTimer?.cancel();
     _breakingNewsController.dispose();
     super.dispose();
   }
@@ -342,6 +351,58 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     _loadPosters(generation);
     _loadHomeVideos(generation);
     _loadDailyQuote(generation, forceRefresh: forceRefresh);
+    _loadMostViewed(generation);
+  }
+
+  /// Runs beside the feeds and never waits for them, or they for it. The
+  /// kept row shows first; a failure leaves it as it is.
+  Future<void> _loadMostViewed(int generation, {bool isRetry = false}) async {
+    _mostViewedRetryTimer?.cancel();
+    final app = AppState.instance;
+    final place = app.feedPlace;
+    final repo = MostViewedRepository.instance;
+    final viewer = _viewer;
+    final lang = app.feedLang;
+    final city = app.feedCity;
+
+    if (_mostViewed.isEmpty) {
+      final kept = await repo.cached(
+        viewer: viewer,
+        lang: lang,
+        state: place.state,
+        district: place.district,
+        city: city,
+        subdistrict: place.subdistrict,
+        village: place.village,
+      );
+      if (kept.isNotEmpty &&
+          _mostViewed.isEmpty &&
+          mounted &&
+          generation == _generation) {
+        setState(() => _mostViewed = kept);
+      }
+    }
+
+    final answer = await repo.fetch(
+      viewer: viewer,
+      lang: lang,
+      state: place.state,
+      district: place.district,
+      city: city,
+      subdistrict: place.subdistrict,
+      village: place.village,
+    );
+    if (!mounted || generation != _generation) return;
+    final items = answer.items;
+    if (items != null) {
+      setState(() => _mostViewed = items);
+    } else if (answer.throttled && !isRetry) {
+      _mostViewedRetryTimer = Timer(const Duration(seconds: 60), () {
+        if (mounted && generation == _generation) {
+          _loadMostViewed(generation, isRetry: true);
+        }
+      });
+    }
   }
 
   /// Opens a Home card. Articles open by slug (detail is
@@ -1623,8 +1684,58 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// Personalized rail from the home bootstrap: horizontal cards, image on
   /// top, two-line headline.
   Widget _buildForYouRail(List<NewsArticle> items) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final telugu = AppState.instance.language == 'Telugu';
+    return _buildStoryRail(
+      section: 'for_you',
+      title: tr('for_you_section'),
+      // Slow connection: the bootstrap came in lite mode.
+      caption:
+          _bootstrapLite ? (telugu ? 'తక్కువ డేటా మోడ్' : 'Data saver') : null,
+      items: items,
+      footer: (index) => items[index].timeAgo,
+    );
+  }
+
+  /// Most Viewed, in the backend's order. No category line: this response
+  /// names no category for articles.
+  Widget _buildMostViewedRail(List<MostViewedItem> items) {
+    final telugu = AppState.instance.language == 'Telugu';
+    return KeyedSubtree(
+      key: const Key('home_most_viewed'),
+      child: _buildStoryRail(
+        section: 'most_viewed',
+        title: telugu ? 'ఎక్కువ మంది చూసినవి' : 'Most Viewed',
+        caption: telugu ? 'గత 24 గంటలు' : 'Last 24 hours',
+        items: [for (final item in items) item.story],
+        showCategory: false,
+        footer: (index) {
+          final item = items[index];
+          return item.periodViews > 0
+              ? '${_viewsLabel(item.periodViews, telugu)} · '
+                  '${item.story.timeAgo}'
+              : item.story.timeAgo;
+        },
+      ),
+    );
+  }
+
+  static String _viewsLabel(int views, bool telugu) {
+    final count = views < 1000
+        ? '$views'
+        : '${(views / 1000).toStringAsFixed(1).replaceAll('.0', '')}K';
+    if (telugu) return '$count వీక్షణలు';
+    return views == 1 ? '1 view' : '$count views';
+  }
+
+  Widget _buildStoryRail({
+    required String section,
+    required String title,
+    String? caption,
+    required List<NewsArticle> items,
+    required String Function(int index) footer,
+    bool showCategory = true,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor =
         isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white;
     final border = isDark
@@ -1636,17 +1747,11 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle(
-            tr('for_you_section'),
-            // Slow connection: the bootstrap came in lite mode.
-            caption: _bootstrapLite
-                ? (telugu ? 'తక్కువ డేటా మోడ్' : 'Data saver')
-                : null,
-          ),
+          _buildSectionTitle(title, caption: caption),
           SizedBox(
             height: 232,
             child: ListView.separated(
-              key: const PageStorageKey('home_for_you_rail'),
+              key: PageStorageKey('home_${section}_rail'),
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: items.length.clamp(0, 12),
@@ -1663,10 +1768,10 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                         borderRadius: BorderRadius.circular(16),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
-                          key: ValueKey('for_you_${article.id}'),
+                          key: ValueKey('${section}_${article.id}'),
                           onTap: () {
                             AdManager.instance.recordContentInteraction();
-                            _trackOpen(article, 'for_you');
+                            _trackOpen(article, section);
                             _openStory(article);
                           },
                           child: DecoratedBox(
@@ -1697,26 +1802,27 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                           ),
                                         ),
                                 ),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                                  child: Text(
-                                    article.category.isNotEmpty
-                                        ? article.category.toUpperCase()
-                                        : '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.4,
-                                      color: AppColors.primary,
+                                if (showCategory)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        12, 10, 12, 0),
+                                    child: Text(
+                                      article.category.isNotEmpty
+                                          ? article.category.toUpperCase()
+                                          : '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.4,
+                                        color: AppColors.primary,
+                                      ),
                                     ),
                                   ),
-                                ),
                                 Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                  padding: EdgeInsets.fromLTRB(
+                                      12, showCategory ? 4 : 10, 12, 0),
                                   child: Text(
                                     article.title,
                                     maxLines: 2,
@@ -1741,7 +1847,9 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                   padding:
                                       const EdgeInsets.fromLTRB(12, 0, 12, 10),
                                   child: Text(
-                                    article.timeAgo,
+                                    footer(index),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: AppColors.textMuted,
@@ -2043,12 +2151,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     // Newest first, fresh-first, and nothing the hero already shows.
     final forYou = homeForYouStories(_forYou, heroItems);
     // Latest is /feed/ itself, so scrolling to the end really loads more.
-    // Nothing already shown above — hero, For You, Near You — repeats here;
+    // Nothing already shown above — hero, For You, Near You, Most Viewed —
+    // repeats here;
     // matched by kind:id, since article and citizen-post ids are separate.
     final shownAbove = {
       ...heroItems.map(_storyKey),
       ...forYou.map(_storyKey),
       ..._nearYou.map(_storyKey),
+      ..._mostViewed.map((item) => _storyKey(item.story)),
     };
     // With a category chip on, the sections above are hidden, so every
     // story of that category is listed (none is "already shown above").
@@ -2244,6 +2354,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                             articles: _nearYou,
                                             cardColor: cardColor,
                                             borderColor: borderColor,
+                                          ),
+                                        // Most Viewed: its own API; hidden
+                                        // when it has nothing.
+                                        if (!filtering &&
+                                            _mostViewed.isNotEmpty)
+                                          RepaintBoundary(
+                                            child: _buildMostViewedRail(
+                                                _mostViewed),
                                           ),
                                         // Village, Mandal, District, State and
                                         // National are not separate sections:

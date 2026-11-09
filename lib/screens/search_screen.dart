@@ -75,6 +75,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
   /// Why the latest search failed; the query stays in the box for Retry.
   SearchErrorKind? _errorKind;
+
+  /// The backend's own words, shown for a query it refused.
+  String? _errorMessage;
   CancelToken? _inFlight;
 
   /// Typing pause before a live search (search handover: 400-500 ms).
@@ -86,13 +89,14 @@ class _SearchScreenState extends State<SearchScreen> {
     _presentedResults = [];
     _response = null;
     _errorKind = null;
+    _errorMessage = null;
     _isLoading = false;
   }
 
   void _onQueryChanged(String query) {
     _debounce?.cancel();
     ++_queryGeneration;
-    if (query.trim().isEmpty) {
+    if (query.trim().length < SearchResult.minQueryLength) {
       setState(_clearResults);
       return;
     }
@@ -113,7 +117,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _debounce?.cancel();
     final generation = ++_queryGeneration;
     final trimmed = query.trim();
-    if (trimmed.isEmpty) {
+    if (trimmed.length < SearchResult.minQueryLength) {
       setState(_clearResults);
       return;
     }
@@ -125,6 +129,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _isLoading = true;
       _errorKind = null;
+      _errorMessage = null;
     });
 
     final futureResponse = ApiService.instance.search(
@@ -142,6 +147,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _isLoading = false;
         _errorKind = response.errorKind;
+        _errorMessage = response.error;
       });
       return;
     }
@@ -165,6 +171,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _presentedResults = insertAdsIntoFeed<NewsArticle>(
         contentItems: _results,
         eligibleAds: ads.cast(),
+        placementZone: 'search',
         allowTimed: false,
         contentKey: (article) => 'search:${article.id}',
       );
@@ -264,7 +271,7 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ],
       ),
-      body: _controller.text.trim().isEmpty
+      body: _controller.text.trim().length < SearchResult.minQueryLength
           ? _buildSuggestions(isDark, telugu)
           : _buildBody(isDark),
     );
@@ -390,8 +397,9 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildBody(bool isDark) {
-    if (_errorKind != null) return _buildError(isDark);
     final response = _response;
+    // Results already on screen stay there, with the message above them.
+    if (_errorKind != null && response == null) return _buildError(isDark);
     if (response == null) {
       return _isLoading
           ? const Center(
@@ -410,18 +418,65 @@ class _SearchScreenState extends State<SearchScreen> {
         onSearchTerm: _searchTerm,
       );
     }
-    return Stack(
+    return Column(
       children: [
-        Positioned.fill(child: results),
-        if (_isLoading)
-          const Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: LinearProgressIndicator(
-                minHeight: 2, color: AppColors.primary),
+        if (_errorKind != null) _buildErrorBanner(isDark),
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(child: results),
+              if (_isLoading)
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(
+                      minHeight: 2, color: AppColors.primary),
+                ),
+            ],
           ),
+        ),
       ],
+    );
+  }
+
+  String get _errorText {
+    final kind = _errorKind!;
+    if (kind == SearchErrorKind.invalidQuery &&
+        (_errorMessage?.isNotEmpty ?? false)) {
+      return _errorMessage!;
+    }
+    return searchErrorMessage(kind);
+  }
+
+  Widget _buildErrorBanner(bool isDark) {
+    final telugu = AppState.instance.language == 'Telugu';
+    return ColoredBox(
+      color: isDark ? AppColors.surfaceElevatedDark : AppColors.chipBg,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                _errorText,
+                key: const ValueKey('search_error_message'),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDark ? AppColors.textLight : AppColors.textDark,
+                ),
+              ),
+            ),
+            if (_errorKind == SearchErrorKind.unavailable)
+              TextButton(
+                key: const ValueKey('search_retry'),
+                onPressed:
+                    _isLoading ? null : () => _runSearch(_controller.text),
+                child: Text(telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -443,7 +498,7 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              searchErrorMessage(kind),
+              _errorText,
               key: const ValueKey('search_error_message'),
               textAlign: TextAlign.center,
               style: TextStyle(

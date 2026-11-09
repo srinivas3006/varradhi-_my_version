@@ -43,7 +43,7 @@ class _AdminUgcDetailScreenState extends State<AdminUgcDetailScreen> {
     await showAdminApprovalDialog(
       context,
       submission: _controller.submission,
-      onApprove: (notes, level, push) => _controller.approve(notes: notes, publicationLevel: level, push: push),
+      onApprove: (notes, level) => _controller.approve(notes: notes, publicationLevel: level),
     );
   }
 

@@ -10,6 +10,7 @@ import 'package:vaaradhi/core/network/dio_client.dart';
 import 'package:vaaradhi/localization/location_translations.dart';
 import 'package:vaaradhi/screens/news_feed_tab.dart';
 import 'package:vaaradhi/screens/profile_tab.dart';
+import 'package:vaaradhi/localization/app_translations.dart';
 import 'package:vaaradhi/state/app_state.dart';
 import 'package:vaaradhi/widgets/bottom_nav_bar.dart';
 
@@ -35,6 +36,8 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     final s = AppState.instance;
+    // A reader with a place; the one without has a test of their own.
+    s.hasValidLocation = true;
     village = s.village;
     subdistrict = s.subdistrict;
     district = s.district;
@@ -43,6 +46,7 @@ void main() {
   });
   tearDown(() {
     final s = AppState.instance
+      ..hasValidLocation = false
       ..village = village
       ..subdistrict = subdistrict
       ..district = district
@@ -77,6 +81,20 @@ void main() {
       await pumpBar(tester);
       // The app is in Telugu, so the village shows in Telugu.
       expect(find.text('కేసారం'), findsOneWidget);
+    });
+
+    testWidgets('no saved place: plain Local, not the starting Hyderabad',
+        (tester) async {
+      AppState.instance
+        ..hasValidLocation = false
+        ..village = ''
+        ..subdistrict = ''
+        ..district = 'Hyderabad'
+        ..city = 'Hyderabad';
+      await pumpBar(tester);
+      expect(find.text('హైదరాబాద్'), findsNothing);
+      expect(find.text('Hyderabad'), findsNothing);
+      expect(find.text(tr('nav_local')), findsOneWidget);
     });
 
     testWidgets('it follows a location change', (tester) async {

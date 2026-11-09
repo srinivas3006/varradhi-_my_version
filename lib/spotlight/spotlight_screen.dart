@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../core/feed/ugc_feed_freshness.dart';
 import '../core/navigation/app_navigator.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
@@ -118,6 +119,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     _controller.addListener(_jumpToInitialStoryOnce);
     // New feed pages: get the photos around the reader ready.
     _controller.addListener(_precacheAroundCurrent);
+    UgcFeedFreshness.published.addListener(_refreshIfAtTop);
   }
 
   void _precacheAroundCurrent() => _precacheUpcoming(_currentPage.value);
@@ -150,11 +152,27 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         state == AppLifecycleState.inactive) {
       SpotlightMediaCoordinator.instance.stopAll();
     }
+    if (state == AppLifecycleState.resumed &&
+        UgcFeedFreshness.isStale(_feedLoadedAt)) {
+      _refreshIfAtTop();
+    }
+  }
+
+  /// When the feed last asked for page one on its own.
+  DateTime? _feedLoadedAt = DateTime.now();
+
+  /// New citizen posts come only from a new page one. Only on the first
+  /// card: a reader further down must not have the story moved under them.
+  void _refreshIfAtTop() {
+    if (_currentPage.value != 0) return;
+    _feedLoadedAt = DateTime.now();
+    unawaited(_controller.loadFeed(refresh: true));
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    UgcFeedFreshness.published.removeListener(_refreshIfAtTop);
     SpotlightMediaCoordinator.instance.stopAll();
     AppTtsService.instance.stop();
     _dwellTimer?.cancel();
@@ -681,7 +699,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               Text(
                 _controller.state.errorMessage ??
                     (isLocal
-                        ? '${AppState.instance.displayLocation} కోసం ప్రస్తుతం స్థానిక వార్తలు అందుబాటులో లేవు. వేరే జిల్లా లేదా మండలాన్ని ఎంచుకోండి.'
+                        ? (AppState.instance.hasValidLocation
+                            ? '${AppState.instance.displayLocation} కోసం ప్రస్తుతం స్థానిక వార్తలు అందుబాటులో లేవు. వేరే జిల్లా లేదా మండలాన్ని ఎంచుకోండి.'
+                            : 'స్థానిక వార్తల కోసం మీ జిల్లా లేదా మండలాన్ని ఎంచుకోండి.')
                         : 'తాజా బ్రేకింగ్ న్యూస్ మరియు అప్‌డేట్‌ల కోసం మళ్లీ చూడండి.'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(

@@ -106,7 +106,7 @@ class NewsArticle {
     this.authorName = '',
     this.authorAvatarUrl = '',
     this.authorLevel = '',
-    this.language = 'te',
+    this.language = '',
     this.isFeatured = false,
     this.mediaItems = const [],
     this.contentKind = 'article',
@@ -338,7 +338,7 @@ class NewsArticle {
           ? (json['uploader']['trust_level'] ?? '').toString()
           : '',
       language:
-          json['language']?.toString() ?? json['lang']?.toString() ?? 'te',
+          json['language']?.toString() ?? json['lang']?.toString() ?? '',
       isFeatured: json['is_featured'] == true,
       mediaItems: parsedMediaItems,
       contentKind: _parseContentKind(json),
@@ -612,6 +612,7 @@ class NewsArticle {
       'is_disliked_by_user': isDisliked,
       'is_bookmarked_by_user': isBookmarked,
       'feed_item_type': contentKind,
+      if (language.isNotEmpty) 'language': language,
       if (shareUrl.isNotEmpty) 'share_url': shareUrl,
       'media_items': mediaItems.map((item) => item.toJson()).toList(),
     };

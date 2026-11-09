@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'account_login_screen.dart';
@@ -17,9 +18,10 @@ class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _saveAgain = false;
 
   // Preferences state
-  bool _enabled = true;
+  bool _enabled = AppState.instance.pushNotificationsEnabled;
   String _contentLanguage = 'te';
   bool _articles = true;
   bool _posters = true;
@@ -34,8 +36,10 @@ class _NotificationSettingsScreenState
   bool _business = true;
   String _quietHoursStart = '22:00:00';
   String _quietHoursEnd = '06:00:00';
-  int _maxPerHour = 5;
-  int _maxPerDay = 25;
+
+  // Shown as the backend reports them; never sent, so its defaults decide.
+  int? _maxPerHour;
+  int? _maxPerDay;
 
   @override
   void initState() {
@@ -57,7 +61,9 @@ class _NotificationSettingsScreenState
       final prefs = await ApiService.instance.getNotificationPreferences();
       if (prefs != null && mounted) {
         setState(() {
-          _enabled = prefs['enabled'] ?? true;
+          // Off on this phone counts as off, whatever the account says.
+          _enabled = (prefs['enabled'] ?? true) &&
+              AppState.instance.pushNotificationsEnabled;
           _contentLanguage = prefs['content_language']?.toString() ?? 'te';
           _articles = prefs['articles'] ?? true;
           _posters = prefs['posters'] ?? true;
@@ -74,8 +80,9 @@ class _NotificationSettingsScreenState
               prefs['quiet_hours_start']?.toString() ?? '22:00:00';
           _quietHoursEnd = prefs['quiet_hours_end']?.toString() ?? '06:00:00';
           _maxPerHour =
-              prefs['max_per_hour'] is int ? prefs['max_per_hour'] : 5;
-          _maxPerDay = prefs['max_per_day'] is int ? prefs['max_per_day'] : 25;
+              prefs['max_per_hour'] is int ? prefs['max_per_hour'] : null;
+          _maxPerDay =
+              prefs['max_per_day'] is int ? prefs['max_per_day'] : null;
         });
       }
     } catch (e) {
@@ -86,7 +93,12 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _savePreferences() async {
-    if (!AppState.instance.isLoggedIn || _isSaving) return;
+    if (!AppState.instance.isLoggedIn) return;
+    if (_isSaving) {
+      // Changed while the last one was saving: save the latest after it.
+      _saveAgain = true;
+      return;
+    }
 
     setState(() => _isSaving = true);
     HapticFeedback.lightImpact();
@@ -108,20 +120,23 @@ class _NotificationSettingsScreenState
       'quiet_hours_start': _quietHoursStart,
       'quiet_hours_end': _quietHoursEnd,
       'timezone': 'Asia/Kolkata',
-      'max_per_hour': _maxPerHour,
-      'max_per_day': _maxPerDay,
       'snoozed_until': null,
     };
 
     final success =
         await ApiService.instance.updateNotificationPreferences(payload);
+    _isSaving = false;
+    if (_saveAgain) {
+      _saveAgain = false;
+      return _savePreferences();
+    }
     if (mounted) {
-      setState(() => _isSaving = false);
+      setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(success
               ? 'నోటిఫికేషన్ సెట్టింగ్‌లు నవీకరించబడ్డాయి'
-              : 'సెట్టింగ్‌లు సేవ్ అయ్యాయి'),
+              : 'సెట్టింగ్‌లు సేవ్ కాలేదు. మళ్లీ ప్రయత్నించండి.'),
           backgroundColor: success ? Colors.green.shade700 : AppColors.primary,
           behavior: SnackBarBehavior.floating,
         ),
@@ -247,6 +262,8 @@ class _NotificationSettingsScreenState
               activeTrackColor: AppColors.primary,
               onChanged: (val) {
                 setState(() => _enabled = val);
+                NotificationService.instance
+                    .setPushEnabled(val, syncAccount: false);
                 _savePreferences();
               },
             ),
@@ -381,12 +398,14 @@ class _NotificationSettingsScreenState
                         fontWeight: FontWeight.w600,
                         color: isDark ? Colors.white : Colors.black87),
                   ),
-                  subtitle: Text(
-                    'గంటకు గరిష్టంగా $_maxPerHour (రోజుకు గరిష్టంగా $_maxPerDay)',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white54 : Colors.black54),
-                  ),
+                  subtitle: _maxPerHour == null || _maxPerDay == null
+                      ? null
+                      : Text(
+                          'గంటకు గరిష్టంగా $_maxPerHour (రోజుకు గరిష్టంగా $_maxPerDay)',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white54 : Colors.black54),
+                        ),
                 ),
               ],
             ),

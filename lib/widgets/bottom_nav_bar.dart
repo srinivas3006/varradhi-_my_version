@@ -40,7 +40,13 @@ class BottomNavBar extends StatelessWidget {
   /// built-in table); a name neither knows stays as it is.
   static String _localLabel() {
     final s = AppState.instance;
-    for (final place in [s.village, s.subdistrict, s.district, s.city]) {
+    final known = s.feedPlace;
+    for (final place in [
+      known.village,
+      known.subdistrict,
+      known.district,
+      s.feedCity,
+    ]) {
       if (place.trim().isNotEmpty) {
         return s.showsTeluguPlaceNames
             ? LocationTranslations.toTelugu(place)
@@ -80,93 +86,97 @@ class BottomNavBar extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: _postRise),
               child: ClipRRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: bgColor,
-                    border: Border(
-                      top: BorderSide(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.05),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: bgColor,
+                      border: Border(
+                        top: BorderSide(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.1)
+                              : Colors.black.withValues(alpha: 0.05),
+                        ),
                       ),
                     ),
-                  ),
-                  child: SafeArea(
-                    child: SizedBox(
-                      height: 65,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: List.generate(_items.length, (index) {
-                          if (index == 2) {
-                            return const SizedBox(width: 64);
-                          }
+                    child: SafeArea(
+                      child: SizedBox(
+                        height: 65,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: List.generate(_items.length, (index) {
+                            if (index == 2) {
+                              return const SizedBox(width: 64);
+                            }
 
-                          final item = _items[index];
-                          final isActive = index == currentIndex;
-                          final itemLabel = item.key == 'nav_local'
-                              ? _localLabel()
-                              : tr(item.key);
+                            final item = _items[index];
+                            final isActive = index == currentIndex;
+                            final itemLabel = item.key == 'nav_local'
+                                ? _localLabel()
+                                : tr(item.key);
 
-                          return Expanded(
-                            child: Semantics(
-                              button: true,
-                              selected: isActive,
-                              label: itemLabel,
-                              child: Tooltip(
-                                message: itemLabel,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    onTap(index);
-                                  },
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      AnimatedScale(
-                                        scale: isActive ? 1.15 : 1.0,
-                                        duration: const Duration(milliseconds: 300),
-                                        curve: Curves.easeOutBack,
-                                        child: Icon(
-                                          item.icon,
-                                          size: 24,
-                                          color: isActive
-                                              ? AppColors.primary
-                                              : AppColors.textMuted,
-                                        ),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                                        child: Text(
-                                          itemLabel,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight:
-                                                isActive ? FontWeight.w700 : FontWeight.w500,
+                            return Expanded(
+                              child: Semantics(
+                                button: true,
+                                selected: isActive,
+                                label: itemLabel,
+                                child: Tooltip(
+                                  message: itemLabel,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      HapticFeedback.selectionClick();
+                                      onTap(index);
+                                    },
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        AnimatedScale(
+                                          scale: isActive ? 1.15 : 1.0,
+                                          duration:
+                                              const Duration(milliseconds: 300),
+                                          curve: Curves.easeOutBack,
+                                          child: Icon(
+                                            item.icon,
+                                            size: 24,
                                             color: isActive
                                                 ? AppColors.primary
                                                 : AppColors.textMuted,
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 2),
+                                          child: Text(
+                                            itemLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: isActive
+                                                  ? FontWeight.w700
+                                                  : FontWeight.w500,
+                                              color: isActive
+                                                  ? AppColors.primary
+                                                  : AppColors.textMuted,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          );
-                        }),
+                            );
+                          }),
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
             ),
             Positioned(
               top: 0,
@@ -194,7 +204,8 @@ class BottomNavBar extends StatelessWidget {
                           end: Alignment.bottomRight,
                         ),
                         border: Border.all(
-                          color: isDark ? AppColors.cardDarkSlate : Colors.white,
+                          color:
+                              isDark ? AppColors.cardDarkSlate : Colors.white,
                           width: 3,
                         ),
                         boxShadow: [

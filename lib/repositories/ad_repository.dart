@@ -65,13 +65,16 @@ class AdRepository {
     String? lang,
     bool forceRefresh = false,
   }) async {
-    final effectiveState = state ?? AppState.instance.stateName;
-    final effectiveDistrict = district ?? AppState.instance.district;
-    final effectiveCity = city ?? AppState.instance.city;
+    // The reader's real place: with none chosen, no location is sent, not
+    // the starting Telangana / Hyderabad.
+    final place = AppState.instance.feedPlace;
+    final effectiveState = state ?? place.state;
+    final effectiveDistrict = district ?? place.district;
+    final effectiveCity = city ?? AppState.instance.feedCity;
     final effectiveLang = lang ?? AppState.instance.contentLanguage;
     final zone = AdPlacement.canonical(placementZone);
-    final effectiveSubdistrict = subdistrict ?? AppState.instance.subdistrict;
-    final effectiveVillage = village ?? AppState.instance.village;
+    final effectiveSubdistrict = subdistrict ?? place.subdistrict;
+    final effectiveVillage = village ?? place.village;
 
     // placement_zone only: the backend's canonical parameter (it accepts
     // `zone` too, but asks for one, not both).

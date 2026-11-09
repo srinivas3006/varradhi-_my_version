@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../core/ads/ad_insertion.dart';
 import '../core/ads/ad_placement.dart';
 import '../core/ads/zone_ads.dart';
+import '../core/feed/ugc_feed_freshness.dart';
+import '../core/network/api_response.dart';
 import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../widgets/ads/unified_ad_widget.dart';
@@ -19,12 +21,14 @@ class UgcFeedScreen extends StatefulWidget {
   State<UgcFeedScreen> createState() => _UgcFeedScreenState();
 }
 
-class _UgcFeedScreenState extends State<UgcFeedScreen> {
+class _UgcFeedScreenState extends State<UgcFeedScreen>
+    with WidgetsBindingObserver {
   final List<NewsArticle> _reports = [];
   bool _isLoading = false;
   int _generation = 0;
   late String _locationKey;
   String get _currentLocationKey => [
+        AppState.instance.feedLang,
         AppState.instance.stateName,
         AppState.instance.district,
         AppState.instance.subdistrict,
@@ -34,7 +38,26 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
   void _onLocationChanged() {
     if (_locationKey == _currentLocationKey) return;
     _locationKey = _currentLocationKey;
+    // Another language or place: nothing of the old list may stay on screen.
+    setState(() {
+      _reports.clear();
+      _cursor = null;
+      _hasMore = true;
+    });
     _refresh();
+  }
+
+  /// When page one last loaded, for the refresh on returning to the app.
+  DateTime? _pageOneLoadedAt;
+
+  void _onPublished() => _refresh();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        UgcFeedFreshness.isStale(_pageOneLoadedAt)) {
+      _refresh();
+    }
   }
 
   String? _errorMessage;
@@ -58,6 +81,8 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
     super.initState();
     _locationKey = _currentLocationKey;
     AppState.instance.addListener(_onLocationChanged);
+    WidgetsBinding.instance.addObserver(this);
+    UgcFeedFreshness.published.addListener(_onPublished);
     _loadZoneAds();
     _loadMore();
     _scrollController.addListener(() {
@@ -77,17 +102,13 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
     });
 
     try {
-      final response = await UgcRepository.instance.getUgcFeed(
-          cursor: _cursor,
-          pageSize: 20,
-          state: AppState.instance.feedPlace.state,
-          district: AppState.instance.feedPlace.district,
-          subdistrict: AppState.instance.feedPlace.subdistrict,
-          village: AppState.instance.feedPlace.village);
+      final firstPage = _cursor == null;
+      final response = await _fetchPage(_cursor);
 
       if (!mounted || generation != _generation) return;
       if (response.hasErrors) throw Exception(response.errorMessage);
       setState(() {
+        // Appended in the backend's order; never re-sorted here.
         final ids = _reports.map((item) => item.id).toSet();
         _reports
             .addAll((response.data ?? []).where((item) => ids.add(item.id)));
@@ -95,6 +116,7 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
         _cursor = response.nextCursor;
         _hasMore =
             response.nextCursor != null && response.nextCursor!.isNotEmpty;
+        if (firstPage) _pageOneLoadedAt = DateTime.now();
       });
     } catch (e) {
       if (mounted && generation == _generation) {
@@ -108,21 +130,58 @@ class _UgcFeedScreenState extends State<UgcFeedScreen> {
     }
   }
 
+  Future<ApiResponse<List<NewsArticle>>> _fetchPage(String? cursor) {
+    return UgcRepository.instance.getUgcFeed(
+        cursor: cursor,
+        pageSize: 20,
+        scope: 'main',
+        state: AppState.instance.feedPlace.state,
+        district: AppState.instance.feedPlace.district,
+        subdistrict: AppState.instance.feedPlace.subdistrict,
+        village: AppState.instance.feedPlace.village);
+  }
+
+  /// Page one again, without the cursor. It replaces the list when it loads;
+  /// the list stays as it is if the request fails.
   Future<void> _refresh() async {
-    ++_generation;
-    _isLoading = false;
+    final generation = ++_generation;
     setState(() {
-      _reports.clear();
-      _cursor = null;
-      _hasMore = true;
+      _isLoading = true;
+      _errorMessage = null;
     });
     _loadZoneAds();
-    await _loadMore();
+    try {
+      final response = await _fetchPage(null);
+      if (!mounted || generation != _generation) return;
+      if (response.hasErrors) throw Exception(response.errorMessage);
+      setState(() {
+        final ids = <String>{};
+        _reports
+          ..clear()
+          ..addAll((response.data ?? []).where((item) => ids.add(item.id)));
+        _isLoading = false;
+        _cursor = response.nextCursor;
+        _hasMore =
+            response.nextCursor != null && response.nextCursor!.isNotEmpty;
+        _pageOneLoadedAt = DateTime.now();
+      });
+    } catch (e) {
+      if (mounted && generation == _generation) {
+        setState(() {
+          _isLoading = false;
+          if (_reports.isEmpty) {
+            _errorMessage = tr('citizen_reports_load_failed');
+          }
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     AppState.instance.removeListener(_onLocationChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    UgcFeedFreshness.published.removeListener(_onPublished);
     _scrollController.dispose();
     super.dispose();
   }

@@ -9,8 +9,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vaaradhi/core/media/media_source.dart';
 import 'package:vaaradhi/core/media/video_playback_controller.dart';
 import 'package:vaaradhi/models/news_article.dart';
+import 'package:vaaradhi/models/unified_feed_item.dart';
 import 'package:vaaradhi/services/analytics_queue.dart';
 import 'package:vaaradhi/services/content_analytics.dart';
+import 'package:vaaradhi/state/app_state.dart';
 import 'package:vaaradhi/utils/share_service.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -101,6 +103,45 @@ void main() {
         expect(e['device_type'], isNotNull);
         expect(e['language'], isNotNull);
       }
+    });
+
+    group('language is the story\'s own', () {
+      NewsArticle story(String? language) => NewsArticle.fromJson({
+            'id': _articleId,
+            'slug': 's',
+            'title': 't',
+            if (language != null) 'language': language,
+          });
+
+      setUp(() => AppState.instance.setContentLanguage('te'));
+      tearDown(() => AppState.instance.setContentLanguage(null));
+
+      test('an English story read by a Telugu reader says en', () async {
+        await AnalyticsQueue.instance.trackContent('article_open', story('en'));
+        expect(events().single['language'], 'en');
+      });
+
+      test('none or an unknown value: the reader\'s language', () async {
+        await AnalyticsQueue.instance.trackContent('article_open', story(null));
+        await AnalyticsQueue.instance
+            .trackContent('article_open', story('all'));
+        expect(events().map((e) => e['language']), ['te', 'te']);
+      });
+
+      test('a citizen feed item keeps its top-level language', () {
+        final item = UnifiedFeedItem.fromJson(
+            {'id': _ugcId, 'type': 'ugc', 'language': 'en'});
+        expect(item.toArticle().language, 'en');
+      });
+
+      test('a saved story keeps it', () {
+        expect(NewsArticle.fromJson(story('en').toJson()).language, 'en');
+      });
+
+      test('app events still use the reader\'s language', () async {
+        await AnalyticsQueue.instance.track('feed_refresh');
+        expect(events().single['language'], 'te');
+      });
     });
 
     test('no UUID (slug only): nothing sent', () async {

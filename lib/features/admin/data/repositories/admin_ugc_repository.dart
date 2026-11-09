@@ -5,7 +5,6 @@ import '../models/admin_bulk_action_model.dart';
 import '../models/admin_moderation_log_model.dart';
 import '../models/admin_otp_delivery_model.dart';
 import '../models/admin_paginated_response.dart';
-import '../models/admin_push_notification_payload.dart';
 import '../models/admin_report_model.dart';
 import '../models/admin_reporter_profile_model.dart';
 import '../models/admin_ugc_submission_model.dart';
@@ -75,10 +74,9 @@ class AdminUgcRepository {
     String id, {
     required String notes,
     required String publicationLevel,
-    AdminPushNotificationPayload? push,
   }) =>
       _guard(
-        () => _api.approveSubmission(id, notes: notes, publicationLevel: publicationLevel, push: push),
+        () => _api.approveSubmission(id, notes: notes, publicationLevel: publicationLevel),
         'Unable to approve submission',
       );
 

@@ -56,12 +56,13 @@ class ReelsScreen extends StatefulWidget {
   /// global reels with ones matching these).
   static Map<String, String> readerLocation() {
     final s = AppState.instance;
+    final place = s.feedPlace;
     return {
-      'state': s.stateName,
-      'district': s.district,
-      'city': s.city,
-      'subdistrict': s.subdistrict,
-      'village': s.village,
+      'state': place.state,
+      'district': place.district,
+      'city': s.feedCity,
+      'subdistrict': place.subdistrict,
+      'village': place.village,
     };
   }
 
