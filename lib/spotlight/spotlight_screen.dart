@@ -7,6 +7,8 @@ import '../core/feed/ugc_feed_freshness.dart';
 import '../core/navigation/app_navigator.dart';
 import '../models/spotlight_item.dart';
 import '../models/news_article.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../widgets/ads/ad_video_preloader.dart';
 import '../widgets/ads/sponsored_spotlight_ad_card.dart';
 import '../services/ad_delivery_service.dart';
 import '../core/widgets/flip_page_view.dart';
@@ -174,6 +176,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     WidgetsBinding.instance.removeObserver(this);
     UgcFeedFreshness.published.removeListener(_refreshIfAtTop);
     SpotlightMediaCoordinator.instance.stopAll();
+    AdVideoPreloader.instance.clear();
     AppTtsService.instance.stop();
     _dwellTimer?.cancel();
     _locationPromptTimer?.cancel();
@@ -295,6 +298,21 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     final feed = _controller.state.feed;
     for (var i = index; i <= index + 3 && i < feed.length; i++) {
       if (i < 0) continue;
+      // An ad ahead: its poster and, for a video, its player, so it opens
+      // on a picture rather than a black page with a spinner.
+      final ad = feed[i].adBanner;
+      if (ad != null) {
+        if (ad.imageUrl.isNotEmpty && _precachedUrls.add(ad.imageUrl)) {
+          unawaited(precacheImage(
+              CachedNetworkImageProvider(ad.imageUrl), context,
+              onError: (_, __) {}));
+        }
+        // Not the current page: its card opens its own player.
+        if (i > index && i <= index + 2) {
+          AdVideoPreloader.instance.preload(ad.videoUrl);
+        }
+        continue;
+      }
       final article = feed[i].article;
       if (article == null) continue;
       // The full story too (the feed has only a summary), so the card is
@@ -328,6 +346,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
 
   void _closeSpotlight() {
     SpotlightMediaCoordinator.instance.stopAll();
+    AdVideoPreloader.instance.clear();
     AppTtsService.instance.stop();
 
     if (Navigator.of(context).canPop()) {
@@ -524,9 +543,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
             active: isCurrent,
             exposureKey: 'spotlight_${_controller.state.generation}_${item.id}',
             onClose: () => _controller.removeAdAt(index),
+            // No duration from the backend: images close after 5 s; a video
+            // is not cut off mid-play (plain Skip, no timer).
             durationSeconds: item.adBanner!.displayDurationSeconds > 0
                 ? item.adBanner!.displayDurationSeconds
-                : 5,
+                : (item.adBanner!.videoUrl.trim().isNotEmpty ? 0 : 5),
             placementZone: 'feed');
         // Full page: the ad is immersive (chrome hidden), so it gets the whole
         // screen. Wrapping it with the trending strip squeezed the creative

@@ -111,7 +111,7 @@ void main() {
   });
 
   test(
-      'Spotlight composes four parents without splitting mixed media; no ad that early',
+      'Spotlight composes four parents without splitting mixed media; the ad after the 4th, as set',
       () async {
     adapter.mixed = true;
     final controller = SpotlightController();
@@ -123,8 +123,9 @@ void main() {
       SpotlightType.ugc,
       SpotlightType.poster,
       SpotlightType.poster,
-      // Ads are at least 6 stories apart and not in the first 4
-      // (AdFrequencyPolicy.spotlight), so a 4-card feed has none.
+      // The ad's display_frequency is 4: one ad after every 4 cards, as set
+      // in the admin (AdFrequencyPolicy.spotlight).
+      SpotlightType.ad,
     ]);
     expect(items.first.article!.orderedMedia.length, 3);
     expect(items[1].article!.orderedMedia.length, 2);

@@ -69,7 +69,8 @@ class SpotlightState {
       showOverlays: showOverlays ?? this.showOverlays,
       isFetching: isFetching ?? this.isFetching,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
-      selectedCategory: clearCategory ? null : (selectedCategory ?? this.selectedCategory),
+      selectedCategory:
+          clearCategory ? null : (selectedCategory ?? this.selectedCategory),
       locationName: locationName ?? this.locationName,
       generation: generation ?? this.generation,
     );

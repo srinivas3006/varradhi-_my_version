@@ -50,6 +50,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.3
+  # Test-only: a fake video player for the ad playback tests.
+  plugin_platform_interface: ^2.1.8
+  video_player_platform_interface: ^6.9.0
 
 flutter_launcher_icons:
   android: true

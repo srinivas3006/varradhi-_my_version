@@ -2295,8 +2295,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
                                     .buildFeedPresentation<NewsArticle>(
                                     contentItems: recommended,
                                     adsPool: inlineAds,
-                                    // Each ad once, spaced out, capped — not
-                                    // the same banner every few stories.
+                                    // As set in the admin: every
+                                    // display_frequency stories, no cap.
                                     policy: AdFrequencyPolicy.home,
                                     contentKey: (article) =>
                                         '${article.contentKind}:${article.id}',

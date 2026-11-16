@@ -15,8 +15,11 @@ import '../widgets/ads/ad_viewability_detector.dart';
 import '../core/media/media_resolver.dart';
 import '../core/media/media_source.dart';
 import '../core/media/network_video_playback_controller.dart';
+import '../core/media/video_playback_controller.dart';
 import '../core/media/video_player_widget.dart';
 import '../widgets/ads/full_screen_ad_image.dart';
+import '../widgets/ads/video_ad_card.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -113,10 +116,13 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _showSplashAd(AdBanner ad) async {
+    // The poster in the cache the full-screen image reads from. The
+    // impression is not sent here: the ad's viewability detector sends it
+    // once the creative is on screen (handover: never on API response).
     if (ad.imageUrl.isNotEmpty && mounted) {
-      precacheImage(NetworkImage(ad.imageUrl), context);
+      unawaited(precacheImage(CachedNetworkImageProvider(ad.imageUrl), context,
+          onError: (_, __) {}));
     }
-    AdManager.instance.recordImpression(ad, placementZone: 'splash');
 
     await showGeneralDialog<void>(
       context: context,
@@ -129,11 +135,17 @@ class _SplashScreenState extends State<SplashScreen>
           ad: ad,
           onTap: () async {
             AdManager.instance.recordClick(ad, placementZone: 'splash');
-            if (ad.destinationUrl.isNotEmpty) {
-              final uri = Uri.tryParse(ad.destinationUrl);
-              if (uri != null && await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
+            final uri = Uri.tryParse(ad.destinationUrl.trim());
+            if (ad.destinationUrl.trim().isNotEmpty && uri != null) {
+              // canLaunchUrl answers false whenever package visibility hides
+              // the handler; try the launch, then the in-app browser.
+              try {
+                final launched =
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                if (!launched) {
+                  await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+                }
+              } catch (_) {}
             }
             // The ad may have closed itself (countdown ended) while the link
             // was opening; popping again would close the splash, not the ad.
@@ -261,6 +273,7 @@ class _SplashAdOverlay extends StatefulWidget {
 class _SplashAdOverlayState extends State<_SplashAdOverlay> {
   NetworkVideoPlaybackController? _videoController;
   bool _videoInitialized = false;
+  bool _videoFailed = false;
   Timer? _clock;
   int _elapsed = 0;
   bool _closed = false;
@@ -331,22 +344,39 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
     );
 
     if (mediaSource.type == MediaSourceType.networkVideo) {
+      // With sound (product decision); the reader can mute it.
       _videoController = NetworkVideoPlaybackController(
         mediaSource,
         autoPlay: true,
         isMuted: false,
-        loop: true,
+        // Played once; it is never restarted.
+        loop: false,
       );
 
       final controller = _videoController!;
-      controller.initialize().then((_) {
-        if (mounted && identical(controller, _videoController)) {
-          setState(() {
-            _videoInitialized = true;
-          });
-          controller.play();
+      // Watched to the end: the ad is complete, even if its time is not up.
+      controller.addListener(() {
+        if (!mounted || _closed || !_videoInitialized) return;
+        if (VideoAdCard.reachedEnd(controller.value)) {
+          AdManager.instance.recordComplete(widget.ad,
+              placementZone: 'splash', contextKey: 'splash_${widget.ad.id}');
+          _close(widget.onComplete);
         }
+      });
+      controller.initialize().then((_) {
+        if (!mounted || !identical(controller, _videoController)) return;
+        // initialize() reports a failure in its state, not by throwing.
+        if (controller.value.status == PlaybackStatus.error) {
+          setState(() => _videoFailed = true);
+          _failIfNothingToShow();
+          return;
+        }
+        setState(() {
+          _videoInitialized = true;
+        });
+        controller.play();
       }).catchError((_) {
+        if (mounted) setState(() => _videoFailed = true);
         // Fall back to the poster if there is one; otherwise there is
         // nothing to show and holding the reader here serves no one.
         if (mounted) _failIfNothingToShow();
@@ -464,6 +494,34 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
               ),
             ),
 
+          if (_videoInitialized && !_videoFailed && _videoController != null)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 68,
+              right: 16,
+              child: ValueListenableBuilder(
+                valueListenable: _videoController!,
+                builder: (context, state, _) => GestureDetector(
+                  key: const Key('splash_ad_mute'),
+                  onTap: () => _videoController!.setMuted(!state.isMuted),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Icon(
+                      state.isMuted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           // Skip Ad Button (top-right, safe area aware, with countdown)
           Positioned(
             top: MediaQuery.paddingOf(context).top + 16,
@@ -545,35 +603,35 @@ class _SplashAdOverlayState extends State<_SplashAdOverlay> {
   );
 
   Widget _buildMedia() {
-    // Video ad — use VideoPlayerWidget with poster fallback
-    if (widget.ad.isVideo && _videoController != null) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          _backdrop(),
-          if (_videoInitialized)
-            Center(
-              child: VideoPlayerWidget(
-                controller: _videoController!,
-                fit: BoxFit.contain,
+    // Video ad: fills the screen like Reels (a portrait video always; a
+    // wide one is shown whole over the blurred poster). The poster shows
+    // while it loads, and stays if the video fails.
+    if (widget.ad.isVideo && _videoController != null && !_videoFailed) {
+      final controller = _videoController!;
+      return LayoutBuilder(builder: (context, c) {
+        final pageRatio = c.maxHeight > 0 && c.maxWidth.isFinite
+            ? c.maxWidth / c.maxHeight
+            : 0.0;
+        final fill = _videoInitialized &&
+            FullScreenAdImage.videoFills(
+                controller.value.aspectRatio, pageRatio);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_videoInitialized) ...[
+              if (!fill) _backdrop(),
+              VideoPlayerWidget(
+                controller: controller,
+                fit: fill ? BoxFit.cover : BoxFit.contain,
                 showControls: false,
               ),
-            )
-          else ...[
-            // Hold the poster, contained like the video will be, so the
-            // creative does not jump size when playback starts.
-            if (widget.ad.imageUrl.isNotEmpty)
-              Center(
-                child: Image.network(
-                  widget.ad.imageUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            _spinner,
+            ] else if (widget.ad.imageUrl.isNotEmpty)
+              FullScreenAdImage(imageUrl: widget.ad.imageUrl)
+            else
+              _spinner,
           ],
-        ],
-      );
+        );
+      });
     }
 
     // Image ad — fills the phone screen when made in (or near) the phone's

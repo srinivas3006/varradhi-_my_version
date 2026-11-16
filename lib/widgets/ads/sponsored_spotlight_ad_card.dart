@@ -36,6 +36,12 @@ class SponsoredSpotlightAdCard extends StatefulWidget {
     this.placementZone = 'feed',
   });
 
+  /// Whole seconds of video left, rounded up (shows 1 until the very end).
+  static int secondsLeft(Duration position, Duration duration) {
+    final ms = (duration - position).inMilliseconds;
+    return ms <= 0 ? 0 : (ms / 1000).ceil();
+  }
+
   @override
   State<SponsoredSpotlightAdCard> createState() =>
       _SponsoredSpotlightAdCardState();
@@ -47,11 +53,63 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
   Timer? _timer;
   bool _isClosing = false;
 
+  /// A video ad's countdown follows the video (time left to play), not a
+  /// clock: it holds while the video buffers or pauses and ends with it.
+  /// Falls back to the clock if the video cannot be played.
+  bool get _followsVideo =>
+      widget.ad.videoUrl.trim().isNotEmpty && !_videoFailed;
+  bool _videoFailed = false;
+
+  /// The video failed with no poster before this page was reached: it is
+  /// skipped the moment it becomes the current page.
+  bool _skipWhenReached = false;
+
+  void _onVideoProgress(Duration position, Duration duration) {
+    final left = SponsoredSpotlightAdCard.secondsLeft(position, duration);
+    if (mounted && left > 0 && left != _secondsRemaining) {
+      setState(() => _secondsRemaining = left);
+    }
+  }
+
+  /// Watched to the end: the same as the countdown running out.
+  void _onVideoCompleted() {
+    if (!mounted || !widget.active) return;
+    setState(() => _secondsRemaining = 0);
+    AdManager.instance
+        .recordHide(widget.ad, placementZone: widget.placementZone);
+    _handleClose(isManualDismiss: false);
+  }
+
+  void _onVideoFailed() {
+    if (!mounted) return;
+    // Nothing to show at all (no poster to fall back on): never leave the
+    // reader on a black page with a spinner. The page is removed, as when
+    // its time is up; nothing was seen, so nothing is recorded.
+    if (widget.ad.imageUrl.trim().isEmpty) {
+      debugPrint('[Ad] video ${widget.ad.id} could not play; skipping it');
+      if (widget.active) {
+        _handleClose(isManualDismiss: false);
+      } else {
+        _skipWhenReached = true;
+      }
+      return;
+    }
+    setState(() {
+      _videoFailed = true;
+      _secondsRemaining = widget.durationSeconds;
+    });
+    _startCountdown();
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _secondsRemaining = (widget.ad.isInterstitial || widget.ad.isFullScreen)
+    // Timed ads count down on Skip: full-screen, interstitial and video
+    // (display_duration_seconds; 0 means no timer).
+    _secondsRemaining = (widget.ad.isInterstitial ||
+            widget.ad.isFullScreen ||
+            widget.ad.videoUrl.trim().isNotEmpty)
         ? widget.durationSeconds
         : 0;
     _startCountdown();
@@ -59,7 +117,8 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
 
   void _startCountdown() {
     _timer?.cancel();
-    if (!widget.active ||
+    if (_followsVideo ||
+        !widget.active ||
         _secondsRemaining <= 0 ||
         (WidgetsBinding.instance.lifecycleState != null &&
             WidgetsBinding.instance.lifecycleState !=
@@ -83,7 +142,15 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
   @override
   void didUpdateWidget(covariant SponsoredSpotlightAdCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.active != widget.active) _startCountdown();
+    if (oldWidget.active != widget.active) {
+      if (widget.active && _skipWhenReached) {
+        // Failed while it was still the page ahead.
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => mounted ? _handleClose(isManualDismiss: false) : null);
+        return;
+      }
+      _startCountdown();
+    }
   }
 
   @override
@@ -150,14 +217,9 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
     super.dispose();
   }
 
-  /// Height of the "Ad" / "Skip" row (14 top offset + ~32 pill + gap). The
-  /// creative starts below it so the disclosure never covers the artwork.
-  static const double _chromeRowHeight = 54;
-
   @override
   Widget build(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return AdViewabilityDetector(
       ad: widget.ad,
@@ -198,28 +260,21 @@ class _SponsoredSpotlightAdCardState extends State<SponsoredSpotlightAdCard>
               // row and the home indicator. A fixed 9:16 frame used to sit
               // inside that, which shrank any creative on screens taller or
               // wider than 9:16 and left a band of backdrop around it.
-              child: Padding(
-                // Images use the whole page (the Ad / Skip row floats over
-                // them); video keeps clear of that row.
-                padding: widget.ad.videoUrl.isNotEmpty
-                    ? EdgeInsets.only(
-                        top: topPadding + _chromeRowHeight,
-                        bottom: bottomPadding + 12,
-                      )
-                    : EdgeInsets.zero,
+              // Image and video alike use the whole page; the Ad / Skip row
+              // floats over them. Video was the feed card in a 9:16 frame —
+              // a small player above a white box — not a full-screen ad.
+              child: SizedBox.expand(
                 child: widget.ad.videoUrl.isNotEmpty
-                    ? Center(
-                        // Video keeps a portrait frame so the player has a
-                        // stable size to lay out against.
-                        child: AspectRatio(
-                          aspectRatio: 9 / 16,
-                          child: AdActivityScope(
-                              active: widget.active,
-                              child: VideoAdCard(
-                                  ad: widget.ad,
-                                  placementZone: widget.placementZone,
-                                  exposureKey:
-                                      widget.exposureKey ?? widget.ad.id)),
+                    ? AdActivityScope(
+                        active: widget.active,
+                        child: VideoAdCard(
+                          ad: widget.ad,
+                          placementZone: widget.placementZone,
+                          exposureKey: widget.exposureKey ?? widget.ad.id,
+                          fullScreen: true,
+                          onProgress: _onVideoProgress,
+                          onCompleted: _onVideoCompleted,
+                          onFailed: _onVideoFailed,
                         ),
                       )
                     // Fills the phone screen when the creative is (close to)
