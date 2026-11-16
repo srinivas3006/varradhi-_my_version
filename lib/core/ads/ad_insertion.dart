@@ -47,22 +47,20 @@ class AdFrequencyPolicy {
   /// No pacing beyond the backend's display_frequency (the old behaviour).
   static const none = AdFrequencyPolicy();
 
-  /// Home: a scrolled list the reader reads top to bottom — each ad once,
-  /// at least 6 stories apart, none in the first 3, at most 4 in all.
-  static const home = AdFrequencyPolicy(
-    minGap: 6,
-    firstAfter: 3,
-    maxAdsPerList: 4,
-    maxRepeatsPerAd: 1,
-  );
+  /// Home: paced exactly as each ad was set up in the admin — one ad after
+  /// every `display_frequency` stories (5 when unset), all the way down the
+  /// list, every ad taking its turn and never the same one twice in a row
+  /// when there is another. The backend owns daily caps. (It used to show
+  /// each ad once, at most 4, at least 6 stories apart.)
+  static const home = AdFrequencyPolicy();
 
-  /// Spotlight: one full-screen card at a time, so an ad page is a bigger
-  /// interruption — at least 6 stories apart, each ad at most twice.
-  static const spotlight = AdFrequencyPolicy(
-    minGap: 6,
-    firstAfter: 4,
-    maxRepeatsPerAd: 2,
-  );
+  /// Spotlight: paced exactly as the ad was set up in the admin — one ad
+  /// after every `display_frequency` stories (5 when unset), all through
+  /// the feed however far the reader goes, rotating through every ad and
+  /// never the same one twice in a row when there is another. The backend
+  /// owns daily caps. (It used to allow each ad only twice and at least 6
+  /// stories apart, so ads stopped appearing after the first few.)
+  static const spotlight = AdFrequencyPolicy();
 
   /// Category lists (zone `category`): at least 6 stories apart, none in
   /// the first 3, at most 4 in all.
@@ -106,6 +104,16 @@ Map<int, AdBanner> adSlotsAfter<T>({
   return slots;
 }
 
+/// [adZone] (as the backend sent it) is the canonical [zone]; an unknown
+/// zone matches nothing.
+bool _sameZone(String adZone, String zone) {
+  try {
+    return AdPlacement.canonical(adZone) == zone;
+  } on ArgumentError {
+    return false;
+  }
+}
+
 /// Deterministic rotation: the next ad's interval is measured in parent
 /// content cards since the previous insertion. Media and ads never increment it.
 List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
@@ -123,7 +131,7 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
       .where((ad) =>
           ad.id.isNotEmpty &&
           ids.add(ad.id) &&
-          ad.placementZone == zone &&
+          _sameZone(ad.placementZone, zone) &&
           AdTypeResolver.isSupported(ad) &&
           AdPlacement.supports(zone, ad) &&
           !ad.isBottomSticky &&

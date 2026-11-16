@@ -146,11 +146,13 @@ class _InterstitialAdScreenState extends State<_InterstitialAdScreen>
               behavior: HitTestBehavior.opaque,
               onTap: _handleTap,
               child: widget.ad.videoUrl.isNotEmpty
-                  ? Center(
-                      child: VideoAdCard(
-                          ad: widget.ad,
-                          placementZone: widget.ad.placementZone,
-                          exposureKey: 'interstitial_${widget.ad.id}'),
+                  ? VideoAdCard(
+                      ad: widget.ad,
+                      placementZone: widget.ad.placementZone,
+                      exposureKey: 'interstitial_${widget.ad.id}',
+                      fullScreen: true,
+                      // The title and call to action below are this screen's.
+                      showDetails: false,
                     )
                   : FullScreenAdImage(
                       imageUrl: widget.ad.imageUrl,

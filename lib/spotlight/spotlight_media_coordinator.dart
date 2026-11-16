@@ -6,7 +6,8 @@ import '../services/tts_service.dart';
 /// - Automatically pauses video when TTS starts, and stops TTS when video starts.
 /// - Coordinates instant media suspension on swiping, app backgrounding, and navigation.
 class SpotlightMediaCoordinator extends ChangeNotifier {
-  static final SpotlightMediaCoordinator instance = SpotlightMediaCoordinator._internal();
+  static final SpotlightMediaCoordinator instance =
+      SpotlightMediaCoordinator._internal();
   SpotlightMediaCoordinator._internal();
 
   String? _activeVideoArticleId;
@@ -14,7 +15,8 @@ class SpotlightMediaCoordinator extends ChangeNotifier {
 
   String? get activeVideoArticleId => _activeVideoArticleId;
   String? get activeTtsArticleId => _activeTtsArticleId;
-  bool get hasActiveMedia => _activeVideoArticleId != null || _activeTtsArticleId != null;
+  bool get hasActiveMedia =>
+      _activeVideoArticleId != null || _activeTtsArticleId != null;
 
   /// Called when an inline or card video starts playing.
   void notifyVideoStarted(String articleId) {

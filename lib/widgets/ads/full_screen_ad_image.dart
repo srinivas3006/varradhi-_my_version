@@ -34,6 +34,18 @@ class FullScreenAdImage extends StatefulWidget {
     return diff <= fillTolerance;
   }
 
+  /// Whether a video of [videoRatio] fills a page of [pageRatio]. A
+  /// portrait video always fills a portrait page, as on Reels and Shorts: a
+  /// 9:16 ad on a 9:20 phone loses a little at the sides rather than
+  /// showing bars above and below. A wide video is still shown whole.
+  static bool videoFills(double videoRatio, double pageRatio) {
+    if (fills(videoRatio, pageRatio)) return true;
+    return videoRatio > 0 &&
+        pageRatio > 0 &&
+        pageRatio < 1 &&
+        videoRatio <= 0.8;
+  }
+
   @override
   State<FullScreenAdImage> createState() => _FullScreenAdImageState();
 }

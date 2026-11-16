@@ -77,13 +77,19 @@ class FlipPageView extends StatelessWidget {
 
                 final delta = (index - page).clamp(-1.0, 1.0);
 
-                // Settled card: no transform at all, so a story at rest is
-                // pixel-exact and its text never sits on a transformed layer.
-                if (delta == 0) return child;
-
-                return delta < 0
-                    ? _outgoing(child, -delta, pageHeight)
-                    : _incoming(child, delta);
+                // One shape for every phase — settled, covered, sliding in —
+                // only the numbers change. When the wrapper differed between
+                // them, Flutter rebuilt the card from scratch as the swipe
+                // settled: a playing video ad started again from zero.
+                // At rest the offset, scrim and shadow are all zero, and a
+                // zero translation paints without a layer, so a settled card
+                // is still pixel-exact.
+                if (delta < 0) {
+                  return _frame(child,
+                      offsetY: parallaxAt(-delta, pageHeight),
+                      scrim: scrimAt(-delta));
+                }
+                return _frame(child, shadow: shadowAt(delta));
               },
             );
           },
@@ -92,59 +98,53 @@ class FlipPageView extends StatelessWidget {
     );
   }
 
-  /// The card being covered. Pushed back down against the pager so it only
-  /// drifts up slowly, and dimmed so it reads as sinking under the new one.
-  Widget _outgoing(Widget child, double progress, double pageHeight) {
+  /// A card in the pager. The card being covered ([offsetY], [scrim]) is
+  /// pushed back down against the pager so it only drifts up slowly, and
+  /// dimmed so it reads as sinking under the new one. The card sliding in on
+  /// top tracks the finger exactly — no lag, no scale — and casts a soft
+  /// [shadow] onto the card it is covering.
+  Widget _frame(
+    Widget child, {
+    double offsetY = 0,
+    double scrim = 0,
+    double shadow = 0,
+  }) {
     return Transform.translate(
-      offset: Offset(0, parallaxAt(progress, pageHeight)),
+      offset: Offset(0, offsetY),
       child: Stack(
         fit: StackFit.passthrough,
+        clipBehavior: Clip.none,
         children: [
           child,
-          // Ignore pointers: the scrim is decoration and must never eat a tap
-          // meant for the story underneath it.
+          // Ignore pointers: the scrim and shadow are decoration and must
+          // never eat a tap meant for the story underneath.
           IgnorePointer(
             child: ColoredBox(
-              color: Colors.black.withValues(alpha: scrimAt(progress)),
+              color: Colors.black.withValues(alpha: scrim),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// The card sliding in on top. It tracks the finger exactly — no lag, no
-  /// scale — and casts a soft shadow onto the card it is covering.
-  Widget _incoming(Widget child, double delta) {
-    final shadow = shadowAt(delta);
-    if (shadow == 0) return child;
-
-    return Stack(
-      fit: StackFit.passthrough,
-      clipBehavior: Clip.none,
-      children: [
-        child,
-        Positioned(
-          top: -_shadowHeight,
-          left: 0,
-          right: 0,
-          height: _shadowHeight,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: shadow),
-                    Colors.transparent,
-                  ],
+          Positioned(
+            top: -_shadowHeight,
+            left: 0,
+            right: 0,
+            height: _shadowHeight,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: shadow),
+                      Colors.transparent,
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

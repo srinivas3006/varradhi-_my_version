@@ -315,6 +315,31 @@ class AdManager extends ChangeNotifier {
     );
   }
 
+  /// Marks a video ad as watched to the end, once per exposure.
+  ///
+  /// Kept on the device for now: the backend's event list (impression,
+  /// viewability, click, dismiss, skip, hide) has no `complete` type yet,
+  /// and an unknown type would only be rejected and retried. Once the
+  /// backend accepts it, enqueue it here.
+  void recordComplete(
+    AdBanner ad, {
+    String placementZone = 'feed',
+    String? contextKey,
+  }) {
+    _emittedEvents.add(_buildEventKey(
+        ad.id, placementZone, 'complete', contextKey ?? 'default'));
+    debugPrint('[AdManager] video ad ${ad.id} watched to the end');
+  }
+
+  /// Whether [recordComplete] was called for this exposure.
+  bool hasCompleted(
+    AdBanner ad, {
+    String placementZone = 'feed',
+    String? contextKey,
+  }) =>
+      _emittedEvents.contains(_buildEventKey(
+          ad.id, placementZone, 'complete', contextKey ?? 'default'));
+
   /// Records user hiding an advertisement.
   void recordHide(AdBanner ad, {String placementZone = 'feed'}) {
     AdEventQueue.instance.enqueue(

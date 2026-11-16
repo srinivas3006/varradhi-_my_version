@@ -48,7 +48,8 @@ void main() {
   });
 
   group('FlipPageView scrolls vertically on real physics', () {
-    testWidgets('it is a vertical PageView with clamping physics', (tester) async {
+    testWidgets('it is a vertical PageView with clamping physics',
+        (tester) async {
       final controller = PageController();
       addTearDown(controller.dispose);
 
@@ -96,7 +97,6 @@ void main() {
     });
   });
 
-
   testWidgets('pulling down past the first story triggers refresh',
       (tester) async {
     final controller = PageController();
@@ -121,4 +121,58 @@ void main() {
 
     expect(refreshed, 1);
   });
+
+  // A card that is created twice restarts: an ad video began, then started
+  // again from zero once the swipe settled (the wrapper around a moving card
+  // was dropped at rest, and Flutter rebuilt the card from scratch).
+  testWidgets('a card is created once, through the swipe and at rest',
+      (tester) async {
+    final controller = PageController();
+    addTearDown(controller.dispose);
+    final created = <int, int>{};
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FlipPageView(
+          controller: controller,
+          itemCount: 3,
+          itemBuilder: (context, i) =>
+              _CountsCreation(index: i, created: created),
+        ),
+      ),
+    ));
+    // Half a swipe, held, then let go: every phase of the transition.
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.byType(PageView)));
+    for (var i = 0; i < 6; i++) {
+      await gesture.moveBy(const Offset(0, -60));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(controller.page, 1.0);
+    expect(created[1], 1, reason: 'page 1 kept its state as it settled');
+    expect(created[0], 1);
+  });
+}
+
+class _CountsCreation extends StatefulWidget {
+  const _CountsCreation({required this.index, required this.created});
+  final int index;
+  final Map<int, int> created;
+  @override
+  State<_CountsCreation> createState() => _CountsCreationState();
+}
+
+class _CountsCreationState extends State<_CountsCreation> {
+  @override
+  void initState() {
+    super.initState();
+    widget.created[widget.index] = (widget.created[widget.index] ?? 0) + 1;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Center(child: Text('page ${widget.index}'));
 }
