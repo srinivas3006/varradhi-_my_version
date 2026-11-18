@@ -19,10 +19,12 @@ class MediaPickerHelper {
         imageQuality: 85,
       );
     } on PlatformException catch (e) {
-      debugPrint('[MediaPickerHelper] Camera photo error: ${e.code} - ${e.message}');
+      debugPrint(
+          '[MediaPickerHelper] Camera photo error: ${e.code} - ${e.message}');
       return null;
     } catch (e) {
-      debugPrint('[MediaPickerHelper] Unexpected error picking photo from camera: $e');
+      debugPrint(
+          '[MediaPickerHelper] Unexpected error picking photo from camera: $e');
       return null;
     }
   }
@@ -37,10 +39,12 @@ class MediaPickerHelper {
         imageQuality: 85,
       );
     } on PlatformException catch (e) {
-      debugPrint('[MediaPickerHelper] Gallery photo error: ${e.code} - ${e.message}');
+      debugPrint(
+          '[MediaPickerHelper] Gallery photo error: ${e.code} - ${e.message}');
       return null;
     } catch (e) {
-      debugPrint('[MediaPickerHelper] Unexpected error picking photo from gallery: $e');
+      debugPrint(
+          '[MediaPickerHelper] Unexpected error picking photo from gallery: $e');
       return null;
     }
   }
@@ -59,23 +63,27 @@ class MediaPickerHelper {
       }
       return picked;
     } on PlatformException catch (e) {
-      debugPrint('[MediaPickerHelper] Gallery multi-image error: ${e.code} - ${e.message}');
+      debugPrint(
+          '[MediaPickerHelper] Gallery multi-image error: ${e.code} - ${e.message}');
       return [];
     } catch (e) {
-      debugPrint('[MediaPickerHelper] Unexpected error picking multi-images: $e');
+      debugPrint(
+          '[MediaPickerHelper] Unexpected error picking multi-images: $e');
       return [];
     }
   }
 
   /// Records a video using the device camera with an optional maximum duration.
-  Future<XFile?> recordVideoFromCamera({Duration maxDuration = const Duration(minutes: 3)}) async {
+  Future<XFile?> recordVideoFromCamera(
+      {Duration maxDuration = const Duration(minutes: 3)}) async {
     try {
       return await _picker.pickVideo(
         source: ImageSource.camera,
         maxDuration: maxDuration,
       );
     } on PlatformException catch (e) {
-      debugPrint('[MediaPickerHelper] Camera video error: ${e.code} - ${e.message}');
+      debugPrint(
+          '[MediaPickerHelper] Camera video error: ${e.code} - ${e.message}');
       return null;
     } catch (e) {
       debugPrint('[MediaPickerHelper] Unexpected error recording video: $e');
@@ -84,13 +92,32 @@ class MediaPickerHelper {
   }
 
   /// Picks a video from the gallery.
+  /// The platform's multi-media picker can also show photos. Callers must
+  /// validate the selected files as videos before accepting them.
+  Future<List<XFile>> pickVideosFromGallery({int maxItems = 10}) async {
+    if (maxItems <= 0) return [];
+    try {
+      return (await _picker.pickMultipleMedia(limit: maxItems))
+          .take(maxItems)
+          .toList();
+    } on PlatformException catch (e) {
+      debugPrint('[MediaPickerHelper] Gallery videos error: ${e.code}');
+      return [];
+    } catch (e) {
+      debugPrint('[MediaPickerHelper] Gallery videos error: $e');
+      return [];
+    }
+  }
+
+  /// Picks a single video from the gallery.
   Future<XFile?> pickVideoFromGallery() async {
     try {
       return await _picker.pickVideo(
         source: ImageSource.gallery,
       );
     } on PlatformException catch (e) {
-      debugPrint('[MediaPickerHelper] Gallery video error: ${e.code} - ${e.message}');
+      debugPrint(
+          '[MediaPickerHelper] Gallery video error: ${e.code} - ${e.message}');
       return null;
     } catch (e) {
       debugPrint('[MediaPickerHelper] Unexpected error picking video: $e');

@@ -55,7 +55,7 @@ class UgcController extends ChangeNotifier {
   String _title = '';
   String _description = '';
   List<String> _selectedImagePaths = [];
-  String? _selectedVideoPath;
+  List<String> _selectedVideoPaths = [];
 
   // Process & Upload State
   UgcUploadStatus _status = UgcUploadStatus.idle;
@@ -79,7 +79,9 @@ class UgcController extends ChangeNotifier {
   String get title => _title;
   String get description => _description;
   List<String> get selectedImagePaths => List.unmodifiable(_selectedImagePaths);
-  String? get selectedVideoPath => _selectedVideoPath;
+  List<String> get selectedVideoPaths => List.unmodifiable(_selectedVideoPaths);
+  String? get selectedVideoPath =>
+      _selectedVideoPaths.isEmpty ? null : _selectedVideoPaths.first;
   UgcUploadStatus get status => _status;
   double get uploadProgress => _uploadProgress;
   String? get errorMessage => _errorMessage;
@@ -121,14 +123,14 @@ class UgcController extends ChangeNotifier {
       _title.trim().isNotEmpty ||
       _description.trim().isNotEmpty ||
       _selectedImagePaths.isNotEmpty ||
-      _selectedVideoPath != null;
+      _selectedVideoPaths.isNotEmpty;
 
   // Setters & Form Mutators
   void setType(PostType newType) {
     if (_type == newType) return;
     _type = newType;
     if (_type == PostType.image) {
-      _selectedVideoPath = null;
+      _selectedVideoPaths.clear();
     } else {
       _selectedImagePaths.clear();
     }
@@ -165,8 +167,7 @@ class UgcController extends ChangeNotifier {
   String? _language;
 
   /// The language the story is sent with — and so which readers see it.
-  String get language =>
-      _language ?? submissionLanguage(_title, _description);
+  String get language => _language ?? submissionLanguage(_title, _description);
 
   bool get languagePicked => _language != null;
 
@@ -218,8 +219,7 @@ class UgcController extends ChangeNotifier {
   // --- Story location ---
 
   bool get locationEdited => _locationEdited;
-  String get village =>
-      _locationEdited ? _village : AppState.instance.village;
+  String get village => _locationEdited ? _village : AppState.instance.village;
   String get subdistrict =>
       _locationEdited ? _subdistrict : AppState.instance.subdistrict;
   String get district =>
@@ -227,8 +227,7 @@ class UgcController extends ChangeNotifier {
   String get stateName =>
       _locationEdited ? _stateName : AppState.instance.stateName;
   bool get hasGpsFix =>
-      AppState.instance.latitude != null &&
-      AppState.instance.longitude != null;
+      AppState.instance.latitude != null && AppState.instance.longitude != null;
 
   /// "Village, Mandal, District, State" with empty parts left out.
   String get locationLabel => [village, subdistrict, district, stateName]
@@ -337,23 +336,58 @@ class UgcController extends ChangeNotifier {
   }
 
   Future<void> recordVideoFromCamera() async {
-    final xFile = await _pickerHelper.recordVideoFromCamera();
-    if (xFile != null) {
-      _selectedVideoPath = xFile.path;
-      _errorMessage = null;
+    if (_selectedVideoPaths.length >= MediaValidator.maxMediaItems) {
+      _errorMessage = 'Maximum ${MediaValidator.maxMediaItems} videos reached.';
       notifyListeners();
-      _autoSaveDraft();
+      return;
     }
+    final file = await _pickerHelper.recordVideoFromCamera();
+    if (file != null) await _addVideos([file.path]);
   }
 
   Future<void> pickVideoFromGallery() async {
-    final xFile = await _pickerHelper.pickVideoFromGallery();
-    if (xFile != null) {
-      _selectedVideoPath = xFile.path;
-      _errorMessage = null;
+    final remaining = MediaValidator.maxMediaItems - _selectedVideoPaths.length;
+    if (remaining <= 0) {
+      _errorMessage = 'Maximum ${MediaValidator.maxMediaItems} videos reached.';
       notifyListeners();
+      return;
+    }
+    final files =
+        await _pickerHelper.pickVideosFromGallery(maxItems: remaining);
+    if (files.isNotEmpty) await _addVideos(files.map((f) => f.path).toList());
+  }
+
+  Future<void> _addVideos(List<String> paths) async {
+    final combined = {..._selectedVideoPaths, ...paths}.toList();
+    final validation = await MediaValidator.validateVideosBatch(combined);
+    if (!validation.isValid) {
+      _errorMessage = validation.errorMessage;
+    } else {
+      _selectedVideoPaths = combined;
+      _errorMessage = null;
       _autoSaveDraft();
     }
+    notifyListeners();
+  }
+
+  void removeVideoAt(int index) {
+    if (index < 0 || index >= _selectedVideoPaths.length) return;
+    _selectedVideoPaths.removeAt(index);
+    notifyListeners();
+    _autoSaveDraft();
+  }
+
+  void moveVideo(int from, int to) {
+    if (from == to ||
+        from < 0 ||
+        to < 0 ||
+        from >= _selectedVideoPaths.length ||
+        to >= _selectedVideoPaths.length) {
+      return;
+    }
+    _selectedVideoPaths.insert(to, _selectedVideoPaths.removeAt(from));
+    notifyListeners();
+    _autoSaveDraft();
   }
 
   void removeImageAt(int index) {
@@ -366,7 +400,7 @@ class UgcController extends ChangeNotifier {
 
   void clearMedia() {
     _selectedImagePaths.clear();
-    _selectedVideoPath = null;
+    _selectedVideoPaths.clear();
     notifyListeners();
     _autoSaveDraft();
   }
@@ -406,14 +440,10 @@ class UgcController extends ChangeNotifier {
     if (_type == PostType.image) {
       _selectedImagePaths =
           draft.filePaths.where((p) => !missing.contains(p)).toList();
-      _selectedVideoPath = null;
+      _selectedVideoPaths.clear();
     } else {
-      if (draft.filePaths.isNotEmpty &&
-          !missing.contains(draft.filePaths.first)) {
-        _selectedVideoPath = draft.filePaths.first;
-      } else {
-        _selectedVideoPath = null;
-      }
+      _selectedVideoPaths =
+          draft.filePaths.where((p) => !missing.contains(p)).toList();
       _selectedImagePaths.clear();
     }
 
@@ -432,7 +462,7 @@ class UgcController extends ChangeNotifier {
     _title = '';
     _description = '';
     _selectedImagePaths.clear();
-    _selectedVideoPath = null;
+    _selectedVideoPaths.clear();
     _category = '';
     _type = PostType.image;
     _locationEdited = false;
@@ -472,9 +502,8 @@ class UgcController extends ChangeNotifier {
       description: _description,
       category: _category,
       type: _type == PostType.image ? 'IMAGE' : 'VIDEO',
-      filePaths: _type == PostType.image
-          ? _selectedImagePaths
-          : (_selectedVideoPath != null ? [_selectedVideoPath!] : []),
+      filePaths:
+          _type == PostType.image ? _selectedImagePaths : _selectedVideoPaths,
       submissionId: id,
       uploadStatus: _status,
       locationLat: AppState.instance.latitude?.toString(),
@@ -576,7 +605,7 @@ class UgcController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-    if (_type == PostType.video && _selectedVideoPath == null) {
+    if (_type == PostType.video && _selectedVideoPaths.isEmpty) {
       _errorMessage = 'దయచేసి వీడియోను జతపరచండి.';
       notifyListeners();
       return false;
@@ -597,7 +626,7 @@ class UgcController extends ChangeNotifier {
       }
     } else {
       final validation =
-          await MediaValidator.validateVideo(_selectedVideoPath!);
+          await MediaValidator.validateVideosBatch(_selectedVideoPaths);
       if (!validation.isValid) {
         _status = UgcUploadStatus.failed;
         _errorMessage = validation.errorMessage;
@@ -756,12 +785,21 @@ class UgcController extends ChangeNotifier {
               cancelToken: _cancelToken,
             );
           }
-        } else {
+        } else if (_selectedVideoPaths.length == 1) {
           await _ugcRepository.uploadMedia(
             submissionId: _submissionId!,
             mobile: mobile,
             mediaType: mediaType,
-            filePath: _selectedVideoPath!,
+            filePath: _selectedVideoPaths.first,
+            onSendProgress: _onSendProgress,
+            cancelToken: _cancelToken,
+          );
+        } else {
+          await _ugcRepository.uploadMediaBatch(
+            submissionId: _submissionId!,
+            mobile: mobile,
+            filePaths: _selectedVideoPaths,
+            mediaTypes: List.filled(_selectedVideoPaths.length, mediaType),
             onSendProgress: _onSendProgress,
             cancelToken: _cancelToken,
           );
@@ -794,9 +832,7 @@ class UgcController extends ChangeNotifier {
           _errorKind = error.kind;
           _errorMessage = error.isRetryable
               ? 'నెట్‌వర్క్ సమస్య కారణంగా మీడియా అప్‌లోడ్ విఫలమైంది. దయచేసి మళ్ళీ ప్రయత్నించండి.'
-              : (e is AppException
-                  ? e.message
-                  : 'మీడియా అప్‌లోడ్ విఫలమైంది.');
+              : (e is AppException ? e.message : 'మీడియా అప్‌లోడ్ విఫలమైంది.');
           notifyListeners();
           return false;
         }
@@ -826,7 +862,7 @@ class UgcController extends ChangeNotifier {
       category: _category,
       mediaUrl: _type == PostType.image && _selectedImagePaths.isNotEmpty
           ? _selectedImagePaths.first
-          : (_selectedVideoPath ?? ''),
+          : (selectedVideoPath ?? ''),
     );
 
     // Clear completed draft from disk

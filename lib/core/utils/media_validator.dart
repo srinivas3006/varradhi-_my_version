@@ -79,19 +79,42 @@ class MediaValidator {
     );
   }
 
+  /// Applies the item cap and validates every video, including later items.
+  static Future<MediaValidationResult> validateVideosBatch(
+      List<String> filePaths) async {
+    if (filePaths.isEmpty) {
+      return MediaValidationResult.invalid('Please attach at least one video.');
+    }
+    if (filePaths.length > maxMediaItems) {
+      return MediaValidationResult.invalid(
+          'Maximum $maxMediaItems videos are allowed per report.');
+    }
+    for (var i = 0; i < filePaths.length; i++) {
+      final result = await validateVideo(filePaths[i]);
+      if (!result.isValid) {
+        return MediaValidationResult.invalid(
+            'Video ${i + 1}: ${result.errorMessage}');
+      }
+    }
+    return MediaValidationResult.valid(fileSizeBytes: 0, extension: 'batch');
+  }
+
   /// Validates a batch of image files.
-  static Future<MediaValidationResult> validateImagesBatch(List<String> filePaths) async {
+  static Future<MediaValidationResult> validateImagesBatch(
+      List<String> filePaths) async {
     if (filePaths.isEmpty) {
       return MediaValidationResult.invalid('Please attach at least one photo.');
     }
     if (filePaths.length > maxMediaItems) {
-      return MediaValidationResult.invalid('Maximum $maxMediaItems photos are allowed per report.');
+      return MediaValidationResult.invalid(
+          'Maximum $maxMediaItems photos are allowed per report.');
     }
 
     for (int i = 0; i < filePaths.length; i++) {
       final res = await validateImage(filePaths[i]);
       if (!res.isValid) {
-        return MediaValidationResult.invalid('Photo ${i + 1}: ${res.errorMessage}');
+        return MediaValidationResult.invalid(
+            'Photo ${i + 1}: ${res.errorMessage}');
       }
     }
 
@@ -115,13 +138,15 @@ class MediaValidator {
     final file = File(filePath);
     final exists = await file.exists();
     if (!exists) {
-      return MediaValidationResult.invalid('$mediaLabel file does not exist or has been removed.');
+      return MediaValidationResult.invalid(
+          '$mediaLabel file does not exist or has been removed.');
     }
 
     // Extract extension safely
     final extIndex = filePath.lastIndexOf('.');
     if (extIndex == -1 || extIndex == filePath.length - 1) {
-      return MediaValidationResult.invalid('$mediaLabel has an unknown or missing file extension.');
+      return MediaValidationResult.invalid(
+          '$mediaLabel has an unknown or missing file extension.');
     }
     final extension = filePath.substring(extIndex + 1).toLowerCase();
 
@@ -136,11 +161,13 @@ class MediaValidator {
     try {
       length = await file.length();
     } catch (_) {
-      return MediaValidationResult.invalid('$mediaLabel file could not be read.');
+      return MediaValidationResult.invalid(
+          '$mediaLabel file could not be read.');
     }
 
     if (length == 0) {
-      return MediaValidationResult.invalid('$mediaLabel file is empty (0 bytes).');
+      return MediaValidationResult.invalid(
+          '$mediaLabel file is empty (0 bytes).');
     }
 
     if (length > maxSizeBytes) {

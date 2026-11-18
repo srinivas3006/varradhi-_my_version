@@ -315,11 +315,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                   title: Text(isImage
                       ? 'గ్యాలరీ నుండి ఫోటో ఎంచుకోండి'
-                      : 'గ్యాలరీ నుండి వీడియో ఎంచుకోండి'),
+                      : 'గ్యాలరీ నుండి వీడియోలు ఎంచుకోండి'),
                   subtitle: Text(
                     isImage
                         ? 'గరిష్టంగా 10 ఫోటోలు'
-                        : 'గరిష్టంగా 50MB ఫైల్ పరిమాణం',
+                        : 'గరిష్టంగా 10 వీడియోలు · ఒక్కొక్కటి 50MB వరకు',
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textMuted),
                   ),
@@ -779,11 +779,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             Positioned(
                               top: 8,
                               right: 8,
-                              child: GestureDetector(
-                                onTap: _controller.isSubmittingOrUploading
+                              child: IconButton(
+                                tooltip: 'Remove all media',
+                                onPressed: _controller.isSubmittingOrUploading
                                     ? null
                                     : _controller.clearMedia,
-                                child: Container(
+                                icon: Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: const BoxDecoration(
                                     color: Colors.black54,
@@ -794,25 +795,26 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                 ),
                               ),
                             ),
-                            if (_controller.type == PostType.image)
-                              Positioned(
-                                bottom: 8,
-                                left: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                      '${_controller.selectedImagePaths.length} ఫోటో(లు)',
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600)),
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(20),
                                 ),
+                                child: Text(
+                                    _controller.type == PostType.image
+                                        ? '${_controller.selectedImagePaths.length} ఫోటో(లు)'
+                                        : '${_controller.selectedVideoPaths.length} వీడియో(లు)',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600)),
                               ),
+                            ),
                             if (_controller.type == PostType.video)
                               const Center(
                                   child: Icon(Icons.play_circle_fill,
@@ -840,12 +842,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
 
-              // Individual Photo Removal Strip
-              if (_controller.type == PostType.image &&
-                  _controller.selectedImagePaths.length > 1) ...[
+              // Ordered photo/video previews and individual removal.
+              if ((_controller.type == PostType.image
+                      ? _controller.selectedImagePaths.length
+                      : _controller.selectedVideoPaths.length) >
+                  1) ...[
                 const SizedBox(height: 12),
                 Text(
-                  'క్రమం మార్చడానికి ఫోటోను పట్టుకొని లాగండి · మొదటిది కవర్',
+                  'క్రమం మార్చడానికి పట్టుకొని లాగండి · మొదటిది కవర్',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 6),
@@ -853,16 +857,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   height: 64,
                   // Upload order follows this strip (long-press and drag).
                   child: ReorderableListView.builder(
-                    key: const Key('ugc_photo_strip'),
+                    key: ValueKey(_controller.type == PostType.image
+                        ? 'ugc_photo_strip'
+                        : 'ugc_video_strip'),
                     scrollDirection: Axis.horizontal,
                     buildDefaultDragHandles: false,
-                    itemCount: _controller.selectedImagePaths.length,
+                    itemCount: _controller.type == PostType.image
+                        ? _controller.selectedImagePaths.length
+                        : _controller.selectedVideoPaths.length,
                     onReorderItem: (from, to) {
                       if (_controller.isSubmittingOrUploading) return;
-                      _controller.moveImage(from, to);
+                      if (_controller.type == PostType.image) {
+                        _controller.moveImage(from, to);
+                      } else {
+                        _controller.moveVideo(from, to);
+                      }
                     },
                     itemBuilder: (context, index) {
-                      final path = _controller.selectedImagePaths[index];
+                      final isVideo = _controller.type == PostType.video;
+                      final path = isVideo
+                          ? _controller.selectedVideoPaths[index]
+                          : _controller.selectedImagePaths[index];
                       return ReorderableDelayedDragStartListener(
                         key: ValueKey(path),
                         index: index,
@@ -873,22 +888,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               padding: const EdgeInsets.only(right: 10),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.file(
-                                  File(_controller.selectedImagePaths[index]),
-                                  width: 64,
-                                  height: 64,
-                                  fit: BoxFit.cover,
-                                ),
+                                child: isVideo
+                                    ? SizedBox(
+                                        width: 64,
+                                        height: 64,
+                                        child: _VideoFramePreview(path: path))
+                                    : Image.file(
+                                        File(path),
+                                        width: 64,
+                                        height: 64,
+                                        fit: BoxFit.cover,
+                                      ),
                               ),
                             ),
                             Positioned(
                               top: 2,
                               right: 12,
-                              child: GestureDetector(
-                                onTap: _controller.isSubmittingOrUploading
+                              child: IconButton(
+                                tooltip: 'Remove media ${index + 1}',
+                                onPressed: _controller.isSubmittingOrUploading
                                     ? null
-                                    : () => _controller.removeImageAt(index),
-                                child: Container(
+                                    : () => isVideo
+                                        ? _controller.removeVideoAt(index)
+                                        : _controller.removeImageAt(index),
+                                icon: Container(
                                   padding: const EdgeInsets.all(2),
                                   decoration: const BoxDecoration(
                                     color: Colors.black87,
