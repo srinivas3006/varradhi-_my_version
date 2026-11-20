@@ -127,16 +127,18 @@ void main() {
   }
 
   Future<UgcController> ready(WidgetTester tester, _Repo repo,
-      {int images = 1}) async {
+      {int images = 1, bool video = false}) async {
     final paths = [
       for (var i = 0; i < images; i++)
-        (File('${tempDir.path}/pic$i.jpg')..writeAsBytesSync([1, 2, 3])).path,
+        (File('${tempDir.path}/pic$i.${video ? 'mp4' : 'jpg'}')
+              ..writeAsBytesSync([1, 2, 3]))
+            .path,
     ];
     await UgcDraftRepository.instance.saveDraft(UgcDraft(
       title: 'Road issue near market',
       description: 'Road damaged near local market area.',
       category: 'Local', // saved by an older build
-      type: 'IMAGE',
+      type: video ? 'VIDEO' : 'IMAGE',
       filePaths: paths,
     ));
     final c = UgcController(
@@ -148,6 +150,20 @@ void main() {
     });
     return c;
   }
+
+  testWidgets('multiple selected videos are all sent in one batch',
+      (tester) async {
+    final context = await pumpContext(tester);
+    final repo = _Repo();
+    final c = await ready(tester, repo, images: 3, video: true);
+    final expected = c.selectedVideoPaths.toList();
+    expect(expected, hasLength(3));
+    await tester.runAsync(() => c.submitNews(context));
+    expect(repo.lastPayload!['content_type'], 'VIDEO');
+    expect(repo.lastBatch, expected);
+    expect(repo.uploadCalls, 1);
+    c.dispose();
+  });
 
   testWidgets('categories come from the API and the slug is submitted',
       (tester) async {
@@ -188,8 +204,8 @@ void main() {
       (tester) async {
     final c = await ready(tester, _Repo());
     c.setTitle('half written');
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     final again = UgcController(ugcRepository: _Repo());
     late bool resumed;
     await tester.runAsync(() async {
@@ -199,8 +215,7 @@ void main() {
     expect(again.title, isEmpty);
   });
 
-  testWidgets(
-      'an unfinished upload survives a restart and is not resubmitted',
+  testWidgets('an unfinished upload survives a restart and is not resubmitted',
       (tester) async {
     final context = await pumpContext(tester);
     final repo = _Repo()..uploadError = _backend(413, 'Request too large');
@@ -212,8 +227,8 @@ void main() {
         stateName: 'Telangana');
     await tester.runAsync(() => c.submitNews(context));
     expect(c.submissionId, 'sub-1');
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
 
     // App restarted: a fresh controller on the post screen.
     final again = UgcController(ugcRepository: repo);
@@ -264,7 +279,8 @@ void main() {
   testWidgets('daily limit during upload keeps the submission id',
       (tester) async {
     final context = await pumpContext(tester);
-    final repo = _Repo()..uploadError = _backend(400, 'Daily upload limit reached.');
+    final repo = _Repo()
+      ..uploadError = _backend(400, 'Daily upload limit reached.');
     final c = await ready(tester, repo);
     await tester.runAsync(() => c.submitNews(context));
     expect(c.errorKind, UgcErrorKind.dailyLimitReached);
@@ -276,16 +292,13 @@ void main() {
     expect(UgcController.submissionLanguage('రోడ్డు సమస్య', 'details'), 'te');
     // English letters no longer force `en` (that hid approved posts from
     // Telugu readers, whose feeds ask for lang=te).
-    expect(
-        UgcController.submissionLanguage('Road issue', 'x', fallback: 'te'),
+    expect(UgcController.submissionLanguage('Road issue', 'x', fallback: 'te'),
         'te');
-    expect(
-        UgcController.submissionLanguage('Road issue', 'x', fallback: 'en'),
+    expect(UgcController.submissionLanguage('Road issue', 'x', fallback: 'en'),
         'en');
   });
 
-  testWidgets('the reporter\'s pick is what the payload sends',
-      (tester) async {
+  testWidgets('the reporter\'s pick is what the payload sends', (tester) async {
     final context = await pumpContext(tester);
     final repo = _Repo();
     final c = await ready(tester, repo);
@@ -348,9 +361,9 @@ void main() {
   });
 
   test('a real headline is kept above the field lines', () {
-    final e = UgcApiError.from(fieldError(
-        {'location_lat': ['Ensure that there are no more than 9 digits.']},
-        message: 'Invalid submission.'));
+    final e = UgcApiError.from(fieldError({
+      'location_lat': ['Ensure that there are no more than 9 digits.']
+    }, message: 'Invalid submission.'));
     expect(e.message,
         'Invalid submission.\nLocation lat: Ensure that there are no more than 9 digits.');
   });
@@ -382,10 +395,9 @@ void main() {
     expect(repo.lastPayload!['mobile'], '9876543210');
   });
 
-
   group('location sheet', () {
-    Future<UgcPlace?> openSheet(WidgetTester tester,
-        Future<void> Function() act) async {
+    Future<UgcPlace?> openSheet(
+        WidgetTester tester, Future<void> Function() act) async {
       UgcPlace? result;
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(

@@ -2080,6 +2080,9 @@ class ApiService {
     ProgressCallback? onSendProgress,
     CancelToken? cancelToken,
   }) async {
+    if (filePaths.isEmpty || filePaths.length != mediaTypes.length) {
+      throw ArgumentError('Each uploaded file must have a media type.');
+    }
     if (filePaths.length == 1) {
       return uploadMedia(
         submissionId: submissionId,
@@ -2097,8 +2100,9 @@ class ApiService {
       'mobile': mobile,
       'media_type': mediaTypes.first,
       'media_types': mediaTypes.join(','),
-      'files': files,
     });
+    // Explicit repeated keys match the backend's getlist('files') contract.
+    formData.files.addAll(files.map((file) => MapEntry('files', file)));
     final response = await _dio.post(
       '/api/v1/ugc/upload-media/',
       data: formData,

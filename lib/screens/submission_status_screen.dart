@@ -181,8 +181,9 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
     final picker = MediaPickerHelper();
     final paths = <String>[];
     if (isVideo) {
-      final f = await picker.pickVideoFromGallery();
-      if (f != null) paths.add(f.path);
+      final files = await picker.pickVideosFromGallery(
+          maxItems: MediaValidator.maxMediaItems);
+      paths.addAll(files.map((f) => f.path));
     } else {
       final files = await picker.pickPhotosFromGallery(
           maxItems: MediaValidator.maxMediaItems);
@@ -191,7 +192,7 @@ class _SubmissionStatusScreenState extends State<SubmissionStatusScreen>
     if (paths.isEmpty || !mounted) return;
 
     final validation = isVideo
-        ? await MediaValidator.validateVideo(paths.single)
+        ? await MediaValidator.validateVideosBatch(paths)
         : await MediaValidator.validateImagesBatch(paths);
     if (!mounted) return;
     if (!validation.isValid) {
