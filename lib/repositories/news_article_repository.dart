@@ -7,7 +7,8 @@ import '../services/api_service.dart';
 /// - Related articles retrieval
 /// - Safe error propagation
 class NewsArticleRepository {
-  NewsArticleRepository({ApiClient? apiClient}) : _api = apiClient ?? ApiClient.instance;
+  NewsArticleRepository({ApiClient? apiClient})
+      : _api = apiClient ?? ApiClient.instance;
 
   static final NewsArticleRepository instance = NewsArticleRepository();
 
@@ -28,7 +29,25 @@ class NewsArticleRepository {
 
   /// Fetches article detail by slug, reusing a copy fetched within
   /// [cacheTtl].
-  Future<NewsArticle> getDetail(String slug, {bool forceRefresh = false}) async {
+  Future<NewsArticle> getDetail(String slug, {bool forceRefresh = false}) =>
+      _getDetail(slug, () => ApiService.instance.getArticleDetail(slug),
+          forceRefresh: forceRefresh);
+
+  Future<NewsArticle> getUgcDetail(String id, String scope,
+          {bool forceRefresh = false}) =>
+      _getDetail(_ugcKey(id, scope), () => ApiService.instance.getUgcDetail(id),
+          forceRefresh: forceRefresh);
+
+  NewsArticle? peekUgcDetail(String id, String scope) =>
+      peekDetail(_ugcKey(id, scope));
+
+  bool isUgcFresh(String id, String scope) => isFresh(_ugcKey(id, scope));
+
+  String _ugcKey(String id, String scope) => 'ugc:$id:$scope';
+
+  Future<NewsArticle> _getDetail(
+      String slug, Future<NewsArticle> Function() load,
+      {required bool forceRefresh}) async {
     final cached = _cache[slug];
     if (!forceRefresh &&
         cached != null &&
@@ -37,7 +56,7 @@ class NewsArticleRepository {
     }
     final pending = _pending[slug];
     if (pending != null) return pending;
-    final request = ApiService.instance.getArticleDetail(slug);
+    final request = load();
     _pending[slug] = request;
     try {
       final article = await request;
@@ -69,12 +88,14 @@ class NewsArticleRepository {
   }
 
   /// Alias for [getDetail].
-  Future<NewsArticle> getArticleBySlug(String slug, {bool forceRefresh = false}) {
+  Future<NewsArticle> getArticleBySlug(String slug,
+      {bool forceRefresh = false}) {
     return getDetail(slug, forceRefresh: forceRefresh);
   }
 
   /// Fetches related articles for the given article slug.
-  Future<List<NewsArticle>> getRelatedArticles(String slug, {int limit = 6}) async {
+  Future<List<NewsArticle>> getRelatedArticles(String slug,
+      {int limit = 6}) async {
     try {
       return await ApiService.instance.getRecommendations(limit: limit);
     } catch (_) {

@@ -28,6 +28,7 @@ import '../models/category.dart';
 import '../models/poll.dart';
 import '../widgets/poll_card.dart';
 import '../services/poll_exposure.dart';
+import '../services/poll_context.dart';
 import '../repositories/home_feed_repository.dart';
 import '../repositories/most_viewed_repository.dart';
 import '../core/ads/home_ads.dart';
@@ -89,6 +90,8 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
   /// This Home screen's impressions: each story once (analytics).
   final ImpressionLog _impressions = ImpressionLog();
   Poll? _poll;
+  PollReader _pollReader = currentPollReader;
+  int _pollRequest = 0;
   List<dynamic> _posters = [];
 
   /// Regular videos for the Home carousel, from /articles/video-feed/.
@@ -149,7 +152,16 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
 
   void _onAppStateChanged() {
     final identity = _homeIdentity;
-    if (identity == _identity) return;
+    final reader = currentPollReader;
+    final pollReaderChanged = reader != _pollReader;
+    _pollReader = reader;
+    if (identity == _identity) {
+      if (pollReaderChanged) {
+        setState(() => _poll = null);
+        _loadPoll(_generation);
+      }
+      return;
+    }
     // New reader, language or place: drop everything in flight, restart
     // pagination and load Home for the new identity.
     _identity = identity;
@@ -160,6 +172,7 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
       _forYou = [];
       _nearYou = [];
       _mostViewed = [];
+      _poll = null;
       _homeLoaded = false;
       _homeFailed = false;
       _latest = [];
@@ -439,14 +452,17 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
     } catch (_) {}
   }
 
-  Future<void> _loadPoll(int generation) async {
+  Future<void> _loadPoll(int generation, {String? excludedId}) async {
+    final request = ++_pollRequest;
+    final reader = currentPollReader;
     try {
       final polls = await ApiService.instance.getPolls();
       // Only a poll the reader has not voted on or seen too often.
       await PollExposure.instance.ready();
       final eligible = PollExposure.instance.eligible(polls);
-      if (mounted && generation == _generation) {
-        setState(() => _poll = eligible.isNotEmpty ? eligible.first : null);
+      if (mounted && generation == _generation && request == _pollRequest &&
+          reader == currentPollReader) {
+        setState(() => _poll = eligible.where((poll) => poll.id != excludedId).firstOrNull);
       }
     } catch (_) {}
   }
@@ -1481,7 +1497,14 @@ class _NewsFeedTabState extends State<NewsFeedTab> {
         const SizedBox(height: 16),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: PollCard(poll: _poll!),
+          child: PollCard(
+            poll: _poll!,
+            onUnavailable: (id) {
+              if (_poll?.id != id) return;
+              setState(() => _poll = null);
+              _loadPoll(_generation, excludedId: id);
+            },
+          ),
         ),
       ],
       if (_posters.isNotEmpty) ...[

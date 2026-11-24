@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -14,11 +15,16 @@ import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];
+  final guestRegistration = Completer<RequestOptions>();
 
   @override
   Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? body,
       Future<void>? cancel) async {
     requests.add(options);
+    if (options.path.contains('/guest-device/') &&
+        !guestRegistration.isCompleted) {
+      guestRegistration.complete(options);
+    }
     return ResponseBody.fromString(
       jsonEncode({'data': [], 'meta': {}, 'errors': null}),
       200,
@@ -143,10 +149,9 @@ void main() {
     test('a guest who changes place is registered again with it', () async {
       state.fcmToken = 'token';
       state.setLocation('Telangana', 'Vikarabad', subdistrict: 'Mominpet');
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      final body = adapter.requests
-          .singleWhere((r) => r.path.contains('/guest-device/'))
-          .data as Map;
+      final request = await adapter.guestRegistration.future
+          .timeout(const Duration(seconds: 5));
+      final body = request.data as Map;
       expect(body['district'], 'Vikarabad');
       expect(body['subdistrict'], 'Mominpet');
       expect(body.containsKey('city'), isFalse);

@@ -1,0 +1,82 @@
+VARADHI Polls | Live backend and Android phone verification
+
+Record the APK version and build number, Android version, device model,
+environment, poll IDs, account or guest context, and the outcome of each case.
+Use controlled polls and test accounts for actions that change votes.
+
+[ ] Install the signed APK on a physical Android phone. Run the cases below
+    in English and Telugu where applicable, including a small viewport and
+    a larger system text size.
+
+[ ] Create controlled polls for Global, State, District, Mandal, Village,
+    Municipality/Town and Assembly Constituency. Ask backend operations
+    which canonical test localities have reviewed Municipality and Assembly
+    mappings. Verify the generic coverage labels and the absence of raw IDs.
+
+[ ] With no saved location, verify global polls in Home and Spotlight.
+    Save a matching and nonmatching state, district, mandal and village
+    without restarting. Verify that village readers receive the broader
+    polls, and mandal-only readers never receive village polls. Test an
+    invalid or inactive hierarchy and expect global-only results. Repeat
+    with an unsuccessful save and verify the prior location and eligibility.
+
+[ ] Verify Municipality/Town and Assembly polls with mapped and unmapped
+    test villages or localities. City-, district- and mandal-only readers
+    must not qualify solely because of their broader place. Open a restricted
+    regional share link in the APK and as an anonymous HTML preview.
+
+[ ] Run the list, detail and vote flows as a guest and as a signed-in reader.
+    Verify guest requests carry both installation headers and signed-in
+    requests carry Bearer authentication. Check header names and presence
+    with redacted diagnostics. Verify an authenticated account with a
+    different saved location receives the account's eligible polls.
+    Repeat with notifications disabled on a valid unowned installation.
+    An absent/unknown guest credential yields only global polls. A wrong
+    secret for a known installation must trigger the existing credential
+    recovery flow and preserve the installation ID.
+
+[ ] Open a poll with at least three options. Compare the visible order with
+    sort_order. Verify accessible selection, an initially disabled Vote
+    button, and Spotlight swiping before and after reading the card.
+
+[ ] Submit a selection. Confirm the request has only option_id, and compare
+    the returned total, percentages and selected option with the card.
+    Reopen the card and confirm the saved vote. On a legacy poll, verify
+    that legacy a/b option IDs send choice and display the saved result.
+    Reset the vote on a controlled poll, tap Refresh results on the open
+    card, and verify the reader can select an option and vote again.
+
+[ ] Tap Vote repeatedly on a slow connection. Verify one submission.
+    Trigger the duplicate-vote response in a controlled test and confirm a
+    detail request restores the recorded result.
+
+[ ] Open an expired poll and verify final results with voting disabled.
+    Close a test poll on the server while its card is open. Confirm it is
+    removed from the feed, and that an invalid option triggers a detail
+    refresh. Verify the reader returns to the expected Spotlight article
+    and the existing ad intervals are visible during the same scroll.
+
+[ ] Use an eligible list with more than twenty polls. Confirm the client
+    follows meta.next, preserves order and renders items from a later page.
+
+[ ] Switch between two accounts with different votes and locations, then
+    log out. Repeat while a list or detail is loading. Verify the current
+    reader's vote and eligibility after each transition. Exercise guest
+    credential recovery and verify the installation ID stays the same.
+
+[ ] Interrupt the connection after a controlled vote reaches the server.
+    Verify the card checks detail before it offers another submission.
+    Repeat when neither request succeeds. Restore connectivity and use
+    Retry to check the result. Exercise HTTP 429 with Retry-After.
+
+[ ] Open a shared poll link and a poll search result. Verify detail loads
+    with the current account or installation. Open missing and restricted
+    poll links and check the unavailable screen. Test Back from each route.
+
+Read-only production checks already performed
+
+[x] Poll list returned HTTP 200 and included global polls with two and
+    three options. The list included Cache-Control: private, no-store.
+[x] A listed poll's detail returned HTTP 200 with the same cache policy.
+[x] An unavailable poll ID returned HTTP 404.
+[x] OPTIONS advertised POST on the vote endpoint.

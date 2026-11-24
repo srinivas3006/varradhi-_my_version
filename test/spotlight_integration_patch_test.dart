@@ -14,6 +14,7 @@ class _FeedAdapter implements HttpClientAdapter {
   Completer<void>? oldRequest;
   Completer<void>? oldStarted;
   bool mixed = false;
+  int additionalStories = 0;
   @override
   Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? body,
       Future<void>? cancel) async {
@@ -32,8 +33,9 @@ class _FeedAdapter implements HttpClientAdapter {
           'district': district,
           // As the backend sends it: local feed = district news, main =
           // state news.
-          'coverage_level':
-              options.queryParameters['scope'] == 'local' ? 'district' : 'state',
+          'coverage_level': options.queryParameters['scope'] == 'local'
+              ? 'district'
+              : 'state',
           'published_at': '2026-09-14T12:00:00Z',
           'media_items': [
             {'media_type': 'image', 'url': 'https://example.com/1.jpg'},
@@ -42,6 +44,14 @@ class _FeedAdapter implements HttpClientAdapter {
           ],
         }
       ];
+      data.addAll(List.generate(
+          additionalStories,
+          (index) => {
+                ...data.first,
+                'id': 'additional-$index',
+                'published_at':
+                    DateTime.utc(2026, 9, 14, 11, 59 - index).toIso8601String(),
+              }));
     } else if (mixed && options.path.contains('/ugc/feed/')) {
       data = [
         {
@@ -111,7 +121,7 @@ void main() {
   });
 
   test(
-      'Spotlight composes four parents without splitting mixed media; the ad after the 4th, as set',
+      'Spotlight preserves four parents without counting promotional posters as news',
       () async {
     adapter.mixed = true;
     final controller = SpotlightController();
@@ -123,9 +133,8 @@ void main() {
       SpotlightType.ugc,
       SpotlightType.poster,
       SpotlightType.poster,
-      // The ad's display_frequency is 4: one ad after every 4 cards, as set
-      // in the admin (AdFrequencyPolicy.spotlight).
-      SpotlightType.ad,
+      // Only two unique news stories have been counted. Promotional posters
+      // keep their own pages and do not advance the news-only ad interval.
     ]);
     expect(items.first.article!.orderedMedia.length, 3);
     expect(items[1].article!.orderedMedia.length, 2);
@@ -137,6 +146,51 @@ void main() {
     expect(adRequest.queryParameters['placement_zone'], 'feed');
     expect(adRequest.queryParameters.containsKey('zone'), isFalse);
     expect(adRequest.queryParameters['district'], 'Selected');
+  });
+
+  test(
+      'Spotlight inserts an ad after four unique stories and preserves posters',
+      () async {
+    adapter.mixed = true;
+    adapter.additionalStories = 4;
+    final controller = SpotlightController();
+    addTearDown(controller.dispose);
+    await controller.loadFeed();
+    final items = controller.state.feed;
+    expect(items.map((item) => item.type), [
+      SpotlightType.standard,
+      SpotlightType.standard,
+      SpotlightType.standard,
+      SpotlightType.standard,
+      SpotlightType.ad,
+      SpotlightType.standard,
+      SpotlightType.poster,
+      SpotlightType.ugc,
+      SpotlightType.poster,
+    ]);
+    final adIndex = items.indexWhere((item) => item.type == SpotlightType.ad);
+    expect(items[adIndex].adBanner!.displayFrequency, 4);
+    expect(items.take(adIndex).where((item) => item.article != null),
+        hasLength(4));
+    expect(items.first.article!.orderedMedia, hasLength(3));
+    expect(
+        items
+            .singleWhere((item) => item.type == SpotlightType.ugc)
+            .article!
+            .orderedMedia,
+        hasLength(2));
+    expect(
+        items
+            .where((item) => item.type == SpotlightType.poster)
+            .map((item) => item.id),
+        ['poster-a', 'poster-b']);
+    for (var i = 1; i < items.length; i++) {
+      final previousIsPromotion = items[i - 1].type == SpotlightType.ad ||
+          items[i - 1].type == SpotlightType.poster;
+      if (items[i].type == SpotlightType.ad) {
+        expect(previousIsPromotion, isFalse);
+      }
+    }
   });
 
   test(

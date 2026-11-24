@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -12,32 +13,60 @@ import 'package:vaaradhi/services/poll_exposure.dart';
 import 'package:vaaradhi/state/app_state.dart';
 import 'package:vaaradhi/widgets/poll_card.dart';
 
+String _optionId(int index) => '11111111-2222-4333-8444-55555555555$index';
+
 Poll _poll({String id = 'p1', int? voted}) => Poll(
       id: id,
       question: 'Who will win?',
       options: const ['Congress', 'BRS', 'BJP'],
+      optionItems: [
+        for (final (index, label) in ['Congress', 'BRS', 'BJP'].indexed)
+          PollOption(id: _optionId(index), label: label),
+      ],
       votes: [0, 2, 0],
       selectedOption: voted,
     );
 
 class _Adapter implements HttpClientAdapter {
-  _Adapter(this.status);
+  _Adapter(this.status, {this.gate});
+  final Completer<void>? gate;
   final int status;
   int calls = 0;
   @override
   Future<ResponseBody> fetch(
       RequestOptions o, Stream<Uint8List>? _, Future<void>? __) async {
     calls++;
+    final voting = o.method == 'POST';
+    if (voting) await gate?.future;
+    final success = !voting || status < 300;
     return ResponseBody.fromString(
-        jsonEncode(status < 300
-            ? {'data': {}}
-            : {
-                'errors': {'message': 'x'}
-              }),
-        status,
-        headers: {
-          Headers.contentTypeHeader: [Headers.jsonContentType]
-        });
+      jsonEncode(success
+          ? {
+              'data': {
+                'id': 'p1',
+                'question': 'Who will win?',
+                'total_votes': voting ? 3 : 2,
+                'user_vote_option_id': voting ? _optionId(0) : null,
+                'options': [
+                  for (final (index, label)
+                      in ['Congress', 'BRS', 'BJP'].indexed)
+                    {
+                      'id': _optionId(index),
+                      'label': label,
+                      'sort_order': index,
+                      'percentage': voting && index == 0 ? 33.3 : 0
+                    },
+                ],
+              }
+            }
+          : {
+              'errors': {'message': 'Temporary problem'}
+            }),
+      voting ? status : 200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType]
+      },
+    );
   }
 
   @override
@@ -51,9 +80,15 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     exposure.resetForTest();
-    AppState.instance.language = 'English';
+    AppState.instance
+      ..language = 'English'
+      ..deviceId = 'test-installation'
+      ..installationSecret = 'test-credential';
   });
-  tearDown(() => AppState.instance.language = 'Telugu');
+  tearDown(() => AppState.instance
+    ..language = 'Telugu'
+    ..deviceId = ''
+    ..installationSecret = null);
 
   group('a poll is shown at most twice, and not after voting', () {
     test('two sessions, then hidden', () async {
@@ -75,17 +110,18 @@ void main() {
       expect(exposure.shouldShow(p), isFalse, reason: 'seen twice');
     });
 
-    test('voting hides it from the next session on', () async {
+    test('refreshed server state can restore a poll after a vote reset',
+        () async {
       await exposure.ready();
       final p = _poll();
       await exposure.markShown(p.id);
-      await exposure.markVoted(p.id);
-      expect(exposure.shouldShow(p), isTrue,
+      expect(exposure.shouldShow(_poll(voted: 1)), isTrue,
           reason: 'the results stay where the reader voted');
 
       exposure.newSessionForTest();
       await exposure.ready();
-      expect(exposure.shouldShow(_poll()), isFalse);
+      expect(exposure.shouldShow(_poll(voted: 1)), isFalse);
+      expect(exposure.shouldShow(_poll()), isTrue);
     });
 
     test('a poll the server says was voted on is not offered', () async {
@@ -95,12 +131,9 @@ void main() {
 
     test('eligible keeps order and drops the rest', () async {
       await exposure.ready();
-      await exposure.markVoted('b');
-      exposure.newSessionForTest();
-      await exposure.ready();
       final list = exposure
-          .eligible([_poll(id: 'a'), _poll(id: 'b'), _poll(id: 'c', voted: 0)]);
-      expect(list.map((p) => p.id), ['a']);
+          .eligible([_poll(id: 'a'), _poll(id: 'b', voted: 1), _poll(id: 'c')]);
+      expect(list.map((p) => p.id), ['a', 'c']);
     });
   });
 
@@ -136,7 +169,7 @@ void main() {
         (tester) async {
       await pump(tester, _poll());
       expect(find.text('Who will win?'), findsOneWidget);
-      expect(find.text('Tap an option to vote'), findsOneWidget);
+      expect(find.text('Select an option to vote'), findsOneWidget);
       for (var i = 0; i < 3; i++) {
         expect(find.byKey(Key('poll_option_$i')), findsOneWidget);
       }
@@ -144,17 +177,26 @@ void main() {
       expect(find.text('2 votes'), findsOneWidget);
     });
 
-    testWidgets('voting shows results, ticks the pick and records it',
+    testWidgets('voting shows results and ticks the server-confirmed pick',
         (tester) async {
-      final adapter = _Adapter(201);
+      final gate = Completer<void>();
+      final adapter = _Adapter(200, gate: gate);
       ApiClient.instance.dio.httpClientAdapter = adapter;
       final poll = _poll();
       await pump(tester, poll);
       await tester.tap(find.byKey(const Key('poll_option_0')));
+      await tester.pump();
+      final vote = find.byKey(const Key('poll_vote'));
+      await tester.tap(vote);
+      await tester.tap(vote);
+      await tester.pump();
+      expect(find.text('2 votes'), findsOneWidget);
+      expect(find.byKey(const Key('poll_voted_note')), findsNothing);
+      gate.complete();
       await tester.pumpAndSettle();
 
       expect(adapter.calls, 1);
-      expect(poll.selectedOption, 0);
+      expect(poll.selectedOption, isNull);
       expect(find.text('3 votes'), findsOneWidget);
       expect(find.textContaining('%'), findsWidgets);
       expect(find.byKey(const Key('poll_voted_note')), findsOneWidget);
@@ -162,16 +204,21 @@ void main() {
 
       exposure.newSessionForTest();
       await exposure.ready();
-      expect(exposure.shouldShow(_poll()), isFalse);
+      expect(exposure.shouldShow(_poll(voted: 0)), isFalse);
+      expect(exposure.shouldShow(_poll()), isTrue);
     });
 
-    testWidgets('a failed vote is undone so the reader can try again',
+    testWidgets('an ambiguous failure loads detail before enabling a retry',
         (tester) async {
-      ApiClient.instance.dio.httpClientAdapter = _Adapter(500);
+      final adapter = _Adapter(500);
+      ApiClient.instance.dio.httpClientAdapter = adapter;
       final poll = _poll();
       await pump(tester, poll);
       await tester.tap(find.byKey(const Key('poll_option_1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('poll_vote')));
       await tester.pumpAndSettle();
+      expect(adapter.calls, 2);
       expect(poll.selectedOption, isNull);
       expect(poll.totalVotes, 2);
       expect(find.textContaining('%'), findsNothing);
@@ -183,7 +230,8 @@ void main() {
       exposure.newSessionForTest();
       await exposure.ready();
       final prefs = await SharedPreferences.getInstance();
-      final views = jsonDecode(prefs.getString(PollExposure.viewsKey)!) as Map;
+      final views = jsonDecode(prefs.getString(
+          '${PollExposure.viewsKey}:installation%3Atest-installation')!) as Map;
       expect(views['seen'], 1);
     });
 

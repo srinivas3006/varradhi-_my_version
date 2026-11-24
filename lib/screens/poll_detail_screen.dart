@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../models/poll.dart';
 import '../state/app_state.dart';
 import '../widgets/poll_card.dart';
 
 /// A single poll, opened from a https://vaaradhinews.com/poll/{id}/ link or a
-/// poll notification. The poll is loaded before this screen is pushed.
+/// poll notification. The card loads it for the reader on the current route.
 class PollDetailScreen extends StatelessWidget {
-  const PollDetailScreen({super.key, required this.poll});
+  const PollDetailScreen({super.key, required this.pollId});
 
-  final Poll poll;
+  final String pollId;
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +18,7 @@ class PollDetailScreen extends StatelessWidget {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: PollCard(poll: poll, trackExposure: false),
+          child: PollCard.detail(pollId: pollId),
         ),
       ),
     );

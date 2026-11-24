@@ -222,7 +222,7 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
     }
 
     // initialize() reports a failure in its state rather than by throwing.
-    ready.then((_) {
+    ready.then<void>((_) {
       settle(failed: controller.value.status == PlaybackStatus.error);
     }).catchError((_) => settle(failed: true));
   }
@@ -306,11 +306,12 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
 
   Future<void> _handleTap() async {
     HapticFeedback.selectionClick();
-    AdManager.instance
-        .recordClick(widget.ad, placementZone: widget.placementZone);
+    final destination = await AdManager.instance.resolveDestination(
+      widget.ad, widget.placementZone);
+    if (!mounted) return;
 
-    final uri = Uri.tryParse(widget.ad.destinationUrl.trim());
-    if (widget.ad.destinationUrl.trim().isEmpty || uri == null) return;
+    final uri = Uri.tryParse(destination.trim());
+    if (destination.trim().isEmpty || uri == null) return;
     // canLaunchUrl is advisory and answers false whenever package visibility
     // hides the handler; try the launch and fall back to the in-app browser.
     try {
@@ -484,6 +485,7 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
     final playing = _isInitialized && controller != null && !_videoFailed;
     return AdViewabilityDetector(
       ad: widget.ad,
+      playback: controller,
       placementZone: widget.placementZone,
       exposureKey: widget.exposureKey,
       child: VisibilityDetector(
@@ -533,6 +535,7 @@ class _VideoAdCardState extends State<VideoAdCard> with WidgetsBindingObserver {
 
     return AdViewabilityDetector(
       ad: widget.ad,
+      playback: _playbackController,
       placementZone: widget.placementZone,
       exposureKey: widget.exposureKey,
       child: VisibilityDetector(

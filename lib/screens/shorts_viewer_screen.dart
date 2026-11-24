@@ -10,6 +10,8 @@ import '../core/widgets/flip_page_view.dart';
 import '../models/ad_banner.dart';
 import '../models/video_item.dart';
 import '../widgets/ads/video_feed_ad_page.dart';
+import 'feedback_screen.dart';
+import '../services/feedback_service.dart';
 
 /// Full-screen vertical Shorts feed: one 9:16 Short at a time, swipe up for
 /// the next and down for the previous.
@@ -218,6 +220,37 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
     }
   }
 
+  FeedbackContentReference? _currentFeedbackReference() {
+    if (_current < 0 || _current >= _pages.length) return null;
+    final page = _pages[_current];
+    final type = page is VideoItem
+        ? FeedbackContentType.video
+        : page is AdBanner
+            ? FeedbackContentType.ad
+            : null;
+    final id = page is VideoItem
+        ? page.id
+        : page is AdBanner
+            ? page.id
+            : null;
+    if (type == null || id == null) return null;
+    final reference = FeedbackContentReference(type: type, id: id);
+    return reference.isValid ? reference : null;
+  }
+
+  void _reportCurrentContent() {
+    final reference = _currentFeedbackReference();
+    if (reference == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FeedbackScreen(
+          content: reference,
+          initialType: FeedbackType.contentReport,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.shorts.isEmpty) {
@@ -288,6 +321,19 @@ class _ShortsViewerScreenState extends State<ShortsViewerScreen> {
                   icon: const Icon(Icons.arrow_back, color: Colors.white),
                   onPressed: () => Navigator.of(context).maybePop(),
                   tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                ),
+              ),
+            ),
+
+          if (_currentFeedbackReference() != null)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  key: const Key('shorts_report_content'),
+                  tooltip: 'Report this content',
+                  onPressed: _reportCurrentContent,
+                  icon: const Icon(Icons.flag_outlined, color: Colors.white),
                 ),
               ),
             ),

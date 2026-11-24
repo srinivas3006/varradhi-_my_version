@@ -11,7 +11,6 @@ import 'package:vaaradhi/features/admin/data/services/admin_ugc_api_service.dart
 import 'package:vaaradhi/services/api_service.dart';
 import 'package:vaaradhi/features/admin/presentation/widgets/dialogs/admin_approval_dialog.dart';
 import 'package:vaaradhi/models/news_article.dart';
-import 'package:vaaradhi/models/submission_status.dart';
 import 'package:vaaradhi/screens/comments_screen.dart';
 import 'package:vaaradhi/screens/submission_status_screen.dart';
 import 'package:vaaradhi/state/app_state.dart';

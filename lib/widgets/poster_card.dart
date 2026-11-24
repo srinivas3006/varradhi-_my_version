@@ -4,7 +4,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../core/navigation/notification_deep_link_resolver.dart';
+import '../models/notification_target.dart';
+import '../services/notification_service.dart';
 import '../services/sharing/share_content_builder.dart';
 import 'sharing/share_sheet.dart';
 
@@ -17,6 +21,7 @@ class PosterCard extends StatefulWidget {
   final String posterId;
 
   final String mediaUrl;
+  final String? destinationUrl;
   final List<String> imageUrls;
   final VoidCallback? onClose;
   final int durationSeconds;
@@ -30,6 +35,7 @@ class PosterCard extends StatefulWidget {
     super.key,
     this.posterId = '',
     required this.mediaUrl,
+    this.destinationUrl,
     this.imageUrls = const [],
     this.onClose,
     this.durationSeconds = 0,
@@ -48,6 +54,41 @@ class _PosterCardState extends State<PosterCard> {
 
   final PageController _pageController = PageController();
   int _index = 0;
+  bool _openingDestination = false;
+
+  Future<void> _openDestination() async {
+    if (_openingDestination || ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    final raw = widget.destinationUrl?.trim() ?? '';
+    if (raw.isEmpty) return;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return;
+    final target = NotificationDeepLinkResolver.resolveFromUri(raw);
+    _openingDestination = true;
+    try {
+      if (target.type != NotificationTargetType.unknown) {
+        await NotificationService.instance
+            .navigateToTarget(target, context: context);
+        return;
+      }
+      // Unknown app routes and malformed/relative links must not leave the app.
+      if (!uri.hasScheme ||
+          const {'vaaradhi', 'varadhi', 'screen'}.contains(uri.scheme) ||
+          (const {'http', 'https'}.contains(uri.scheme) && uri.host.isEmpty)) {
+        return;
+      }
+      final launched =
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && const {'http', 'https'}.contains(uri.scheme)) {
+        await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+      }
+    } catch (e) {
+      debugPrint('[Poster] Could not open destination: $e');
+    } finally {
+      _openingDestination = false;
+    }
+  }
 
   /// Every design in this poster, in backend order.
   List<String> get _images =>
@@ -102,7 +143,7 @@ class _PosterCardState extends State<PosterCard> {
   Widget build(BuildContext context) {
     final padding = MediaQuery.paddingOf(context);
 
-    return Container(
+    final card = Container(
       color: Colors.black,
       child: Stack(
         fit: StackFit.expand,
@@ -240,6 +281,12 @@ class _PosterCardState extends State<PosterCard> {
           ),
         ],
       ),
+    );
+    return GestureDetector(
+      onTap: widget.destinationUrl?.trim().isNotEmpty == true
+          ? _openDestination
+          : null,
+      child: card,
     );
   }
 }
