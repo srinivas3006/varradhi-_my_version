@@ -78,6 +78,28 @@ class AdFrequencyPolicy {
   static const videoFeed = AdFrequencyPolicy(minGap: 8, maxAdsPerList: 4);
 }
 
+/// Reader progress used to keep Spotlight ad pacing stable across rebuilds.
+class AdInsertionProgress {
+  final Set<String> consumedContentKeys = <String>{};
+  final Map<String, int> shownAdCounts = <String, int>{};
+  int totalContentConsumed = 0;
+  int contentSinceLastAd = 0;
+  String? lastAdId;
+
+  void recordContentConsumed(String key) {
+    if (key.isEmpty || !consumedContentKeys.add(key)) return;
+    totalContentConsumed++;
+    contentSinceLastAd++;
+  }
+
+  void recordAdShown(String adId) {
+    if (adId.isEmpty) return;
+    shownAdCounts[adId] = (shownAdCounts[adId] ?? 0) + 1;
+    lastAdId = adId;
+    contentSinceLastAd = 0;
+  }
+}
+
 /// The ad to show after each content index of [contentItems] — the same
 /// pacing as [insertAdsIntoFeed], for lists that keep their own indexes
 /// (an ad is drawn under the item it follows).
@@ -124,6 +146,10 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
   int? overrideFrequency,
   String Function(T)? contentKey,
   AdFrequencyPolicy policy = AdFrequencyPolicy.none,
+  AdInsertionProgress? progress,
+  bool Function(T)? isEligibleContent,
+  String? Function(T)? eligibleContentKey,
+  bool Function(T)? isPromotion,
 }) {
   final zone = AdPlacement.canonical(placementZone);
   final ids = <String>{};
@@ -138,11 +164,22 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
           (allowTimed || (!ad.isInterstitial && !ad.isFullScreen)))
       .toList();
   final result = <FeedPresentationItem<T>>[];
-  final shown = <String, int>{};
-  var count = 0;
+  final shown = Map<String, int>.from(progress?.shownAdCounts ?? const {});
+  final countedContentKeys = <String>{
+    ...?progress?.consumedContentKeys,
+  };
+  var count = progress?.contentSinceLastAd ?? 0;
+  var totalContent = progress?.totalContentConsumed ?? 0;
   var adIndex = 0;
+  var lastPlacedAdId = progress?.lastAdId;
+  if (lastPlacedAdId != null) {
+    final lastAdIndex = ads.indexWhere((ad) => ad.id == lastPlacedAdId);
+    if (lastAdIndex >= 0 && ads.isNotEmpty) {
+      adIndex = (lastAdIndex + 1) % ads.length;
+    }
+  }
   var placed = 0;
-  String? lastAdId;
+  var lastItemWasPromotion = false;
 
   /// The next ad in rotation that is still allowed here, or null.
   AdBanner? nextAd() {
@@ -152,7 +189,7 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
       final capped =
           policy.maxRepeatsPerAd != null && repeats >= policy.maxRepeatsPerAd!;
       // Never the same creative twice in a row when there is another.
-      final sameAsLast = ad.id == lastAdId && ads.length > 1;
+      final sameAsLast = ad.id == lastPlacedAdId && ads.length > 1;
       if (!capped && !sameAsLast) {
         adIndex = (adIndex + tries) % ads.length;
         return ad;
@@ -166,25 +203,43 @@ List<FeedPresentationItem<T>> insertAdsIntoFeed<T>({
     final key = contentKey?.call(content) ?? '$index';
     result.add(
         FeedPresentationItem<T>.content(content, stableKey: 'content_$key'));
-    count++;
+    final wasFollowedByPromotion = lastItemWasPromotion;
+    final currentIsPromotion = isPromotion?.call(content) ?? false;
+    lastItemWasPromotion = currentIsPromotion;
+    if (isEligibleContent?.call(content) ?? true) {
+      final eligibleKey = eligibleContentKey?.call(content) ?? key;
+      if (eligibleKey.isNotEmpty && countedContentKeys.add(eligibleKey)) {
+        count++;
+        totalContent++;
+      }
+    }
     if (ads.isEmpty) continue;
-    if (index + 1 < policy.firstAfter) continue;
+    if (totalContent < policy.firstAfter) continue;
     if (policy.maxAdsPerList != null && placed >= policy.maxAdsPerList!) {
+      continue;
+    }
+    if (count < policy.minGap ||
+        wasFollowedByPromotion ||
+        currentIsPromotion ||
+        (index + 1 < contentItems.length &&
+            (isPromotion?.call(contentItems[index + 1]) ?? false))) {
       continue;
     }
     final ad = nextAd();
     if (ad == null) continue; // every ad has used up its repeats
     final configured = overrideFrequency ?? ad.displayFrequency;
     var interval = configured > 0 ? configured : 5;
-    if (interval < policy.minGap) interval = policy.minGap;
     if (count < interval) continue;
     result.add(
         FeedPresentationItem<T>.ad(ad, stableKey: 'ad_${ad.id}_after_$key'));
     shown[ad.id] = (shown[ad.id] ?? 0) + 1;
-    lastAdId = ad.id;
+    lastPlacedAdId = ad.id;
     placed++;
     adIndex++;
     count = 0;
+    // The content just appended already separates this ad from the next
+    // insertion. Marking the ad as a promotional content card here imposed
+    // an extra story of spacing even when minGap is zero and frequency is 1.
   }
   return result;
 }

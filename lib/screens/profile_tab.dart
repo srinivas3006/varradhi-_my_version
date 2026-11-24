@@ -24,6 +24,7 @@ import 'my_posts_screen.dart';
 import 'reporter_wallet_screen.dart';
 import 'ad_booking_screen.dart';
 import 'device_sessions_screen.dart';
+import 'feedback_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../localization/app_translations.dart';
 
@@ -147,6 +148,8 @@ class _ProfileTabState extends State<ProfileTab>
                   // was rejected for an in-app contact page reviewers did
                   // not find). Same CMS page as the item under About.
                   _buildContactUsButton(isDark),
+                  const SizedBox(height: 8),
+                  _buildFeedbackButton(isDark),
                   const SizedBox(height: 16),
 
                   // 2. Dynamic Reporter Section (Guest vs Reader vs Reporter)
@@ -1015,6 +1018,26 @@ class _ProfileTabState extends State<ProfileTab>
               const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFeedbackButton(bool isDark) {
+    final telugu = AppState.instance.language == 'Telugu';
+    return Material(
+      color: isDark
+          ? AppColors.cardDarkNavy
+          : AppColors.primary.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(14),
+      child: ListTile(
+        key: const Key('profile_feedback'),
+        leading: const Icon(Icons.feedback_outlined, color: AppColors.primary),
+        title: Text(telugu ? 'అభిప్రాయం పంపండి' : 'Send feedback'),
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FeedbackScreen()),
         ),
       ),
     );

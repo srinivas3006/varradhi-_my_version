@@ -24,12 +24,23 @@ import '../widgets/spotlight/spotlight_news_card.dart'
 import '../services/content_engagement_service.dart';
 import '../services/api_service.dart';
 import '../services/content_analytics.dart';
+import 'feedback_screen.dart';
+import '../services/feedback_service.dart';
 
 class NewsDetailScreen extends StatefulWidget {
   final NewsArticle article;
   final String? slug;
 
-  const NewsDetailScreen({super.key, required this.article, this.slug});
+  final String? topStoriesScope;
+  final bool Function()? claimQualifiedOpen;
+
+  const NewsDetailScreen({
+    super.key,
+    required this.article,
+    this.slug,
+    this.topStoriesScope,
+    this.claimQualifiedOpen,
+  });
 
   @override
   State<NewsDetailScreen> createState() => _NewsDetailScreenState();
@@ -109,7 +120,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       _detailError = null;
     });
     try {
-      final full = await ApiService.instance.getUgcDetail(id);
+      final scope = widget.topStoriesScope;
+      final full = scope == null
+          ? await ApiService.instance.getUgcDetail(id)
+          : await NewsArticleRepository.instance.getUgcDetail(id, scope);
       if (!mounted) return;
       setState(() {
         // Keep whatever the detail payload leaves blank from the feed copy.
@@ -345,6 +359,36 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     }
   }
 
+  void _reportContentFeedback() {
+    final type = article.contentKind == 'ugc'
+        ? FeedbackContentType.ugc
+        : article.contentKind == 'quote'
+            ? FeedbackContentType.quote
+            : article.isVideo
+                ? FeedbackContentType.video
+                : FeedbackContentType.article;
+    final reference = FeedbackContentReference(type: type, id: article.id);
+    if (!reference.isValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppState.instance.language == 'Telugu'
+              ? 'ఈ కంటెంట్‌ను నివేదించలేము.'
+              : 'This content cannot be reported.'),
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FeedbackScreen(
+          content: reference,
+          initialType: FeedbackType.contentReport,
+        ),
+      ),
+    );
+  }
+
   void _openComments() {
     HapticFeedback.lightImpact();
     Navigator.push(
@@ -364,6 +408,7 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
       article.isLiked = true;
     }
     _reading = ReadingTracker(article,
+        claimQualifiedOpen: widget.claimQualifiedOpen,
         isOnTop: () => mounted && (ModalRoute.of(context)?.isCurrent ?? true));
     // article_open once the screen is actually on screen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -474,6 +519,18 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                             onTap: _goBack,
                           ),
                           const Spacer(),
+                          IconButton(
+                            key: const Key('detail_report_content'),
+                            tooltip: AppState.instance.language == 'Telugu'
+                                ? 'కంటెంట్‌ను నివేదించండి'
+                                : 'Report this content',
+                            onPressed: _reportContentFeedback,
+                            icon: const Icon(
+                              Icons.flag_outlined,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
                           // More (⋮): Report Story + Bookmark — the same
                           // sheet as Spotlight, for every story.
                           Semantics(
@@ -1094,6 +1151,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
         ZoneAdSlot(
           key: ValueKey('article_end_${widget.article.id}'),
           placementZone: AdPlacement.articleEnd,
+          language: widget.article.language,
+          category: widget.article.categorySlug,
           padding: const EdgeInsets.only(top: 8.0, bottom: 20.0),
           exposureKey: 'article_end_${widget.article.id}',
         ),

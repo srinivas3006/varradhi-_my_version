@@ -6,9 +6,9 @@ void main() {
   final controller = File(
           'lib/features/admin/presentation/controllers/admin_ugc_queue_controller.dart')
       .readAsStringSync();
-  final tab = File(
-          'lib/features/admin/presentation/screens/tabs/admin_queue_tab.dart')
-      .readAsStringSync();
+  final tab =
+      File('lib/features/admin/presentation/screens/tabs/admin_queue_tab.dart')
+          .readAsStringSync();
   final dialog = File(
           'lib/features/admin/presentation/widgets/dialogs/admin_reject_dialog.dart')
       .readAsStringSync();
@@ -84,7 +84,8 @@ void main() {
       test('$name reports a failed page instead of faking success', () {
         final src = File(base + name).readAsStringSync();
         final i = src.indexOf('Future<void> loadMore()');
-        final fn = src.substring(i, i + 2600 > src.length ? src.length : i + 2600);
+        final fn =
+            src.substring(i, i + 2600 > src.length ? src.length : i + 2600);
 
         expect(fn, contains('_status = AdminLoadStatus.error'));
         expect(fn, isNot(contains('} catch (_) {')));
@@ -102,8 +103,7 @@ void main() {
 
     for (final name in tabs) {
       test('$name keeps loaded rows when a later page fails', () {
-        final src = File(
-                'lib/features/admin/presentation/screens/tabs/' + name)
+        final src = File('lib/features/admin/presentation/screens/tabs/$name')
             .readAsStringSync();
         expect(src,
             contains('c.status == AdminLoadStatus.error && c.items.isEmpty'));

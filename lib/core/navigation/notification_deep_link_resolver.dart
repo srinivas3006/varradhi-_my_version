@@ -39,6 +39,25 @@ class NotificationDeepLinkResolver {
     final host = uri.host.toLowerCase();
     final segments = uri.pathSegments;
 
+    // Custom URI authority: advertise-with-us is the host, not a path.
+    // Keep the legacy varadhi spelling compatible with existing app links.
+    if ((scheme == 'vaaradhi' || scheme == 'varadhi') &&
+        host == 'advertise-with-us') {
+      if (uri.userInfo.isEmpty &&
+          !uri.hasPort &&
+          segments.every((segment) => segment.isEmpty)) {
+        return NotificationTarget.screen(
+          screenName: 'advertise-with-us',
+          notificationId: notificationId,
+          originalPayload: originalPayload,
+        );
+      }
+      return NotificationTarget.unknown(
+        rawUri: trimmed,
+        originalPayload: originalPayload,
+      );
+    }
+
     // 1. Handle scheme: "varadhi://"
     if (scheme == 'varadhi') {
       // e.g. varadhi://category/education -> host = "category", pathSegments = ["education"]

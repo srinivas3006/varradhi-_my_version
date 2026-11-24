@@ -3,14 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vaaradhi/models/video_item.dart';
+import 'package:vaaradhi/screens/feedback_screen.dart';
 import 'package:vaaradhi/screens/shorts_viewer_screen.dart';
+import 'package:vaaradhi/services/feedback_service.dart';
 
-VideoItem _short(String id) => VideoItem.fromJson({
+VideoItem _short(String id, {bool playable = true}) => VideoItem.fromJson({
       'id': id,
       'title': 'Short $id',
       'is_short': true,
       'thumbnail_url': '',
-      'youtube_url': 'https://youtube.com/shorts/$id',
+      if (playable) 'youtube_url': 'https://youtube.com/shorts/$id',
     });
 
 void main() {
@@ -33,6 +35,32 @@ void main() {
           .map((w) => w.aspectRatio);
       expect(ratios, contains(9 / 16),
           reason: 'a Short is portrait; the landscape player letterboxed it');
+    });
+
+    testWidgets('UUID-valid Shorts open a video feedback form', (tester) async {
+      const id = '22f55b83-c38b-49fd-b034-a26f92abbcf0';
+      await tester.pumpWidget(MaterialApp(
+          home: ShortsViewerScreen(
+        shorts: [_short(id, playable: false)],
+      )));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('shorts_report_content')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final feedback = tester.widget<FeedbackScreen>(
+        find.byType(FeedbackScreen),
+      );
+      expect(feedback.initialType, FeedbackType.contentReport);
+      expect(feedback.content?.type, FeedbackContentType.video);
+      expect(feedback.content?.id, id);
+    });
+
+    testWidgets('non-UUID Short IDs cannot be reported', (tester) async {
+      await pumpViewer(tester);
+
+      expect(find.byKey(const Key('shorts_report_content')), findsNothing);
     });
 
     testWidgets('it opens on the tapped Short, not the first', (tester) async {
@@ -74,8 +102,8 @@ void main() {
     });
 
     testWidgets('an empty list does not crash', (tester) async {
-      await tester.pumpWidget(
-          const MaterialApp(home: ShortsViewerScreen(shorts: [])));
+      await tester
+          .pumpWidget(const MaterialApp(home: ShortsViewerScreen(shorts: [])));
       await tester.pump();
       expect(find.text('No shorts available'), findsOneWidget);
     });
@@ -229,8 +257,7 @@ void main() {
     });
 
     test('a loading page is appended while more are coming', () {
-      expect(viewer,
-          contains('_pages.length + (widget.hasMore ? 1 : 0)'));
+      expect(viewer, contains('_pages.length + (widget.hasMore ? 1 : 0)'));
     });
   });
 }

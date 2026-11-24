@@ -359,6 +359,7 @@ class LocationProvider extends ChangeNotifier {
   }
 
   Future<bool> apply(LocationSearchResult result) async {
+    if (_isApplying) return false;
     _isApplying = true;
     notifyListeners();
     // Keep the API's Telugu name for the chosen place, so it can be shown
@@ -380,15 +381,6 @@ class LocationProvider extends ChangeNotifier {
         village: result.type == LocationLevel.village ? result.nameEn : '',
       );
 
-      AppState.instance.setDeviceLocation(
-        location,
-        stateId: result.type == LocationLevel.state ? result.id : null,
-        districtId: result.type == LocationLevel.district ? result.id : null,
-        subdistrictId:
-            result.type == LocationLevel.subdistrict ? result.id : null,
-        villageId: result.type == LocationLevel.village ? result.id : null,
-      );
-
       final patchData = <String, dynamic>{};
       if (result.type == LocationLevel.village) {
         patchData['village_id'] = result.id;
@@ -401,9 +393,20 @@ class LocationProvider extends ChangeNotifier {
       }
       if (result.type == LocationLevel.state) patchData['state_id'] = result.id;
 
-      if (patchData.isNotEmpty) {
-        await ApiService.instance.updateLocationProfile(patchData);
+      if (patchData.isEmpty ||
+          !await ApiService.instance.updateLocationProfile(patchData)) {
+        throw StateError('Could not save your location. Please try again.');
       }
+
+
+      AppState.instance.setDeviceLocation(
+        location,
+        stateId: result.type == LocationLevel.state ? result.id : null,
+        districtId: result.type == LocationLevel.district ? result.id : null,
+        subdistrictId:
+            result.type == LocationLevel.subdistrict ? result.id : null,
+        villageId: result.type == LocationLevel.village ? result.id : null,
+      );
 
       return true;
     } catch (error) {

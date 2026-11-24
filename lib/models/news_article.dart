@@ -25,6 +25,7 @@ class NewsArticle {
   /// That publisher's logo (`source_logo_url`), when sent.
   final String sourceLogoUrl;
   final String category;
+  final String categorySlug;
   final DateTime publishedAt;
   int likes;
 
@@ -84,6 +85,7 @@ class NewsArticle {
     this.sourceUrl = '',
     this.sourceLogoUrl = '',
     required this.category,
+    this.categorySlug = '',
     required this.publishedAt,
     required this.likes,
     this.dislikes = 0,
@@ -269,6 +271,10 @@ class NewsArticle {
       sourceUrl: json['source_url']?.toString().trim() ?? '',
       sourceLogoUrl: json['source_logo_url']?.toString().trim() ?? '',
       category: parsedCategory,
+      categorySlug: json['category_slug']?.toString() ??
+          (json['category'] is Map
+              ? json['category']['slug']?.toString() ?? ''
+              : ''),
       publishedAt: DateParser.tryParse(json['published_at'] ??
               json['created_at'] ??
               json['publish_date'] ??
@@ -337,8 +343,7 @@ class NewsArticle {
       authorLevel: json['uploader'] is Map
           ? (json['uploader']['trust_level'] ?? '').toString()
           : '',
-      language:
-          json['language']?.toString() ?? json['lang']?.toString() ?? '',
+      language: json['language']?.toString() ?? json['lang']?.toString() ?? '',
       isFeatured: json['is_featured'] == true,
       mediaItems: parsedMediaItems,
       contentKind: _parseContentKind(json),
@@ -351,7 +356,7 @@ class NewsArticle {
         ?.toString()
         .trim()
         .toLowerCase();
-    return const {'article', 'ugc', 'live'}.contains(value)
+    return const {'article', 'ugc', 'live', 'quote'}.contains(value)
         ? value!
         : 'article';
   }
@@ -591,6 +596,7 @@ class NewsArticle {
       if (sourceUrl.isNotEmpty) 'source_url': sourceUrl,
       if (sourceLogoUrl.isNotEmpty) 'source_logo_url': sourceLogoUrl,
       'category': {'name': category},
+      if (categorySlug.isNotEmpty) 'category_slug': categorySlug,
       'published_at': publishedAt.toIso8601String(),
       'likes_count': likes,
       'dislike_count': dislikes,

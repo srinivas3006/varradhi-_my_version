@@ -200,14 +200,6 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    Future<void> chooseArea(
-        WidgetTester tester, String scope, String name) async {
-      await tester.tap(find.byKey(Key('ad_area_dropdown_$scope')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(name).last);
-      await tester.pumpAndSettle();
-    }
-
     Future<void> fillDetails(WidgetTester tester) async {
       await tester.enterText(find.byType(TextFormField).at(0), 'Ganesh Stores');
       await tester.enterText(find.byType(TextFormField).at(1), 'Ganesh');

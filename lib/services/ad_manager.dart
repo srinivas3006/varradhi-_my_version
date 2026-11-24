@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import '../core/ads/ad_insertion.dart';
 import '../core/ads/ad_placement.dart';
@@ -42,6 +43,16 @@ class AdManager extends ChangeNotifier {
 
   /// Emitted events deduplication set: {adId_zone_eventType_exposureContext}
   final Set<String> _emittedEvents = <String>{};
+  final _clicksInFlight = <String>{};
+  final _openedDestinations = <String, DateTime>{};
+
+  bool canDisplay(AdBanner ad) {
+    final exposure = ad.exposure;
+    return ad.canDisplay &&
+        !AdEventQueue.instance.isInvalid(exposure) &&
+        (exposure?.targetingKey == null ||
+            exposure!.targetingKey == AdRepository.targetingKey);
+  }
 
   /// Session impression telemetry; backend eligibility enforces daily caps.
   final Map<String, int> _adImpressionCounts = {};
@@ -157,7 +168,9 @@ class AdManager extends ChangeNotifier {
     if (pool.isEmpty) return null;
 
     // Filter to supported types
-    var candidates = pool.where(AdTypeResolver.isSupported).toList();
+    var candidates = pool
+        .where((ad) => canDisplay(ad) && AdTypeResolver.isSupported(ad))
+        .toList();
     if (candidates.isEmpty) return null;
 
     // If preferred type specified, prioritize it
@@ -252,8 +265,9 @@ class AdManager extends ChangeNotifier {
     String placementZone = 'feed',
     String? contextKey,
   }) {
-    final key = _buildEventKey(
-        ad.id, placementZone, 'impression', contextKey ?? 'default');
+    if (!canDisplay(ad)) return;
+    final key = _buildEventKey(ad.id, placementZone, 'impression',
+        ad.exposure?.id ?? contextKey ?? 'default');
     if (_emittedEvents.contains(key)) {
       return; // Already tracked for this exposure
     }
@@ -261,11 +275,7 @@ class AdManager extends ChangeNotifier {
     _emittedEvents.add(key);
     AdRepository.instance.clearCache();
     markAdShown(ad, isInterstitial: ad.isInterstitial || ad.isFullScreen);
-    AdEventQueue.instance.enqueue(
-      adId: ad.id,
-      eventType: 'impression',
-      placementZone: placementZone,
-    );
+    _record(ad, 'impression', placementZone);
   }
 
   /// Records a viewability event (deduplicated per exposure key).
@@ -273,46 +283,91 @@ class AdManager extends ChangeNotifier {
     AdBanner ad, {
     String placementZone = 'feed',
     String? contextKey,
+    double? visibleFraction,
+    int? visibleDurationMs,
   }) {
-    final key = _buildEventKey(
-        ad.id, placementZone, 'viewability', contextKey ?? 'default');
+    if (!canDisplay(ad)) return;
+    final key = _buildEventKey(ad.id, placementZone, 'viewability',
+        ad.exposure?.id ?? contextKey ?? 'default');
     if (_emittedEvents.contains(key)) {
       return;
     }
 
     _emittedEvents.add(key);
-    AdEventQueue.instance.enqueue(
-      adId: ad.id,
-      eventType: 'viewability',
-      placementZone: placementZone,
-    );
+    _record(ad, 'viewability', placementZone, telemetry: {
+      if (visibleFraction != null && visibleFraction.isFinite)
+        'visible_fraction': visibleFraction.clamp(0, 1),
+      if (visibleDurationMs != null) 'visible_duration_ms': visibleDurationMs,
+    });
   }
 
-  /// Records a user click on an advertisement.
   void recordClick(AdBanner ad, {String placementZone = 'feed'}) {
-    AdEventQueue.instance.enqueue(
+    if (ad.exposure == null) _record(ad, 'click', placementZone);
+  }
+
+  /// The v2 destination comes from the same exposure that rendered.
+  Future<String> resolveDestination(AdBanner ad, String placementZone) async {
+    final exposure = ad.exposure;
+    if (exposure == null) {
+      recordClick(ad, placementZone: placementZone);
+      return ad.destinationUrl.trim();
+    }
+    final now = DateTime.now();
+    _openedDestinations.removeWhere((_, expiry) => !expiry.isAfter(now));
+    if (!canDisplay(ad) ||
+        _openedDestinations.containsKey(exposure.id) ||
+        !_clicksInFlight.add(exposure.id)) {
+      return '';
+    }
+    try {
+      final result = await _enqueue(ad, 'click', placementZone);
+      final destination = result?['destination_url'];
+      if (destination is! String || !canDisplay(ad)) return '';
+      final uri = Uri.tryParse(destination.trim());
+      if (uri == null ||
+          !const {'http', 'https', 'whatsapp'}.contains(uri.scheme)) {
+        return '';
+      }
+      _openedDestinations[exposure.id] = exposure.expiresAt!;
+      return destination.trim();
+    } finally {
+      _clicksInFlight.remove(exposure.id);
+    }
+  }
+
+  void _record(AdBanner ad, String event, String zone,
+          {Map<String, num> telemetry = const {}}) =>
+      unawaited(_enqueue(ad, event, zone, telemetry: telemetry));
+
+  void recordVideoEvent(
+      AdBanner ad, String zone, String event, Map<String, num> telemetry) {
+    if (ad.exposure != null) _record(ad, event, zone, telemetry: telemetry);
+  }
+
+  Future<Map?> _enqueue(AdBanner ad, String event, String zone,
+      {Map<String, num> telemetry = const {}}) async {
+    if (!canDisplay(ad) ||
+        (ad.exposure != null &&
+            ad.placementZone != AdPlacement.canonical(zone))) {
+      return null;
+    }
+    return AdEventQueue.instance.enqueue(
       adId: ad.id,
-      eventType: 'click',
-      placementZone: placementZone,
+      eventType: event,
+      placementZone: zone,
+      exposure: ad.exposure,
+      telemetry: telemetry,
     );
   }
 
   /// Records user dismissing an advertisement (e.g. Closing spotlight or interstitial).
   void recordDismiss(AdBanner ad, {String placementZone = 'feed'}) {
-    AdEventQueue.instance.enqueue(
-      adId: ad.id,
-      eventType: 'dismiss',
-      placementZone: placementZone,
-    );
+    _record(ad, 'dismiss', placementZone);
   }
 
   /// Records user skipping an advertisement.
   void recordSkip(AdBanner ad, {String placementZone = 'feed'}) {
-    AdEventQueue.instance.enqueue(
-      adId: ad.id,
-      eventType: 'skip',
-      placementZone: placementZone,
-    );
+    _record(ad, 'skip', placementZone);
   }
 
   /// Marks a video ad as watched to the end, once per exposure.
@@ -342,11 +397,7 @@ class AdManager extends ChangeNotifier {
 
   /// Records user hiding an advertisement.
   void recordHide(AdBanner ad, {String placementZone = 'feed'}) {
-    AdEventQueue.instance.enqueue(
-      adId: ad.id,
-      eventType: 'hide',
-      placementZone: placementZone,
-    );
+    _record(ad, 'hide', placementZone);
   }
 
   /// Fetches ads for a specific zone via [AdRepository].

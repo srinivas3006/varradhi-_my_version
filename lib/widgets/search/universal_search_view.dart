@@ -9,7 +9,6 @@ import '../../models/category.dart';
 import '../../models/live_news.dart';
 import '../../models/news_article.dart';
 import '../../models/notification_target.dart';
-import '../../models/poll.dart';
 import '../../models/unified_feed_item.dart';
 import '../../models/video_item.dart';
 import '../../screens/category_screen.dart';
@@ -122,7 +121,8 @@ Future<void> openSearchItem(
               UnifiedFeedItem.fromJson({...item, 'type': 'ugc'}).toArticle()));
       return;
     case 'polls':
-      push(PollDetailScreen(poll: Poll.fromJson(item)));
+      final id = item['id']?.toString();
+      if (id != null && id.isNotEmpty) push(PollDetailScreen(pollId: id));
       return;
     case 'posters':
       push(PosterDetailScreen(poster: item));

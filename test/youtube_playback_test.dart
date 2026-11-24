@@ -8,7 +8,7 @@ import 'package:vaaradhi/core/media/youtube_playback_controller.dart';
 void main() {
   group('controller construction', () {
     test('a YouTube source builds a YouTube controller', () {
-      final src = MediaSource.youtube(videoId: 'dQw4w9WgXcQ', thumbnailUrl: '');
+      const src = MediaSource.youtube(videoId: 'dQw4w9WgXcQ', thumbnailUrl: '');
       expect(
         VideoPlaybackController.fromSource(src),
         isA<YouTubePlaybackController>(),
@@ -16,7 +16,7 @@ void main() {
     });
 
     test('defaults to paused — nothing plays just by being constructed', () {
-      final src = MediaSource.youtube(videoId: 'dQw4w9WgXcQ', thumbnailUrl: '');
+      const src = MediaSource.youtube(videoId: 'dQw4w9WgXcQ', thumbnailUrl: '');
       final ctrl = VideoPlaybackController.fromSource(src);
       addTearDown(ctrl.dispose);
       expect(ctrl.value.status, isNot(PlaybackStatus.playing));
@@ -24,7 +24,7 @@ void main() {
 
     test('an invalid video id surfaces an error, not a silent dead player',
         () async {
-      final src = MediaSource.youtube(videoId: '', thumbnailUrl: '');
+      const src = MediaSource.youtube(videoId: '', thumbnailUrl: '');
       final ctrl = VideoPlaybackController.fromSource(src);
       addTearDown(ctrl.dispose);
       await ctrl.initialize();
@@ -60,8 +60,8 @@ void main() {
     });
 
     test('video tab keeps focus-driven playback, without the lost command', () {
-      final b = body('lib/screens/video_tab.dart',
-          'VideoPlaybackController.fromSource');
+      final b = body(
+          'lib/screens/video_tab.dart', 'VideoPlaybackController.fromSource');
       expect(b, contains('autoPlay: widget.isFocused'));
       expect(b, isNot(contains('ctrl.play()')));
     });

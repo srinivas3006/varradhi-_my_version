@@ -105,8 +105,11 @@ class _ImpressionTrackerState extends State<ImpressionTracker> {
 /// Reading time counts only while the screen is on top, the app is in the
 /// foreground and the reader touched or scrolled within [idleAfter].
 class ReadingTracker with WidgetsBindingObserver {
-  ReadingTracker(this.story, {bool Function()? isOnTop})
+  ReadingTracker(this.story,
+      {bool Function()? isOnTop, this.claimQualifiedOpen})
       : _isOnTop = isOnTop ?? (() => true);
+
+  final bool Function()? claimQualifiedOpen;
 
   /// Replaced by the full story once the detail loads (see [updateStory]).
   NewsArticle story;
@@ -142,7 +145,14 @@ class ReadingTracker with WidgetsBindingObserver {
 
   void _sendOpen() {
     if (_openSent || AnalyticsQueue.contentIdOf(story) == null) return;
+    if (claimQualifiedOpen != null &&
+        (_activeSeconds < CardViewTracker.openAfter.inSeconds ||
+            !_foreground ||
+            !_isOnTop())) {
+      return;
+    }
     _openSent = true;
+    if (claimQualifiedOpen?.call() == false) return;
     unawaited(AnalyticsQueue.instance.trackContent('article_open', story));
   }
 
@@ -162,6 +172,7 @@ class ReadingTracker with WidgetsBindingObserver {
     final t = now ?? DateTime.now();
     if (_foreground && _isOnTop() && t.difference(_lastActivity) <= idleAfter) {
       _activeSeconds++;
+      if (claimQualifiedOpen != null) _sendOpen();
     }
     _maybeComplete();
   }
@@ -230,11 +241,15 @@ class CardViewTracker with WidgetsBindingObserver {
   Timer? _timer;
   bool _observing = false;
 
+  bool Function()? _claimQualifiedOpen;
+
   /// [story]'s card became the current one.
-  void shown(NewsArticle story, {DateTime? now}) {
+  void shown(NewsArticle story,
+      {DateTime? now, bool Function()? claimQualifiedOpen}) {
     if (identical(_story, story) && _since != null) return;
     left(now: now);
     _story = story;
+    _claimQualifiedOpen = claimQualifiedOpen;
     _openSent = false;
     _seen = Duration.zero;
     if (!_observing) {
@@ -273,8 +288,11 @@ class CardViewTracker with WidgetsBindingObserver {
     final story = _story;
     if (story != null && !_openSent && _seen >= openAfter) {
       _openSent = true;
-      unawaited(AnalyticsQueue.instance.trackContent('article_open', story,
-          metadata: {'surface': surface}));
+      if (AnalyticsQueue.contentIdOf(story) != null &&
+          _claimQualifiedOpen?.call() != false) {
+        unawaited(AnalyticsQueue.instance.trackContent('article_open', story,
+            metadata: {'surface': surface}));
+      }
     }
   }
 

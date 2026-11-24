@@ -9,9 +9,9 @@ import '../models/ad_banner.dart';
 import '../models/news_article.dart';
 import '../models/poll.dart';
 import '../services/poll_exposure.dart';
+import '../services/poll_context.dart';
 import '../services/analytics_queue.dart';
 import '../services/api_service.dart';
-import '../services/ad_delivery_service.dart';
 import '../repositories/ad_repository.dart';
 import '../repositories/feed_repository.dart';
 import '../repositories/news_article_repository.dart';
@@ -35,12 +35,15 @@ class SpotlightController extends ChangeNotifier {
 
   final List<dynamic> _postersPool = [];
   final List<Poll> _pollsPool = [];
+  PollReader _pollReader = currentPollReader;
+  int _pollRequest = 0;
   final List<NewsArticle> _ugcItems = [];
   String? _ugcCursor;
   bool _ugcHasMore = true;
   bool _articleHasMore = true;
   final Set<String> _dismissedSlots = {};
   final List<AdBanner> _adsPool = [];
+  AdInsertionProgress _adInsertionProgress = AdInsertionProgress();
   Timer? _overlayTimer;
   int _requestGeneration = 0;
   bool _disposed = false;
@@ -69,8 +72,18 @@ class SpotlightController extends ChangeNotifier {
       ].join('|');
 
   void _onPreferencesChanged() {
+    if (_disposed) return;
     final identity = _currentPreferencesIdentity;
-    if (identity == _preferencesIdentity || _disposed) return;
+    final reader = currentPollReader;
+    final pollReaderChanged = reader != _pollReader;
+    if (pollReaderChanged) {
+      _pollReader = reader;
+      _pollsPool.clear();
+    }
+    if (identity == _preferencesIdentity) {
+      if (pollReaderChanged) unawaited(_reloadPollPool());
+      return;
+    }
     _preferencesIdentity = identity;
     updateLocation();
   }
@@ -188,7 +201,6 @@ class SpotlightController extends ChangeNotifier {
     _currentFetchCompleter = completer;
 
     if (refresh) {
-      AdDeliveryService.instance.resetSession();
       _state = _state.copyWith(
         isFetching: true,
         clearError: true,
@@ -201,6 +213,8 @@ class SpotlightController extends ChangeNotifier {
     }
 
     try {
+      final pollReader = currentPollReader;
+      final pollRequest = ++_pollRequest;
       final isLocal = _state.isLocalNews;
       final category = _state.selectedCategory;
       final app = AppState.instance;
@@ -295,7 +309,7 @@ class SpotlightController extends ChangeNotifier {
         _postersPool.isEmpty
             ? ApiService.instance.getPosters(pageSize: 10, lang: lang)
             : Future.value(List<dynamic>.from(_postersPool)),
-        _pollsPool.isEmpty
+        refresh || _pollsPool.isEmpty
             ? ApiService.instance.getPolls()
             : Future.value(List<Poll>.from(_pollsPool)),
       ]);
@@ -323,9 +337,11 @@ class SpotlightController extends ChangeNotifier {
       _postersPool
         ..clear()
         ..addAll(results[3] as List);
-      _pollsPool
-        ..clear()
-        ..addAll(results[4] as List<Poll>);
+      if (pollReader == currentPollReader && pollRequest == _pollRequest) {
+        _pollsPool
+          ..clear()
+          ..addAll(results[4] as List<Poll>);
+      }
       if (failure != null &&
           feedState.items.isEmpty &&
           _ugcItems.isEmpty &&
@@ -384,8 +400,15 @@ class SpotlightController extends ChangeNotifier {
         contentItems: content,
         eligibleAds: _adsPool,
         allowTimed: true,
-        // Each ad at most twice, at least 6 stories apart.
         policy: AdFrequencyPolicy.spotlight,
+        progress: _adInsertionProgress,
+        // Count each article/UGC once, regardless of its media count. Posters
+        // are promotional pages: retain them without advancing this interval.
+        isEligibleContent: (item) => item.article != null,
+        eligibleContentKey: (item) => item.article == null
+            ? null
+            : '${item.article!.contentKind}:${item.article!.id}',
+        isPromotion: (item) => item.type == SpotlightType.poster,
         contentKey: (item) => '${item.type.name}:${item.id}',
       );
       final rebuilt = run
@@ -538,6 +561,45 @@ class SpotlightController extends ChangeNotifier {
     }
   }
 
+  Future<void> _reloadPollPool({String? excludedId}) async {
+    final request = ++_pollRequest;
+    final reader = currentPollReader;
+    final polls = await ApiService.instance.getPolls();
+    if (_disposed || request != _pollRequest || reader != currentPollReader) {
+      return;
+    }
+    _pollsPool
+      ..clear()
+      ..addAll(polls.where((poll) => poll.id != excludedId));
+  }
+
+  int? removeUnavailablePoll(String pollId) {
+    final index = _state.feed.indexWhere((item) => item.poll?.id == pollId);
+    if (index < 0) return null;
+    final feed = List<SpotlightItem>.of(_state.feed)..removeAt(index);
+    _pollsPool.removeWhere((poll) => poll.id == pollId);
+    _state = _state.copyWith(feed: feed);
+    notifyListeners();
+    unawaited(_reloadPollPool(excludedId: pollId));
+    return index;
+  }
+
+  /// Records a unique news card or ad reached by the reader.
+  void recordPageConsumed(int index) {
+    if (index < 0 || index >= _state.feed.length) return;
+    final item = _state.feed[index];
+    if (item.article != null) {
+      _adInsertionProgress.recordContentConsumed(
+          '${item.article!.contentKind}:${item.article!.id}');
+    } else if (item.type == SpotlightType.ad && item.adBanner != null) {
+      _adInsertionProgress.recordAdShown(item.adBanner!.id);
+    }
+  }
+
+  void _resetAdInsertionProgress() {
+    _adInsertionProgress = AdInsertionProgress();
+  }
+
   /// Switches category filter, cancels stale requests, resets cursor, and reloads.
   Future<void> selectCategory(String? category) async {
     final trimmed = category?.trim();
@@ -549,6 +611,7 @@ class SpotlightController extends ChangeNotifier {
 
     HapticFeedback.selectionClick();
     ++_requestGeneration;
+    _resetAdInsertionProgress();
     _pinned = null;
     _state = _state.copyWith(
       selectedCategory: cat,
@@ -567,6 +630,7 @@ class SpotlightController extends ChangeNotifier {
     if (_state.isLocalNews == isLocal) return;
     HapticFeedback.selectionClick();
     ++_requestGeneration;
+    _resetAdInsertionProgress();
     _pinned = null;
     _state = _state.copyWith(
       isLocalNews: isLocal,
@@ -584,6 +648,7 @@ class SpotlightController extends ChangeNotifier {
   Future<void> updateLocation() async {
     HapticFeedback.lightImpact();
     ++_requestGeneration;
+    _resetAdInsertionProgress();
     _pinned = null;
     _state = _state.copyWith(
       locationName: AppState.instance.displayLocation,

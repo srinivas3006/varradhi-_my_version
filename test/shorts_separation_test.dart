@@ -59,20 +59,32 @@ void main() {
     test('Video-section pagination cannot reintroduce a regular video', () {
       // Page 2 arrives carrying a regular video; the filter runs on every
       // page, not just the first.
-      final page1 = [_item({'id': 's1', 'is_short': true})];
-      final page2 = [_item({'id': 'v9'}), _item({'id': 's2', 'is_short': true})];
-      final accumulated = <VideoItem>[]
-        ..addAll(page1.where((v) => v.isShort))
-        ..addAll(page2.where((v) => v.isShort));
+      final page1 = [
+        _item({'id': 's1', 'is_short': true})
+      ];
+      final page2 = [
+        _item({'id': 'v9'}),
+        _item({'id': 's2', 'is_short': true})
+      ];
+      final accumulated = <VideoItem>[
+        ...page1.where((v) => v.isShort),
+        ...page2.where((v) => v.isShort),
+      ];
       expect(accumulated.map((v) => v.id), ['s1', 's2']);
     });
 
     test('Home pagination cannot reintroduce a Short', () {
-      final page1 = [_item({'id': 'v1'})];
-      final page2 = [_item({'id': 's9', 'is_short': true}), _item({'id': 'v2'})];
-      final accumulated = <VideoItem>[]
-        ..addAll(page1.where((v) => !v.isShort))
-        ..addAll(page2.where((v) => !v.isShort));
+      final page1 = [
+        _item({'id': 'v1'})
+      ];
+      final page2 = [
+        _item({'id': 's9', 'is_short': true}),
+        _item({'id': 'v2'})
+      ];
+      final accumulated = <VideoItem>[
+        ...page1.where((v) => !v.isShort),
+        ...page2.where((v) => !v.isShort),
+      ];
       expect(accumulated.map((v) => v.id), ['v1', 'v2']);
     });
 
@@ -100,15 +112,15 @@ void main() {
 
     test('an empty video list hides the Home section', () {
       final src = File('lib/screens/news_feed_tab.dart').readAsStringSync();
-      final strip = src.substring(src.indexOf('Widget _buildHomeVideosStrip()'));
+      final strip =
+          src.substring(src.indexOf('Widget _buildHomeVideosStrip()'));
       expect(strip.substring(0, 300),
           contains('if (_homeVideos.isEmpty) return const SizedBox.shrink();'));
     });
 
     test('the carousel creates no player and does not autoplay', () {
       final src = File('lib/screens/news_feed_tab.dart').readAsStringSync();
-      final strip = src.substring(
-          src.indexOf('Widget _buildHomeVideosStrip()'),
+      final strip = src.substring(src.indexOf('Widget _buildHomeVideosStrip()'),
           src.indexOf('Widget _buildPostersStrip()'));
       expect(strip, isNot(contains('VideoPlaybackController')));
       expect(strip, isNot(contains('autoPlay')));
@@ -116,8 +128,7 @@ void main() {
 
     test('Home cards are 16:9, not the Shorts 9:16', () {
       final src = File('lib/screens/news_feed_tab.dart').readAsStringSync();
-      final strip = src.substring(
-          src.indexOf('Widget _buildHomeVideosStrip()'),
+      final strip = src.substring(src.indexOf('Widget _buildHomeVideosStrip()'),
           src.indexOf('Widget _buildPostersStrip()'));
       expect(strip, contains('aspectRatio: 16 / 9'),
           reason: 'landscape video would letterbox in a portrait card');
@@ -125,8 +136,7 @@ void main() {
 
     test('tapping a Home video opens the regular player', () {
       final src = File('lib/screens/news_feed_tab.dart').readAsStringSync();
-      final strip = src.substring(
-          src.indexOf('Widget _buildHomeVideosStrip()'),
+      final strip = src.substring(src.indexOf('Widget _buildHomeVideosStrip()'),
           src.indexOf('Widget _buildPostersStrip()'));
       expect(strip, contains('VideoPlayerScreen('));
     });
@@ -134,10 +144,8 @@ void main() {
 
   group('the Video tab presents Shorts in their own shape', () {
     final tab = File('lib/screens/video_tab.dart').readAsStringSync();
-    final code = tab
-        .split('\n')
-        .where((l) => !l.trimLeft().startsWith('//'))
-        .join('\n');
+    final code =
+        tab.split('\n').where((l) => !l.trimLeft().startsWith('//')).join('\n');
 
     test('tiles are laid out in a grid, not a wide list', () {
       // The list card was landscape, so every 9:16 Short rendered with black

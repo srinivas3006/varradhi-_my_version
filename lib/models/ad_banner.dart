@@ -1,5 +1,26 @@
 import '../core/utils/url_normalizer.dart';
 
+class AdExposure {
+  const AdExposure({
+    required this.id,
+    required this.expiresAt,
+    required this.deviceId,
+    this.variantId,
+    this.videoDurationMs,
+    this.targetingKey,
+  });
+
+  final String id;
+  final DateTime? expiresAt;
+  final String deviceId;
+  final String? variantId;
+  final int? videoDurationMs;
+  final String? targetingKey;
+
+  bool isValidAt(DateTime time) =>
+      id.isNotEmpty && expiresAt?.isAfter(time) == true;
+}
+
 int _toInt(dynamic val, [int fallback = 0]) {
   if (val == null) return fallback;
   if (val is int) return val;
@@ -33,6 +54,9 @@ class AdBanner {
   /// 3D ads: which 3D format to play (cube, prism, pillar, corner
   /// billboard, showcase) when the backend names one; empty = take turns.
   final String displayStyle;
+  final AdExposure? exposure;
+  final DateTime? startsAt;
+  final DateTime? endsAt;
 
   AdBanner({
     required this.id,
@@ -50,7 +74,17 @@ class AdBanner {
     this.dailyMaxImpressionsPerUser = 0,
     required this.ctr,
     this.displayStyle = '',
+    this.exposure,
+    this.startsAt,
+    this.endsAt,
   });
+
+  bool get canDisplay {
+    final now = DateTime.now();
+    return (startsAt?.isAfter(now) != true) &&
+        (endsAt == null || endsAt!.isAfter(now)) &&
+        (exposure?.isValidAt(now) ?? true);
+  }
 
   int get displayDurationSeconds => durationSeconds;
 
@@ -70,14 +104,19 @@ class AdBanner {
   bool get isFullScreen => adType.toLowerCase() == 'full_screen';
   bool get isBottomSticky => adType.toLowerCase() == 'bottom_sticky';
 
-  factory AdBanner.fromJson(Map<String, dynamic> json) {
-    final rawImg =
-        (json['image_url'] ?? json['thumbnail_url'] ?? json['banner_url'])
-            ?.toString();
-    final rawVideo = (json['video_url'] ?? json['video'])?.toString();
-    final rawDest =
-        (json['destination_url'] ?? json['target_url'] ?? json['click_url'])
-            ?.toString();
+  factory AdBanner.fromJson(Map<String, dynamic> json,
+      {String deviceId = '', String? targetingKey}) {
+    final tracking = json['tracking'];
+    final isV2 = tracking is Map && _toInt(tracking['tracking_version']) == 2;
+    final creative = tracking is Map ? tracking['creative'] : null;
+    final rawImg = (json['image_url'] ??
+            (isV2 ? null : json['thumbnail_url'] ?? json['banner_url']))
+        ?.toString();
+    final rawVideo =
+        (json['video_url'] ?? (isV2 ? null : json['video']))?.toString();
+    final rawDest = (json['destination_url'] ??
+            (isV2 ? null : json['target_url'] ?? json['click_url']))
+        ?.toString();
 
     return AdBanner(
       id: json['id']?.toString() ?? '',
@@ -103,6 +142,21 @@ class AdBanner {
       dailyMaxImpressionsPerUser:
           _toInt(json['daily_max_impressions_per_user'], 0),
       ctr: _toDouble(json['ctr'], 0.0),
+      startsAt: DateTime.tryParse(json['start_date']?.toString() ?? ''),
+      endsAt: DateTime.tryParse(json['end_date']?.toString() ?? ''),
+      exposure: isV2
+          ? AdExposure(
+              id: tracking['exposure_id']?.toString().trim() ?? '',
+              expiresAt: DateTime.tryParse(
+                  tracking['exposure_expires_at']?.toString() ?? ''),
+              deviceId: deviceId,
+              targetingKey: targetingKey,
+              variantId: tracking['variant_id']?.toString(),
+              videoDurationMs: creative is Map
+                  ? int.tryParse('${creative['video_duration_ms']}')
+                  : null,
+            )
+          : null,
       displayStyle: (json['three_d_style'] ??
               json['animation_style'] ??
               json['display_style'] ??
@@ -127,6 +181,8 @@ class AdBanner {
       'display_duration_seconds': durationSeconds,
       'daily_max_impressions_per_user': dailyMaxImpressionsPerUser,
       'ctr': ctr,
+      if (startsAt != null) 'start_date': startsAt!.toIso8601String(),
+      if (endsAt != null) 'end_date': endsAt!.toIso8601String(),
       if (displayStyle.isNotEmpty) 'three_d_style': displayStyle,
     };
   }
@@ -165,6 +221,9 @@ class AdBanner {
           dailyMaxImpressionsPerUser ?? this.dailyMaxImpressionsPerUser,
       ctr: ctr ?? this.ctr,
       displayStyle: displayStyle ?? this.displayStyle,
+      exposure: exposure,
+      startsAt: startsAt,
+      endsAt: endsAt,
     );
   }
 }

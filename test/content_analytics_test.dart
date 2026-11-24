@@ -317,6 +317,37 @@ void main() {
   });
 
   group('spotlight card', () {
+    test('a qualified Top Stories open is shared by the card and detail', () {
+      final story = _story();
+      var claimed = false;
+      bool claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      }
+
+      final t0 = DateTime.now();
+      final card = CardViewTracker();
+      card.shown(story, now: t0, claimQualifiedOpen: claim);
+      card.left(now: t0.add(const Duration(seconds: 2)));
+      final detail = ReadingTracker(story, claimQualifiedOpen: claim);
+      detail.opened();
+      detail.updateStory(_story());
+      detail.tick(now: t0);
+      detail.tick(now: t0);
+      expect(events(), isEmpty);
+      detail.tick(now: t0);
+      detail.updateStory(_story());
+
+      card.shown(story, now: t0, claimQualifiedOpen: claim);
+      card.left(now: t0.add(CardViewTracker.openAfter));
+      detail.closed();
+      card.dispose();
+      final opens = events().where((e) => e['event_type'] == 'article_open');
+      expect(opens, hasLength(1));
+      expect(opens.single['article_id'], story.id);
+    });
+
     test('open after 3 s on the card, then the reading time on leaving', () {
       final v = CardViewTracker();
       final t0 = DateTime.now();

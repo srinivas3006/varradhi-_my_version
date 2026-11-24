@@ -37,6 +37,7 @@ class SpotlightItem {
 
   // For standard news
   final NewsArticle? article;
+  final bool isEditorialHighlight;
 
   // For carousel news
   final List<String>? imageUrls;
@@ -50,6 +51,7 @@ class SpotlightItem {
 
   // For poster / infoCard / ad
   final String? mediaUrl;
+  final String? destinationUrl;
   final AdBanner? adBanner;
   final Poll? poll;
 
@@ -57,20 +59,24 @@ class SpotlightItem {
     required this.id,
     required this.type,
     this.article,
+    this.isEditorialHighlight = false,
     this.imageUrls,
     this.posterPageIndex = 1,
     this.posterPageCount = 1,
     this.title,
     this.mediaUrl,
+    this.destinationUrl,
     this.adBanner,
     this.poll,
   });
 
-  factory SpotlightItem.standard(NewsArticle article) {
+  factory SpotlightItem.standard(NewsArticle article,
+      {bool isEditorialHighlight = false}) {
     return SpotlightItem(
       id: article.id,
       type: article.isUgc ? SpotlightType.ugc : SpotlightType.standard,
       article: article,
+      isEditorialHighlight: isEditorialHighlight,
     );
   }
 
@@ -97,6 +103,9 @@ class SpotlightItem {
         type: SpotlightType.poster,
         mediaUrl: urls.isEmpty ? '' : urls.first,
         imageUrls: urls,
+        destinationUrl: json['destination_url'] is String
+            ? (json['destination_url'] as String).trim()
+            : null,
         title: json['title']?.toString());
   }
 
@@ -117,6 +126,7 @@ class SpotlightItem {
         mediaUrl: urls.first,
         imageUrls: urls,
         title: record.title,
+        destinationUrl: record.destinationUrl,
         posterPageIndex: 1,
         posterPageCount: urls.length,
       ),

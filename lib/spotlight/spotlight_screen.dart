@@ -23,7 +23,10 @@ import '../widgets/poll_card.dart';
 import '../core/widgets/fit_or_scroll.dart';
 import '../widgets/spotlight/spotlight_trending_strip.dart';
 import '../screens/news_detail_screen.dart';
+import '../screens/feedback_screen.dart';
+import '../services/feedback_service.dart';
 import '../repositories/news_article_repository.dart';
+import '../repositories/top_stories_repository.dart';
 import '../utils/share_service.dart';
 import '../theme/app_theme.dart';
 import '../state/app_state.dart';
@@ -36,6 +39,7 @@ import '../services/tts_service.dart';
 
 import 'spotlight_controller.dart';
 import 'spotlight_state.dart';
+import 'top_stories_controller.dart';
 import 'spotlight_media_coordinator.dart';
 import '../widgets/ads/paced_ads_overlay.dart';
 
@@ -84,8 +88,91 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   // (momentum, fling, settle) instead of the hand-rolled vertical drag
   // handlers it used before, which had none of them — that is what made the
   // swipe feel like it caught.
-  final PageController _pageController = PageController();
+  late final PageController _pageController =
+      PageController(onAttach: (_) => _restoreSpotlightPage());
+  ({int page, int generation})? _spotlightPosition;
   int _lastPageIndex = 0;
+  final _topStories = TopStoriesController();
+  final _topPageController = PageController(keepPage: false);
+  final _topPage = ValueNotifier<int>(0);
+  final _qualifiedTopStories = <(String, String)>{};
+  bool _showTopStories = false;
+
+  List<SpotlightItem> get _visibleFeed =>
+      _showTopStories ? _topStories.stories : _controller.state.feed;
+  ValueNotifier<int> get _visiblePage =>
+      _showTopStories ? _topPage : _currentPage;
+
+  void _syncTopStoriesFilters() {
+    if (!_showTopStories) return;
+    final query = TopStoriesQuery.fromApp(AppState.instance);
+    if (query.cacheKey == _topStories.filterKey) return;
+    _topPage.value = 0;
+    SpotlightMediaCoordinator.instance.stopAll();
+    unawaited(_topStories.show(query));
+  }
+
+  void _topStoriesChanged() {
+    final stories = _topStories.stories;
+    if (stories.isEmpty) {
+      if (!_topStories.loading) _topPage.value = 0;
+      return;
+    }
+    if (_topPage.value < stories.length) return;
+    final index = stories.length - 1;
+    _topPage.value = index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showTopStories && _topPageController.hasClients) {
+        _topPageController.jumpToPage(_topPage.value);
+      }
+    });
+  }
+
+  void _selectTopStories(bool selected) {
+    if (selected == _showTopStories) return;
+    _locationPromptTimer?.cancel();
+    SpotlightMediaCoordinator.instance.stopAll();
+    _controller.resetOverlayTimer();
+    setState(() => _showTopStories = selected);
+    if (selected) {
+      _spotlightPosition = (
+        page: _pageController.hasClients
+            ? _pageController.page?.round() ?? _currentPage.value
+            : _currentPage.value,
+        generation: _controller.state.generation,
+      );
+      _syncTopStoriesFilters();
+    } else {
+      _lastPageIndex = _spotlightPageToRestore;
+      _currentPage.value = _lastPageIndex;
+      _topStories.close();
+      _jumpToInitialStoryOnce();
+    }
+  }
+
+  int get _spotlightPageToRestore {
+    final saved = _spotlightPosition;
+    final state = _controller.state;
+    if (saved == null ||
+        saved.generation != state.generation ||
+        state.feed.isEmpty) {
+      return 0;
+    }
+    return saved.page.clamp(0, state.feed.length - 1).toInt();
+  }
+
+  void _restoreSpotlightPage() {
+    if (_spotlightPosition == null) return;
+    final page = _spotlightPageToRestore;
+    _spotlightPosition = null;
+    _pageController.jumpToPage(page);
+  }
+
+  Future<void> _refreshVisibleFeed() =>
+      _showTopStories ? _topStories.refresh() : _controller.refreshFeed();
+
+  String get _topStoriesLabel =>
+      AppState.instance.language == 'Telugu' ? 'టాప్ స్టోరీస్' : 'Top Stories';
 
   /// Which page is settled. A notifier rather than setState: only the two
   /// cards whose isCurrent actually flips need to rebuild, not the feed.
@@ -122,6 +209,8 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     // New feed pages: get the photos around the reader ready.
     _controller.addListener(_precacheAroundCurrent);
     UgcFeedFreshness.published.addListener(_refreshIfAtTop);
+    AppState.instance.addListener(_syncTopStoriesFilters);
+    _topStories.addListener(_topStoriesChanged);
   }
 
   void _precacheAroundCurrent() => _precacheUpcoming(_currentPage.value);
@@ -129,7 +218,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   bool _jumpedToInitialStory = false;
 
   void _jumpToInitialStoryOnce() {
-    if (_jumpedToInitialStory) return;
+    if (_jumpedToInitialStory || _showTopStories) return;
     final feed = _controller.state.feed;
     if (feed.isEmpty) return;
 
@@ -175,6 +264,11 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     UgcFeedFreshness.published.removeListener(_refreshIfAtTop);
+    AppState.instance.removeListener(_syncTopStoriesFilters);
+    _topStories.removeListener(_topStoriesChanged);
+    _topStories.dispose();
+    _topPage.dispose();
+    _topPageController.dispose();
     SpotlightMediaCoordinator.instance.stopAll();
     AdVideoPreloader.instance.clear();
     AppTtsService.instance.stop();
@@ -210,7 +304,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     if (!await LocationPermissionCoordinator.shouldShowAutomaticPrompt()) {
       return;
     }
-    if (!mounted) return;
+    if (!mounted || _showTopStories) return;
 
     _hasPromptedLocationThisSession = true;
     final changed = await LocationPermissionCoordinator.requestCurrentLocation(
@@ -237,6 +331,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     final bool isSwipingBack = index < _lastPageIndex;
     _lastPageIndex = index;
     _currentPage.value = index;
+    _controller.recordPageConsumed(index);
 
     // Mutually exclusive playback: stop active TTS/video on swipe. This used
     // to hang off the pager's onSwipeStart, which the PageView has no
@@ -345,6 +440,10 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
   }
 
   void _closeSpotlight() {
+    if (_showTopStories) {
+      _selectTopStories(false);
+      return;
+    }
     SpotlightMediaCoordinator.instance.stopAll();
     AdVideoPreloader.instance.clear();
     AppTtsService.instance.stop();
@@ -410,6 +509,62 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         builder: (_) => NewsDetailScreen(
           article: article,
           slug: article.slug,
+        ),
+      ),
+    );
+  }
+
+  FeedbackContentReference? _feedbackReference(SpotlightItem item) {
+    FeedbackContentType? type;
+    String? id;
+    if (item.article != null) {
+      final article = item.article!;
+      id = article.id;
+      if (article.contentKind == 'ugc') {
+        type = FeedbackContentType.ugc;
+      } else if (article.contentKind == 'quote') {
+        type = FeedbackContentType.quote;
+      } else if (article.isVideo) {
+        type = FeedbackContentType.video;
+      } else {
+        type = FeedbackContentType.article;
+      }
+    } else {
+      switch (item.type) {
+        case SpotlightType.ad:
+          type = FeedbackContentType.ad;
+          id = item.adBanner?.id;
+        case SpotlightType.poster:
+          type = FeedbackContentType.poster;
+          id = item.id;
+        case SpotlightType.poll:
+          type = FeedbackContentType.poll;
+          id = item.poll?.id;
+        case SpotlightType.standard:
+        case SpotlightType.ugc:
+        case SpotlightType.carousel:
+        case SpotlightType.infoCard:
+        case SpotlightType.shimmer:
+          break;
+      }
+    }
+    if (type == null || id == null) return null;
+    final reference = FeedbackContentReference(type: type, id: id);
+    return reference.isValid ? reference : null;
+  }
+
+  void _reportCurrentContent() {
+    final feed = _visibleFeed;
+    final index = _visiblePage.value;
+    if (index < 0 || index >= feed.length) return;
+    final content = _feedbackReference(feed[index]);
+    if (content == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FeedbackScreen(
+          content: content,
+          initialType: FeedbackType.contentReport,
         ),
       ),
     );
@@ -490,15 +645,38 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     );
   }
 
+  void _removeUnavailablePoll(String id) {
+    final previous = _currentPage.value;
+    final removed = _controller.removeUnavailablePoll(id);
+    if (removed == null) return;
+    final last = _controller.state.feed.length - 1;
+    final next = last < 0
+        ? 0
+        : (removed < previous ? previous - 1 : previous).clamp(0, last).toInt();
+    _lastPageIndex = next;
+    _currentPage.value = next;
+    final saved = _spotlightPosition;
+    if (saved != null && removed < saved.page) {
+      _spotlightPosition = (page: saved.page - 1, generation: saved.generation);
+    }
+    if (next != previous) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_showTopStories && _pageController.hasClients) {
+          _pageController.jumpToPage(next);
+        }
+      });
+    }
+  }
+
   Widget _buildItemFor(BuildContext context, int index, bool isCurrent) {
     const dragDelta = 0.0;
     const dragProgress = 0.0;
     const matchCutProgress = 0.0;
 
-    final state = _controller.state;
-    if (index >= state.feed.length) return const SizedBox();
+    final feed = _visibleFeed;
+    if (index >= feed.length) return const SizedBox();
 
-    final item = state.feed[index];
+    final item = feed[index];
 
     Widget child;
 
@@ -507,15 +685,24 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
       case SpotlightType.ugc:
         if (item.article == null) return const SizedBox();
         child = SpotlightNewsCard(
+          key: _showTopStories ? ValueKey((item.type, item.id)) : null,
           article: item.article!,
           pageIndex: index,
-          pageCount: state.feed.length,
-          isCurrent: isCurrent,
+          pageCount: feed.length,
+          isCurrent: isCurrent &&
+              (!_showTopStories || (ModalRoute.isCurrentOf(context) ?? true)),
+          topStoriesScope: _showTopStories ? _topStories.filterKey : null,
+          isEditorialHighlight: item.isEditorialHighlight,
+          claimQualifiedOpen: _showTopStories
+              ? () =>
+                  _qualifiedTopStories.add((item.article!.contentKind, item.id))
+              : null,
           dragDelta: dragDelta,
           dragProgress: dragProgress,
           matchCutProgress: matchCutProgress,
           onTap: _controller.toggleOverlay,
           onShare: () => _shareArticle(item.article!),
+          onShareResolved: _showTopStories ? _shareArticle : null,
           onClose: _closeSpotlight,
         );
         break;
@@ -525,7 +712,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         child = SpotlightNewsCard(
             article: item.article!,
             pageIndex: index,
-            pageCount: state.feed.length,
+            pageCount: feed.length,
             isCurrent: isCurrent,
             dragDelta: dragDelta,
             dragProgress: dragProgress,
@@ -558,6 +745,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
         child = PosterCard(
           key: ValueKey('poster_${item.id}'),
           posterId: item.id,
+          destinationUrl: item.destinationUrl,
           mediaUrl: item.mediaUrl ?? '',
           imageUrls: item.imageUrls ?? [],
           durationSeconds: 0,
@@ -594,6 +782,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               child: PollCard(
                 key: ValueKey('poll_${item.id}'),
                 poll: item.poll!,
+                onUnavailable: _removeUnavailablePoll,
               ),
             ),
           ),
@@ -856,7 +1045,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
               // 2. Animated Sliding Toggle Pill: [ ప్రధాన వార్తలు | స్థానికం ]
               Container(
                 key: const Key('spotlight_mode_toggle'),
-                width: 192,
+                width: (MediaQuery.sizeOf(context).width - 114)
+                    .clamp(140.0, 270.0)
+                    .toDouble(),
                 height: 36,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.16),
@@ -869,11 +1060,13 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                     AnimatedAlign(
                       duration: const Duration(milliseconds: 250),
                       curve: Curves.easeOutCubic,
-                      alignment: !state.isLocalNews
-                          ? Alignment.centerLeft
-                          : Alignment.centerRight,
+                      alignment: _showTopStories
+                          ? Alignment.centerRight
+                          : state.isLocalNews
+                              ? Alignment.center
+                              : Alignment.centerLeft,
                       child: FractionallySizedBox(
-                        widthFactor: 0.5,
+                        widthFactor: 1 / 3,
                         child: Container(
                           margin: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
@@ -897,6 +1090,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                             behavior: HitTestBehavior.opaque,
                             onTap: () {
                               _controller.resetOverlayTimer();
+                              _selectTopStories(false);
                               _controller.toggleMode(false);
                             },
                             child: Center(
@@ -905,7 +1099,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: !state.isLocalNews
+                                  color: !_showTopStories && !state.isLocalNews
                                       ? Colors.black
                                       : Colors.white70,
                                 ),
@@ -918,6 +1112,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                             behavior: HitTestBehavior.opaque,
                             onTap: () {
                               _controller.resetOverlayTimer();
+                              _selectTopStories(false);
                               _controller.toggleMode(true);
                               if (!AppState.instance.hasValidLocation) {
                                 // Tapping Local is explicit intent — ask
@@ -942,10 +1137,32 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: state.isLocalNews
+                                  color: !_showTopStories && state.isLocalNews
                                       ? Colors.black
                                       : Colors.white70,
                                 ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Semantics(
+                            selected: _showTopStories,
+                            child: TextButton(
+                              key: const Key('spotlight_top_stories'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: _showTopStories
+                                    ? Colors.black
+                                    : Colors.white70,
+                                padding: EdgeInsets.zero,
+                              ),
+                              onPressed: () => _selectTopStories(true),
+                              child: Text(
+                                _topStoriesLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                             ),
                           ),
@@ -1110,11 +1327,34 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                 onPressed: () {
                   HapticFeedback.mediumImpact();
                   _controller.resetOverlayTimer();
-                  _controller.refreshFeed();
+                  _refreshVisibleFeed();
                 },
                 icon: const Icon(Icons.refresh_rounded,
                     color: Colors.white, size: 22),
                 tooltip: 'తాజాకరించండి',
+              ),
+              ValueListenableBuilder<int>(
+                valueListenable: _visiblePage,
+                builder: (context, index, _) {
+                  final feed = _visibleFeed;
+                  if (index < 0 ||
+                      index >= feed.length ||
+                      _feedbackReference(feed[index]) == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return IconButton(
+                    key: const Key('spotlight_report_content'),
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 48, height: 48),
+                    onPressed: _reportCurrentContent,
+                    icon: const Icon(Icons.flag_outlined,
+                        color: Colors.white, size: 22),
+                    tooltip: AppState.instance.language == 'Telugu'
+                        ? 'కంటెంట్‌ను నివేదించండి'
+                        : 'Report this content',
+                  );
+                },
               ),
             ],
           ),
@@ -1123,10 +1363,102 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     );
   }
 
+  Widget _buildTopStoriesFeed() {
+    final stories = _topStories.stories;
+    final failure = _topStories.failure;
+    final te = AppState.instance.language == 'Telugu';
+    final message = switch (failure?.status) {
+      400 => failure!.details.isEmpty
+          ? (te
+              ? 'భాష లేదా ప్రాంతం ఎంపికను మార్చండి.'
+              : 'Change your language or location selection.')
+          : failure.details.join('\n'),
+      429 =>
+        te ? 'కాసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.' : 'Try again in a moment.',
+      _ when failure?.offline == true =>
+        te ? 'ఇంటర్నెట్ కనెక్షన్ లేదు.' : 'You’re offline.',
+      _ when failure != null =>
+        te ? 'వార్తలను లోడ్ చేయలేకపోయాము.' : 'Couldn’t load Top Stories.',
+      _ => te ? 'ప్రస్తుతం టాప్ స్టోరీస్ లేవు.' : 'No Top Stories right now.',
+    };
+    if (stories.isEmpty) {
+      if (_topStories.loading) return const SpotlightShimmerCard();
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message, textAlign: TextAlign.center),
+              if (failure != null && failure.status != 400)
+                TextButton(
+                  onPressed: _refreshVisibleFeed,
+                  child: Text(te ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+                ),
+              TextButton(
+                onPressed: () => _selectTopStories(false),
+                child: Text(te
+                    ? 'స్పాట్‌లైట్‌కు తిరిగి వెళ్లండి'
+                    : 'Back to Spotlight'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Stack(
+      children: [
+        ScrollConfiguration(
+          behavior: const MaterialScrollBehavior().copyWith(overscroll: false),
+          child: RefreshIndicator(
+            onRefresh: _refreshVisibleFeed,
+            child: FlipPageView(
+              key: ValueKey('top_stories_${_topStories.filterKey}'),
+              controller: _topPageController,
+              itemCount: stories.length,
+              onPageChanged: (index) {
+                _topPage.value = index;
+                SpotlightMediaCoordinator.instance.stopAll();
+                _controller.hideOverlay();
+              },
+              itemBuilder: (context, index) => ValueListenableBuilder<int>(
+                valueListenable: _topPage,
+                builder: (context, page, _) =>
+                    _buildItemFor(context, index, index == page),
+              ),
+            ),
+          ),
+        ),
+        if (failure != null)
+          Positioned(
+            top: _topBarHeight + 8,
+            left: 16,
+            right: 16,
+            child: IgnorePointer(
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Text(message,
+                        style: const TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = AnimatedBuilder(
-      animation: _controller,
+      animation: Listenable.merge([_controller, _topStories]),
       builder: (context, _) {
         final state = _controller.state;
         final statusBarHeight = MediaQuery.paddingOf(context).top;
@@ -1167,36 +1499,38 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                   child: GestureDetector(
                     onTap: _controller.toggleOverlay,
                     behavior: HitTestBehavior.opaque,
-                    child: state.isLoading && state.feed.isEmpty
-                        ? const SpotlightShimmerCard()
-                        : state.feed.isEmpty
-                            ? state.isLocalNews &&
-                                    !AppState.instance.hasValidLocation &&
-                                    state.errorMessage == null
-                                ? _buildLocationFallback()
-                                : _buildEmptyFeedState(state.isLocalNews)
-                            : ScrollConfiguration(
-                                // Android 12+ stretch overscroll swallows the
-                                // overscroll notification RefreshIndicator
-                                // needs, so the pull did nothing on device
-                                // while passing in tests. Drop the indicator
-                                // here; the refresh spinner is the feedback.
-                                behavior: const MaterialScrollBehavior()
-                                    .copyWith(overscroll: false),
-                                child: RefreshIndicator(
-                                  // refreshFeed() is the same call the
-                                  // bottom-bar button already makes.
-                                  onRefresh: _controller.refreshFeed,
-                                  child: FlipPageView(
-                                    key: ValueKey(
-                                        'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
-                                    controller: _pageController,
-                                    itemCount: state.feed.length,
-                                    onPageChanged: _handlePageChanged,
-                                    itemBuilder: _buildItem,
+                    child: _showTopStories
+                        ? _buildTopStoriesFeed()
+                        : state.isLoading && state.feed.isEmpty
+                            ? const SpotlightShimmerCard()
+                            : state.feed.isEmpty
+                                ? state.isLocalNews &&
+                                        !AppState.instance.hasValidLocation &&
+                                        state.errorMessage == null
+                                    ? _buildLocationFallback()
+                                    : _buildEmptyFeedState(state.isLocalNews)
+                                : ScrollConfiguration(
+                                    // Android 12+ stretch overscroll swallows the
+                                    // overscroll notification RefreshIndicator
+                                    // needs, so the pull did nothing on device
+                                    // while passing in tests. Drop the indicator
+                                    // here; the refresh spinner is the feedback.
+                                    behavior: const MaterialScrollBehavior()
+                                        .copyWith(overscroll: false),
+                                    child: RefreshIndicator(
+                                      // refreshFeed() is the same call the
+                                      // bottom-bar button already makes.
+                                      onRefresh: _controller.refreshFeed,
+                                      child: FlipPageView(
+                                        key: ValueKey(
+                                            'feed_${state.isLocalNews}_${state.locationName}_${state.generation}'),
+                                        controller: _pageController,
+                                        itemCount: state.feed.length,
+                                        onPageChanged: _handlePageChanged,
+                                        itemBuilder: _buildItem,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
                   ),
                 ),
               ),
@@ -1244,7 +1578,9 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 280),
                       curve: Curves.easeOutCubic,
-                      top: (showOverlays && state.isLocalNews)
+                      top: (showOverlays &&
+                              state.isLocalNews &&
+                              !_showTopStories)
                           ? MediaQuery.of(context).padding.top +
                               _topBarHeight +
                               4
@@ -1255,10 +1591,15 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
                         child: AnimatedOpacity(
                           duration: const Duration(milliseconds: 220),
                           curve: Curves.easeOutCubic,
-                          opacity:
-                              (showOverlays && state.isLocalNews) ? 1.0 : 0.0,
+                          opacity: (showOverlays &&
+                                  state.isLocalNews &&
+                                  !_showTopStories)
+                              ? 1.0
+                              : 0.0,
                           child: IgnorePointer(
-                            ignoring: !(showOverlays && state.isLocalNews),
+                            ignoring: !(showOverlays &&
+                                state.isLocalNews &&
+                                !_showTopStories),
                             child: _keepChromeAlive(_buildLocationStrip()),
                           ),
                         ),
@@ -1302,7 +1643,7 @@ class _SpotlightScreenViewState extends State<SpotlightScreenView>
     return ImpressionScope(
         log: _impressions,
         child: PopScope(
-          canPop: canPop,
+          canPop: canPop && !_showTopStories,
           onPopInvokedWithResult: (didPop, _) {
             AppTtsService.instance.stop();
             if (!didPop) {

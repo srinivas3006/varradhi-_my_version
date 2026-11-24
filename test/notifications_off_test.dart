@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -12,11 +13,22 @@ import 'package:vaaradhi/state/app_state.dart';
 
 class _Adapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];
+  Completer<void>? holdFirstPreferencesRequest;
+  Completer<void>? firstPreferencesRequestStarted;
+  int _preferencesRequestCount = 0;
 
   @override
   Future<ResponseBody> fetch(RequestOptions options, Stream<Uint8List>? body,
       Future<void>? cancel) async {
     requests.add(options);
+    if (options.path == '/api/v1/notifications/preferences/' &&
+        options.method == 'PATCH') {
+      if (_preferencesRequestCount++ == 0 &&
+          holdFirstPreferencesRequest != null) {
+        firstPreferencesRequestStarted?.complete();
+        await holdFirstPreferencesRequest!.future;
+      }
+    }
     return ResponseBody.fromString(
       jsonEncode({
         'data': {'installation_secret': 'secret'},
@@ -56,6 +68,8 @@ void main() {
   tearDown(() {
     ApiClient.instance.dio.httpClientAdapter = previous;
     ApiService.fcmTokenDropper = null;
+    state.isLoggedIn = false;
+    state.authToken = null;
     state.pushNotificationsEnabled = true;
     state.fcmToken = null;
     state.installationSecret = null;
@@ -63,6 +77,33 @@ void main() {
 
   Iterable<RequestOptions> tokenCalls() => adapter.requests.where((r) =>
       r.path.contains('/guest-device/') || r.path.contains('/device-token/'));
+
+  test('logged-in push preference updates are sent in toggle order', () async {
+    state
+      ..isLoggedIn = true
+      ..authToken = 'access-token'
+      ..pushNotificationsEnabled = true;
+    adapter.holdFirstPreferencesRequest = Completer<void>();
+    adapter.firstPreferencesRequestStarted = Completer<void>();
+
+    final turnOff = NotificationService.instance.setPushEnabled(false);
+    await adapter.firstPreferencesRequestStarted!.future;
+    final turnOn = NotificationService.instance.setPushEnabled(true);
+    await Future<void>.delayed(Duration.zero);
+
+    Iterable<RequestOptions> preferenceCalls() => adapter.requests.where((r) =>
+        r.path == '/api/v1/notifications/preferences/' && r.method == 'PATCH');
+    expect(preferenceCalls().length, 1,
+        reason: 'the next update must wait for the in-flight PATCH');
+
+    adapter.holdFirstPreferencesRequest!.complete();
+    await Future.wait([turnOff, turnOn]);
+
+    final values = preferenceCalls()
+        .map((request) => (request.data as Map)['enabled'])
+        .toList();
+    expect(values, [false, true]);
+  });
 
   group('notifications off', () {
     test('no token is registered', () async {

@@ -6,6 +6,7 @@ import '../errors/app_exception.dart';
 import 'network_logger_interceptor.dart';
 import '../utils/log_safe.dart';
 import '../../state/app_state.dart';
+import '../../services/poll_context.dart';
 
 /// Central API Client for VARADHI.
 /// Consolidates all network requests, interceptors, timeouts, authentication,
@@ -56,6 +57,11 @@ class ApiClient {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) {
+          final pollReader = options.extra['pollReader'];
+          if (pollReader != null && pollReader != currentPollReader) {
+            return handler.reject(DioException(
+                requestOptions: options, type: DioExceptionType.cancel));
+          }
           final token = AppState.instance.authToken;
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
@@ -63,9 +69,40 @@ class ApiClient {
             options.headers.remove('Authorization');
           }
 
+          if (options.path == '/api/v1/feedback/' &&
+              !AppState.instance.isLoggedIn) {
+            if (AppState.instance.isLoggedIn &&
+                token != null &&
+                token.isNotEmpty) {
+              options.headers['Authorization'] = 'Bearer $token';
+            } else {
+              options.headers.remove('Authorization');
+            }
+          }
+
+          if (options.path == '/api/v1/feedback/' &&
+              AppState.instance.isLoggedIn &&
+              token != null &&
+              token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+
           final deviceId = AppState.instance.deviceId;
-          if (deviceId.isNotEmpty) {
+          if (deviceId.isNotEmpty && !options.headers.containsKey('X-Device-ID')) {
             options.headers['X-Device-ID'] = deviceId;
+          }
+          final path = options.uri.path;
+          if ((path.startsWith('/api/v1/polls/') ||
+                  path == '/api/v1/auth/locations/guest/') &&
+              options.uri.origin == Uri.parse(_config.baseUrl).origin) {
+            final app = AppState.instance;
+            if (!app.isLoggedIn) {
+              options.headers.remove('Authorization');
+              final secret = app.installationSecret;
+              if (secret != null && secret.isNotEmpty) {
+                options.headers['X-Installation-Secret'] = secret;
+              }
+            }
           }
 
           final sessionId = AppState.instance.sessionId;
@@ -77,6 +114,11 @@ class ApiClient {
           return handler.next(options);
         },
         onError: (DioException e, handler) async {
+          final pollReader = e.requestOptions.extra['pollReader'];
+          if (pollReader != null && pollReader != currentPollReader) {
+            return handler.reject(DioException(
+                requestOptions: e.requestOptions, type: DioExceptionType.cancel));
+          }
           final path = e.requestOptions.path;
           final isAuthEndpoint = path.contains('/auth/login/') ||
               path.contains('/auth/register/') ||
@@ -102,6 +144,10 @@ class ApiClient {
                 final retryOptions = e.requestOptions;
                 retryOptions.headers['Authorization'] =
                     'Bearer $newAccessToken';
+                if (path == '/api/v1/feedback/') {
+                  retryOptions.headers['Authorization'] =
+                      'Bearer $newAccessToken';
+                }
                 final response = await dio.fetch(retryOptions);
                 return handler.resolve(response);
               } catch (_) {

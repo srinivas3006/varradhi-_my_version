@@ -15,8 +15,8 @@ class _Adapter implements HttpClientAdapter {
   _Adapter(this.handler);
   final Future<ResponseBody> Function(RequestOptions o) handler;
   @override
-  Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? _,
-          Future<void>? __) =>
+  Future<ResponseBody> fetch(
+          RequestOptions o, Stream<Uint8List>? _, Future<void>? __) =>
       handler(o);
   @override
   void close({bool force = false}) {}
@@ -70,22 +70,58 @@ void main() {
       expect(state.isStoryBookmarked(staleCopy), isTrue);
     });
 
-    test('logging out forgets the account\'s bookmarks', () {
-      // Regression: only citizen-post bookmarks were cleared, so the next
-      // account on the phone saw the previous account's saved articles.
-      final src = File('lib/state/app_state.dart').readAsStringSync();
-      final fn = src.substring(src.indexOf('_clearLocalSession() async'));
-      final body = fn.substring(0, fn.indexOf('\n  }\n'));
-      expect(body, contains('bookmarkedItemIds.clear();'));
-      expect(body, contains('_bookmarkDecisions.clear();'));
+    test('logging out forgets the account\'s bookmarks', () async {
+      // Exercise logout rather than parsing platform-dependent source lines.
+      const storage =
+          MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(storage, (_) async => null);
+      addTearDown(() => messenger.setMockMethodCallHandler(storage, null));
+      final previousAdapter = ApiClient.instance.dio.httpClientAdapter;
+      ApiClient.instance.dio.httpClientAdapter =
+          _Adapter((_) async => _json({'data': {}}, 200));
+      addTearDown(
+          () => ApiClient.instance.dio.httpClientAdapter = previousAdapter);
+      state.refreshToken = null;
+
+      state.setBookmarked('saved', true);
+      state.setBookmarked('removed', false);
+      await state
+          .saveStoryOnDevice(NewsArticle.fromJson({'id': 'device-story'}));
+      expect(state.isStoryBookmarked(NewsArticle.fromJson({'id': 'saved'})),
+          isTrue);
+      expect(
+          state.isStoryBookmarked(
+              NewsArticle.fromJson({'id': 'removed', 'is_bookmarked': true})),
+          isFalse);
+      expect(state.deviceSavedStories, isNotEmpty);
+
+      await state.logout();
+
+      expect(state.isLoggedIn, isFalse);
+      expect(state.bookmarkedItemIds, isEmpty);
+      expect(state.deviceSavedStories, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getStringList('bookmarkedItemIds'), isEmpty);
+      expect(jsonDecode(prefs.getString('device_saved_stories_v1')!), isEmpty);
+
+      // A new account must respect its own server flags, with neither the
+      // previous account's saved nor removed decisions taking precedence.
+      state.isLoggedIn = true;
+      expect(state.isStoryBookmarked(NewsArticle.fromJson({'id': 'saved'})),
+          isFalse);
+      expect(
+          state.isStoryBookmarked(
+              NewsArticle.fromJson({'id': 'removed', 'is_bookmarked': true})),
+          isTrue);
     });
 
     test('there is one name for it, and no leftover duplicate calls', () {
       final api = File('lib/services/api_service.dart').readAsStringSync();
       expect(api, isNot(contains('removeBookmark(')));
-      final engagement =
-          File('lib/services/content_engagement_service.dart')
-              .readAsStringSync();
+      final engagement = File('lib/services/content_engagement_service.dart')
+          .readAsStringSync();
       expect(engagement, isNot(contains('setSaved(')));
     });
 
@@ -185,7 +221,9 @@ void main() {
         method = o.method;
         path = o.path;
         body = o.data;
-        return _json({'data': {'like_count': 5}}, 200);
+        return _json({
+          'data': {'like_count': 5}
+        }, 200);
       });
 
       final res = await ApiService.instance.postArticleReaction('a1', 'like');
@@ -199,7 +237,9 @@ void main() {
       Object? body;
       serve((o) async {
         body = o.data;
-        return _json({'data': {'like_count': 2}}, 200);
+        return _json({
+          'data': {'like_count': 2}
+        }, 200);
       });
       await ApiService.instance.postArticleReaction('a1', 'dislike');
       expect(body, {'reaction_type': 'dislike'});
@@ -210,7 +250,9 @@ void main() {
       serve((o) async {
         method = o.method;
         path = o.path;
-        return _json({'data': {'like_count': 4}}, 200);
+        return _json({
+          'data': {'like_count': 4}
+        }, 200);
       });
       await ApiService.instance.postArticleReaction('a1', 'none');
       expect(method, 'DELETE');
@@ -218,14 +260,18 @@ void main() {
     });
 
     test('the server count is returned rather than inferred', () async {
-      serve((o) async => _json({'data': {'like_count': 42}}, 200));
+      serve((o) async => _json({
+            'data': {'like_count': 42}
+          }, 200));
       final res = await ApiService.instance.postArticleReaction('a1', 'like');
       expect(res['like_count'], 42,
           reason: 'the UI must render the authoritative count');
     });
 
     test('a failed reaction surfaces instead of being swallowed', () async {
-      serve((o) async => _json({'errors': {'message': 'nope'}}, 500));
+      serve((o) async => _json({
+            'errors': {'message': 'nope'}
+          }, 500));
       expect(
         () => ApiService.instance.postArticleReaction('a1', 'like'),
         throwsA(isA<DioException>()),
@@ -241,7 +287,9 @@ void main() {
         method = o.method;
         path = o.path;
         body = o.data;
-        return _json({'data': {'bookmarked': true}}, 200);
+        return _json({
+          'data': {'bookmarked': true}
+        }, 200);
       });
 
       await ApiService.instance.toggleBookmark('a1');
@@ -251,7 +299,9 @@ void main() {
     });
 
     test('toggle returns the server state, not the hoped-for one', () async {
-      serve((o) async => _json({'data': {'bookmarked': false}}, 200));
+      serve((o) async => _json({
+            'data': {'bookmarked': false}
+          }, 200));
       expect(await ApiService.instance.toggleBookmark('a1'), isFalse);
     });
 
@@ -277,8 +327,9 @@ void main() {
     });
 
     test('saving an article already saved still ends saved (200)', () async {
-      serve((o) async => _json(
-          {'data': {'message': 'Article already bookmarked.'}}, 200));
+      serve((o) async => _json({
+            'data': {'message': 'Article already bookmarked.'}
+          }, 200));
       final story = NewsArticle.fromJson({'id': 'a2', 'title': 't'});
       expect(
           await ContentEngagementService.instance
@@ -306,7 +357,9 @@ void main() {
       var calls = 0;
       serve((o) async {
         calls++;
-        return _json({'errors': {'message': 'down'}}, 503);
+        return _json({
+          'errors': {'message': 'down'}
+        }, 503);
       });
       final story = NewsArticle.fromJson({'id': 'a1', 'title': 't'});
       expect(
@@ -317,7 +370,9 @@ void main() {
     });
 
     test('a failed toggle throws so the caller can roll back', () async {
-      serve((o) async => _json({'errors': {'message': 'nope'}}, 500));
+      serve((o) async => _json({
+            'errors': {'message': 'nope'}
+          }, 500));
       expect(
         () => ApiService.instance.toggleBookmark('a1'),
         throwsA(isA<DioException>()),
@@ -332,7 +387,9 @@ void main() {
       expect(state.isBookmarked('a1'), isFalse);
     });
 
-    test('getBookmarks parses standard DRF results envelope with nested article', () async {
+    test(
+        'getBookmarks parses standard DRF results envelope with nested article',
+        () async {
       serve((o) async {
         return _json({
           'count': 1,
@@ -358,8 +415,7 @@ void main() {
       expect(items.first.story.isBookmarked, isTrue);
     });
 
-    test('the combined list parses articles and citizen posts (§5)',
-        () async {
+    test('the combined list parses articles and citizen posts (§5)', () async {
       serve((o) async => _json({
             'data': [
               {
@@ -421,18 +477,30 @@ void main() {
         if (o.uri.queryParameters['cursor'] == 'p2') {
           return _json({
             'data': [
-              {'id': 'bm1', 'feed_item_type': 'article', 'content_id': 'a1',
-                  'article': {'id': 'a1', 'title': 'one'}},
-              {'id': 'bm2', 'feed_item_type': 'article', 'content_id': 'a2',
-                  'article': {'id': 'a2', 'title': 'two'}},
+              {
+                'id': 'bm1',
+                'feed_item_type': 'article',
+                'content_id': 'a1',
+                'article': {'id': 'a1', 'title': 'one'}
+              },
+              {
+                'id': 'bm2',
+                'feed_item_type': 'article',
+                'content_id': 'a2',
+                'article': {'id': 'a2', 'title': 'two'}
+              },
             ],
             'meta': {'next': null},
           }, 200);
         }
         return _json({
           'data': [
-            {'id': 'bm1', 'feed_item_type': 'article', 'content_id': 'a1',
-                'article': {'id': 'a1', 'title': 'one'}},
+            {
+              'id': 'bm1',
+              'feed_item_type': 'article',
+              'content_id': 'a1',
+              'article': {'id': 'a1', 'title': 'one'}
+            },
           ],
           'meta': {
             'next':
@@ -466,7 +534,9 @@ void main() {
       expect(await ApiService.instance.deleteBookmark('bm-x'), isFalse);
     });
 
-    test('getBookmarks parses wrapped data envelope and preserves bookmarked flag', () async {
+    test(
+        'getBookmarks parses wrapped data envelope and preserves bookmarked flag',
+        () async {
       serve((o) async {
         return _json({
           'data': [
@@ -531,7 +601,9 @@ void main() {
       expect(article.dislikes, 4);
     });
 
-    test('mutual exclusivity: dislike increments dislikes and decrements likes if previously liked', () {
+    test(
+        'mutual exclusivity: dislike increments dislikes and decrements likes if previously liked',
+        () {
       final article = NewsArticle.fromJson({
         'id': 'a11',
         'likes_count': 5,
@@ -555,7 +627,9 @@ void main() {
       expect(article.isDisliked, isTrue);
     });
 
-    test('mutual exclusivity: like increments likes and decrements dislikes if previously disliked', () {
+    test(
+        'mutual exclusivity: like increments likes and decrements dislikes if previously disliked',
+        () {
       final article = NewsArticle.fromJson({
         'id': 'a12',
         'likes_count': 8,
@@ -581,16 +655,16 @@ void main() {
 
     test('server response updates both like_count and dislike_count', () async {
       serve((o) async => _json({
-        'data': {
-          'like_count': 15,
-          'dislike_count': 7,
-        }
-      }, 200));
+            'data': {
+              'like_count': 15,
+              'dislike_count': 7,
+            }
+          }, 200));
 
-      final res = await ApiService.instance.postArticleReaction('a1', 'dislike');
+      final res =
+          await ApiService.instance.postArticleReaction('a1', 'dislike');
       expect(res['like_count'], 15);
       expect(res['dislike_count'], 7);
     });
   });
 }
-

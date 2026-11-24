@@ -25,6 +25,7 @@ import '../models/app_notification.dart';
 import '../models/account_deletion_request.dart';
 import 'dio_client.dart';
 import 'location_service.dart';
+import 'poll_context.dart';
 import '../state/app_state.dart';
 import '../core/utils/date_parser.dart';
 import '../core/errors/app_exception.dart';
@@ -306,7 +307,8 @@ class ApiService {
       });
 
       final secretReturned = _extractInstallationSecret(response.data);
-      if (secretReturned != null && secretReturned.isNotEmpty) {
+      if (secretReturned != null && secretReturned.isNotEmpty &&
+          AppState.instance.deviceId == devId) {
         await AppState.instance.setInstallationSecret(secretReturned);
       }
       return (response.data['data'] as Map<String, dynamic>?) ??
@@ -315,7 +317,7 @@ class ApiService {
               : null);
     } on DioException catch (dioErr) {
       debugPrint(
-          '[ApiService] registerGuestDevice failed: ${dioErr.response?.statusCode} - ${dioErr.response?.data}');
+          '[ApiService] registerGuestDevice failed: ${dioErr.response?.statusCode}');
       return null;
     } catch (_) {
       return null;
@@ -745,6 +747,15 @@ class ApiService {
     }
 
     final location = match.canonicalDeviceLocation;
+    final patchData = <String, dynamic>{
+      if (match.stateId != null) 'state_id': match.stateId,
+      if (match.districtId != null) 'district_id': match.districtId,
+      if (match.subdistrictId != null) 'subdistrict_id': match.subdistrictId,
+      if (match.villageId != null) 'village_id': match.villageId,
+    };
+    if (patchData.isEmpty || !await updateLocationProfile(patchData)) {
+      throw LocationException('Could not save your location. Please try again.');
+    }
     AppState.instance.setDeviceLocation(
       location,
       stateId: match.stateId,
@@ -760,21 +771,6 @@ class ApiService {
       });
     }
 
-    final patchData = <String, dynamic>{};
-    if (match.villageId != null) patchData['village_id'] = match.villageId;
-    if (match.subdistrictId != null) {
-      patchData['subdistrict_id'] = match.subdistrictId;
-    }
-    if (match.districtId != null) patchData['district_id'] = match.districtId;
-    if (match.stateId != null) patchData['state_id'] = match.stateId;
-
-    if (patchData.isNotEmpty) {
-      try {
-        await updateLocationProfile(patchData);
-      } catch (e) {
-        debugPrint('Failed to patch canonical location profile: $e');
-      }
-    }
   }
 
   Future<void> resolveAndSyncCanonicalLocation(DeviceLocation location) async {
@@ -982,12 +978,34 @@ class ApiService {
   }
 
   Future<bool> updateLocationProfile(Map<String, dynamic> data) async {
+    final reader = currentPollReader;
+    final endpoint = reader.authenticated
+        ? '/api/v1/auth/locations/profile/'
+        : '/api/v1/auth/locations/guest/';
     try {
-      final endpoint = AppState.instance.isLoggedIn
-          ? '/api/v1/auth/locations/profile/'
-          : '/api/v1/auth/locations/guest/';
-      final response = await _dio.patch(endpoint, data: data);
-      return response.statusCode == 200;
+      Future<bool> save(PollReader expected) async {
+        final response = await _dio.patch(endpoint, data: data,
+            options: Options(
+                followRedirects: false, extra: {'pollReader': expected}));
+        final body = response.data;
+        return response.statusCode == 200 &&
+            (body is! Map || body['errors'] == null);
+      }
+      final expected = await () async {
+        try {
+          return await save(reader) ? reader : null;
+        } on DioException catch (error) {
+          if (reader.authenticated || error.response?.statusCode != 403) rethrow;
+          await _repairPollInstallation(reader);
+          final recovered = currentPollReader;
+          if (recovered.authenticated || recovered.device != reader.device ||
+              recovered.secret == reader.secret) {
+            rethrow;
+          }
+          return await save(recovered) ? recovered : null;
+        }
+      }();
+      return expected == currentPollReader;
     } catch (_) {
       return false;
     }
@@ -2529,60 +2547,185 @@ class ApiService {
   }
 
   // --- Polls ---
-  Future<List<Poll>> getPolls() async {
-    try {
-      final response = await _dio.get('/api/v1/polls/');
-      final List data = response.data['data'] ?? [];
-      return data
-          .map((json) => Poll.fromJson(json as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
+  static const _pollsPath = '/api/v1/polls/';
+  final _pollReaders = Expando<PollReader>();
+  PollReader? pollReaderOf(Poll poll) => _pollReaders[poll];
+  final _pendingVotes = <(PollVoter, String)>{};
+  final _unconfirmedVotes = <(PollVoter, String), Object>{};
+  final _pollCooldowns = <PollVoter, DateTime>{};
+  Future<void>? _installationRepair;
+
+  // Re-register only the existing installation. Polls must not rotate an ID.
+  Future<void> _repairPollInstallation(PollReader reader) async {
+    if (reader.authenticated || reader.device.isEmpty ||
+        reader != currentPollReader) {
+      return;
     }
+    final repair = _installationRepair ??= () async {
+      await registerGuestDevice(deviceId: reader.device, forCredential: true);
+    }();
+    try {
+      await repair;
+    } finally {
+      if (identical(_installationRepair, repair)) _installationRepair = null;
+    }
+  }
+
+  Future<Response<dynamic>> _pollRequest(String path, PollReader reader,
+      {Map<String, String>? vote}) async {
+    if (reader != currentPollReader) {
+      throw const PollFailure(PollProblem.readerChanged);
+    }
+    final now = DateTime.now();
+    _pollCooldowns.removeWhere((_, until) => !until.isAfter(now));
+    final until = _pollCooldowns[reader.voter];
+    if (until != null) {
+      throw PollFailure(PollProblem.throttled, retryAfter: until.difference(now));
+    }
+    final options = Options(followRedirects: false, extra: {'pollReader': reader});
+    try {
+      final separator = path.indexOf('?');
+      final response = vote == null
+          ? await _dio.get(
+              separator < 0 ? path : path.substring(0, separator),
+              queryParameters: Uri.parse(path).queryParametersAll.map(
+                (key, values) =>
+                    MapEntry(key, values.length == 1 ? values.single : values),
+              ),
+              options: options,
+            )
+          : await _dio.post(path, options: options, data: vote);
+      if (reader != currentPollReader) {
+        throw const PollFailure(PollProblem.readerChanged);
+      }
+      return response;
+    } on DioException catch (error) {
+      if (reader != currentPollReader) {
+        throw const PollFailure(PollProblem.readerChanged);
+      }
+      final failure = PollFailure.fromDio(error, reader);
+      if (failure.retryAfter case final delay?) {
+        _pollCooldowns[reader.voter] = DateTime.now().add(delay);
+      }
+      if (failure.problem == PollProblem.credential && !reader.authenticated) {
+        await _repairPollInstallation(reader);
+        if (reader != currentPollReader) {
+          throw const PollFailure(PollProblem.readerChanged);
+        }
+      }
+      throw failure;
+    }
+  }
+
+  String? _safePollNext(String? raw) {
+    final link = raw == null ? null : Uri.tryParse(raw);
+    if (link == null || raw!.isEmpty) return null;
+    final base = Uri.parse(_dio.options.baseUrl).resolve(_pollsPath);
+    final uri = base.resolveUri(link);
+    if (uri.scheme != base.scheme || uri.host != base.host ||
+        uri.port != base.port || uri.path != base.path ||
+        uri.userInfo.isNotEmpty || uri.hasFragment ||
+        uri.queryParameters.keys.any((key) =>
+            RegExp(r'secret|token|authorization', caseSensitive: false)
+                .hasMatch(key))) {
+      return null;
+    }
+    return uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
+  }
+
+  Future<List<Poll>> getPolls() async {
+    final reader = currentPollReader;
+    String? next = '$_pollsPath?page_size=20';
+    final visited = <String>{};
+    final polls = <String, Poll>{};
+    try {
+      while (next != null && visited.add(next)) {
+        final response = await _pollRequest(next, reader);
+        final body = response.data;
+        final data = body is Map && body['errors'] == null ? body['data'] : null;
+        if (data is! List) break;
+        for (final row in data.whereType<Map<String, dynamic>>()) {
+          final poll = Poll.fromJson(row);
+          if (poll.id.isNotEmpty) {
+            _pollReaders[poll] = reader;
+            polls.putIfAbsent(poll.id, () => poll);
+          }
+        }
+        final meta = body is Map ? body['meta'] : null;
+        next = _safePollNext(meta is Map ? meta['next']?.toString() : null);
+      }
+    } catch (_) {
+      // Keep complete pages from this reader when a later page fails.
+    }
+    return reader == currentPollReader ? polls.values.toList() : const [];
   }
 
   Future<Poll?> getPollDetails(String pollId) async {
     try {
-      final response = await _dio.get('/api/v1/polls/$pollId/');
-      if (response.data['data'] != null) {
-        return Poll.fromJson(response.data['data'] as Map<String, dynamic>);
-      }
-      return null;
-    } catch (_) {
+      return await fetchPollDetail(pollId);
+    } on PollFailure {
       return null;
     }
   }
 
-  /// GET /api/v1/polls/{id}/ for deep links. Unlike [getPollDetails] this
-  /// throws, so a 404 can be told apart from a network failure.
   Future<Poll> fetchPollDetail(String pollId) async {
-    final response = await _dio.get('/api/v1/polls/$pollId/');
-    final payload = response.data is Map
-        ? ((response.data as Map)['data'] ?? response.data)
-        : response.data;
-    if (payload is! Map) {
-      throw Exception('Unexpected detail payload format for poll $pollId');
+    final reader = currentPollReader;
+    final key = (reader.voter, pollId);
+    final unconfirmed = _unconfirmedVotes[key];
+    final response = await _pollRequest(
+        '$_pollsPath${Uri.encodeComponent(pollId)}/', reader);
+    final poll = _pollFromObject(response.data, pollId);
+    _pollReaders[poll] = reader;
+    if (unconfirmed != null && identical(_unconfirmedVotes[key], unconfirmed)) {
+      _unconfirmedVotes.remove(key);
     }
-    return Poll.fromJson(Map<String, dynamic>.from(payload));
+    return poll;
   }
 
-  Future<bool> submitPollVote(
-    String pollId, {
-    String? optionId,
-    int? optionIndex,
-  }) async {
+  Poll _pollFromObject(dynamic body, String pollId) {
+    final data = body is Map && body['errors'] == null ? body['data'] : null;
+    if (data is! Map<String, dynamic> || data['id']?.toString() != pollId) {
+      throw const PollFailure(PollProblem.uncertain);
+    }
+    return Poll.fromJson(data);
+  }
+
+  Future<Poll> submitPollVote(String pollId, {required String optionId}) async {
+    final legacy = PollOption.isLegacyChoice(optionId);
+    if (pollId.isEmpty || (!legacy && !PollOption.isVoteId(optionId))) {
+      throw const PollFailure(PollProblem.invalidOption);
+    }
+    final reader = currentPollReader;
+    final key = (reader.voter, pollId);
+    if (_unconfirmedVotes.containsKey(key) || !_pendingVotes.add(key)) {
+      throw const PollFailure(PollProblem.uncertain);
+    }
+    var submitted = false;
     try {
-      final Map<String, dynamic> body = {};
-      if (optionId != null && optionId.isNotEmpty) {
-        body['option_id'] = optionId;
-      } else if (optionIndex != null) {
-        body['choice'] = optionIndex == 0 ? 'a' : 'b';
+      if (!reader.authenticated &&
+          (reader.device.isEmpty || reader.secret?.isNotEmpty != true)) {
+        await _repairPollInstallation(reader);
+        throw PollFailure(reader == currentPollReader
+            ? PollProblem.credential : PollProblem.readerChanged);
       }
-      final response =
-          await _dio.post('/api/v1/polls/$pollId/vote/', data: body);
-      return response.statusCode == 200 || response.statusCode == 201;
-    } catch (_) {
-      return false;
+      submitted = true;
+      final response = await _pollRequest(
+        '$_pollsPath${Uri.encodeComponent(pollId)}/vote/', reader,
+        vote: {if (legacy) 'choice': optionId else 'option_id': optionId},
+      );
+      final poll = _pollFromObject(response.data, pollId);
+      if (!poll.hasVoted) throw const PollFailure(PollProblem.uncertain);
+      _pollReaders[poll] = reader;
+      return poll;
+    } on PollFailure catch (failure) {
+      if (failure.problem == PollProblem.uncertain ||
+          failure.problem == PollProblem.duplicate ||
+          (submitted && failure.problem == PollProblem.readerChanged)) {
+        _unconfirmedVotes[key] = Object();
+      }
+      rethrow;
+    } finally {
+      _pendingVotes.remove(key);
     }
   }
 

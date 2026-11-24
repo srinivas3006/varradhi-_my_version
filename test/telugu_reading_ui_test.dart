@@ -11,9 +11,11 @@ void main() {
   group('Telugu Reading UI Color Tokens & Typography Specification', () {
     test('Reading color tokens match exact specification', () {
       expect(AppColors.readingTitleLight, const Color(0xFF212121),
-          reason: 'Headline in light mode must be #212121 (dark gray, not pure black)');
+          reason:
+              'Headline in light mode must be #212121 (dark gray, not pure black)');
       expect(AppColors.readingBodyLight, const Color(0xFF424242),
-          reason: 'Article body in light mode must be #424242 (soft dark gray, avoid pure black)');
+          reason:
+              'Article body in light mode must be #424242 (soft dark gray, avoid pure black)');
       expect(AppColors.readingMetaLight, const Color(0xFF6B7280),
           reason: 'Meta information in light mode must be #6B7280');
 
@@ -33,8 +35,9 @@ void main() {
 
     test('Reading contrast ratios satisfy WCAG AAA standards', () {
       double luminance(Color c) {
-        double channel(double v) =>
-            v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) * ((v + 0.055) / 1.055);
+        double channel(double v) => v <= 0.03928
+            ? v / 12.92
+            : ((v + 0.055) / 1.055) * ((v + 0.055) / 1.055);
         return 0.2126 * channel(c.r) +
             0.7152 * channel(c.g) +
             0.0722 * channel(c.b);
@@ -66,13 +69,15 @@ void main() {
           reason: 'Dark body text must exceed WCAG AAA 7:1 contrast');
     });
 
-    test('AppState readingFontSize defaults to 19.0 and can be adjusted', () async {
+    test('AppState readingFontSize defaults to 19.0 and can be adjusted',
+        () async {
       SharedPreferences.setMockInitialValues({});
       final appState = AppState.instance;
       await appState.init();
 
       expect(appState.readingFontSize, 19.0,
-          reason: 'Default reading font size for Telugu readability must be 19px');
+          reason:
+              'Default reading font size for Telugu readability must be 19px');
 
       bool notified = false;
       appState.addListener(() {
@@ -88,14 +93,16 @@ void main() {
       expect(appState.readingFontSize, 19.0);
     });
 
-    test('Spotlight news card typography scaling yields balanced line density', () {
+    test('Spotlight news card typography scaling yields balanced line density',
+        () {
       double calculateEffectiveFontSize(double sliderValue) {
         return sliderValue > 0 ? (sliderValue * (16.5 / 19.0)) : 16.5;
       }
 
       // At default slider 19.0, effective size is 16.5
       expect(calculateEffectiveFontSize(19.0), closeTo(16.5, 0.01),
-          reason: 'Default 19.0 slider must scale to 16.5dp to avoid oversized body typography');
+          reason:
+              'Default 19.0 slider must scale to 16.5dp to avoid oversized body typography');
 
       // At minimum slider 12.0
       expect(calculateEffectiveFontSize(12.0), closeTo(10.42, 0.01));
@@ -105,17 +112,19 @@ void main() {
 
       // Media aspect ratio 4:3 (1.333) vs previous 9:8 (1.125) saves vertical height
       const cardWidth = 390.0;
-      final oldMediaHeight = cardWidth / (9 / 8); // 346.67dp
-      final newMediaHeight = cardWidth / (4 / 3); // 292.50dp
+      const oldMediaHeight = cardWidth / (9 / 8); // 346.67dp
+      const newMediaHeight = cardWidth / (4 / 3); // 292.50dp
       expect(oldMediaHeight - newMediaHeight, greaterThan(50.0),
-          reason: '4:3 ratio must reclaim >50dp of vertical space for news reading body');
+          reason:
+              '4:3 ratio must reclaim >50dp of vertical space for news reading body');
     });
   });
 
   group('reading size is the same for guests and logged-in readers', () {
     test('logging in does not take the account font_size', () {
       final src = File('lib/state/app_state.dart').readAsStringSync();
-      final sync = src.substring(src.indexOf('Future<void> refreshRolesFromServer'));
+      final sync =
+          src.substring(src.indexOf('Future<void> refreshRolesFromServer'));
       expect(sync.substring(0, sync.indexOf('_restoreReporterStatus(me)')),
           isNot(contains('setReadingFontSize(')),
           reason: 'the backend default (16) shrank every story after login');

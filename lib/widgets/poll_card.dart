@@ -1,114 +1,278 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/poll.dart';
 import '../services/api_service.dart';
 import '../services/poll_exposure.dart';
+import '../services/poll_context.dart';
 import '../services/sharing/share_content_builder.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../theme/article_typography.dart';
 import 'sharing/share_sheet.dart';
 
-/// A community poll: question, options, live results after voting.
-///
-/// Before the vote every option is a tappable row with an empty radio; one
-/// tap votes. After the vote the rows turn into result bars, the reader's
-/// pick is ticked and the leading option is marked.
+/// A community poll with server-confirmed voting and results.
 class PollCard extends StatefulWidget {
-  final Poll poll;
+  final Poll? poll;
+  final String pollId;
   final ValueChanged<int>? onVoted;
-
-  /// Counts this card toward the reader's view limit for the poll
-  /// ([PollExposure]). Off for the poll's own screen, opened on purpose.
+  final ValueChanged<String>? onUnavailable;
   final bool trackExposure;
 
-  const PollCard({
+  PollCard({
     super.key,
-    required this.poll,
+    required Poll this.poll,
     this.onVoted,
+    this.onUnavailable,
     this.trackExposure = true,
-  });
+  }) : pollId = poll.id;
+
+  const PollCard.detail({super.key, required this.pollId})
+      : poll = null,
+        onVoted = null,
+        onUnavailable = null,
+        trackExposure = false;
 
   @override
   State<PollCard> createState() => _PollCardState();
 }
 
 class _PollCardState extends State<PollCard> {
+  late PollReader _reader;
+  Poll? _poll;
+  String? _choice;
+  String? _message;
   bool _isVoting = false;
+  bool _loading = false;
+  bool _requiresDetail = false;
+  bool _unavailable = false;
+  bool _forceClosed = false;
   bool _justVoted = false;
+  Timer? _cooldown;
+  Timer? _expiry;
+  int _generation = 0;
 
   bool get _telugu => AppState.instance.language == 'Telugu';
 
   @override
   void initState() {
     super.initState();
-    if (widget.trackExposure) {
-      PollExposure.instance.markShown(widget.poll.id);
+    AppState.instance.addListener(_readerChanged);
+    _reader = currentPollReader;
+    _start();
+  }
+
+  @override
+  void didUpdateWidget(covariant PollCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.pollId != oldWidget.pollId || widget.poll != oldWidget.poll) {
+      _reset();
+      _reader = currentPollReader;
+      _start();
     }
   }
 
-  Future<void> _vote(int index) async {
-    final poll = widget.poll;
-    if (poll.selectedOption != null || _isVoting) return;
-    HapticFeedback.selectionClick();
+  void _reset() {
+    ++_generation;
+    _cooldown?.cancel();
+    _cooldown = null;
+    _expiry?.cancel();
+    _poll = null;
+    _choice = null;
+    _message = null;
+    _isVoting = false;
+    _loading = false;
+    _requiresDetail = false;
+    _unavailable = false;
+    _forceClosed = false;
+    _justVoted = false;
+  }
 
-    // Optimistic: results show at once; undone if the vote is not saved.
-    final previousTotal = poll.totalVotes;
+  void _start() {
+    final initial = widget.poll;
+    final owner =
+        initial == null ? null : ApiService.instance.pollReaderOf(initial);
+    if (initial != null && (owner == null || owner == _reader)) {
+      _showPoll(initial);
+    } else {
+      unawaited(_reload());
+    }
+  }
+
+  void _readerChanged() {
+    final reader = currentPollReader;
+    if (_reader == reader) return;
     setState(() {
-      _isVoting = true;
-      if (index < poll.votes.length) poll.votes[index]++;
-      poll.totalVotes++;
-      poll.selectedOption = index;
-      if (poll.optionItems.isNotEmpty && index < poll.optionItems.length) {
-        poll.selectedOptionId = poll.optionItems[index].id;
-      }
+      _reset();
+      _reader = reader;
     });
+    unawaited(_reload());
+  }
 
-    final optionId =
-        (poll.optionItems.isNotEmpty && index < poll.optionItems.length)
-            ? poll.optionItems[index].id
-            : null;
-
-    final success = await ApiService.instance.submitPollVote(
-      poll.id,
-      optionId: optionId,
-      optionIndex: index,
-    );
-    if (!mounted) return;
-
-    if (!success) {
-      setState(() {
-        _isVoting = false;
-        if (index < poll.votes.length && poll.votes[index] > 0) {
-          poll.votes[index]--;
-        }
-        poll.totalVotes = previousTotal;
-        poll.selectedOption = null;
-        poll.selectedOptionId = null;
+  void _showPoll(Poll poll) {
+    _poll = poll;
+    _expiry?.cancel();
+    final end = poll.endsAt;
+    if (!poll.closed && end != null) {
+      _expiry = Timer(end.difference(DateTime.now()), () {
+        if (mounted) setState(() => _forceClosed = true);
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(_telugu
-            ? 'ఓటు నమోదు కాలేదు. ఇంటర్నెట్ చూసి మళ్లీ ప్రయత్నించండి.'
-            : 'Could not register your vote. Check your connection.'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
+    }
+    if (widget.trackExposure) {
+      unawaited(PollExposure.instance.markShown(poll.id));
+    }
+  }
+
+  bool _current(int generation) =>
+      mounted && generation == _generation && _reader == currentPollReader;
+
+  Future<void> _reload(
+      {bool preserveMessage = false, bool refreshResults = false}) async {
+    if (_loading || _cooldown != null) return;
+    final generation = _generation;
+    setState(() {
+      _loading = true;
+      _requiresDetail = true;
+      if (!preserveMessage) _message = null;
+    });
+    try {
+      final poll = await ApiService.instance.fetchPollDetail(widget.pollId);
+      if (!_current(generation)) return;
+      if (!poll.isActive) {
+        _showUnavailable();
+        return;
+      }
+      setState(() {
+        _showPoll(poll);
+        _requiresDetail = false;
+        _unavailable = false;
+        if (refreshResults) _forceClosed = false;
+        if (poll.hasVoted || poll.closed) _message = null;
+        if ((_justVoted && !poll.hasVoted) ||
+            !poll.optionItems
+                .any((option) => option.canVote && option.id == _choice)) {
+          _choice = null;
+        }
+        if (!poll.hasVoted) _justVoted = false;
+      });
+    } on PollFailure catch (failure) {
+      if (_current(generation)) _showFailure(failure);
+    } finally {
+      if (_current(generation)) setState(() => _loading = false);
+    }
+  }
+
+  void _showUnavailable() {
+    setState(() {
+      _poll = null;
+      _unavailable = true;
+      _requiresDetail = false;
+    });
+    widget.onUnavailable?.call(widget.pollId);
+  }
+
+  void _showFailure(PollFailure failure) {
+    if (failure.problem == PollProblem.readerChanged) return;
+    if (failure.problem == PollProblem.unavailable ||
+        failure.problem == PollProblem.eligibility) {
+      _showUnavailable();
       return;
     }
-
-    HapticFeedback.mediumImpact();
     setState(() {
-      _isVoting = false;
-      _justVoted = true;
+      _message = failure.message ??
+          (_telugu
+              ? 'పోల్ అభ్యర్థనను పూర్తి చేయలేకపోయాం. మళ్లీ ప్రయత్నించండి.'
+              : 'Could not complete the poll request. Please try again.');
+      if (failure.retryAfter case final delay? when delay > Duration.zero) {
+        _cooldown?.cancel();
+        _cooldown = Timer(delay, () {
+          if (mounted) setState(() => _cooldown = null);
+        });
+      }
     });
-    await PollExposure.instance.markVoted(poll.id);
-    widget.onVoted?.call(index);
+  }
+
+  Future<void> _vote() async {
+    final poll = _poll;
+    final choice = _choice;
+    if (poll == null ||
+        choice == null ||
+        poll.hasVoted ||
+        poll.closed ||
+        _forceClosed ||
+        _requiresDetail ||
+        _loading ||
+        _isVoting ||
+        _cooldown != null ||
+        !poll.optionItems.any((o) => o.canVote && o.id == choice)) {
+      return;
+    }
+    final generation = _generation;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _isVoting = true;
+      _message = null;
+    });
+    try {
+      final result =
+          await ApiService.instance.submitPollVote(poll.id, optionId: choice);
+      if (!_current(generation)) return;
+      setState(() {
+        _showPoll(result);
+        _justVoted = true;
+      });
+      if (result.selectedOption case final index?) widget.onVoted?.call(index);
+    } on PollFailure catch (failure) {
+      if (!_current(generation)) return;
+      _showFailure(failure);
+      switch (failure.problem) {
+        case PollProblem.expired:
+          setState(() => _forceClosed = true);
+          await _reload(preserveMessage: true);
+        case PollProblem.duplicate:
+        case PollProblem.uncertain:
+          await _reload(preserveMessage: true);
+        case PollProblem.invalidOption:
+          setState(() => _choice = null);
+          await _reload(preserveMessage: true);
+        case PollProblem.invalid:
+          setState(() => _choice = null);
+        case PollProblem.credential:
+        case PollProblem.unauthorized:
+          setState(() => _requiresDetail = true);
+        default:
+          break;
+      }
+    } finally {
+      if (_current(generation)) setState(() => _isVoting = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    AppState.instance.removeListener(_readerChanged);
+    _cooldown?.cancel();
+    _expiry?.cancel();
+    super.dispose();
   }
 
   String _votesLabel(int n) => _telugu
       ? '$n ${n == 1 ? 'ఓటు' : 'ఓట్లు'}'
       : '$n ${n == 1 ? 'vote' : 'votes'}';
+
+  String? _coverageLabel(Poll poll) => switch (poll.coverage) {
+        PollCoverage.global => _telugu ? 'అందరికీ' : 'Global',
+        PollCoverage.state => _telugu ? 'రాష్ట్రం' : 'State',
+        PollCoverage.district => _telugu ? 'జిల్లా' : 'District',
+        PollCoverage.mandal => _telugu ? 'మండలం' : 'Mandal',
+        PollCoverage.village => _telugu ? 'గ్రామం' : 'Village',
+        PollCoverage.municipality => _telugu ? 'పట్టణం' : 'Municipality/Town',
+        PollCoverage.assembly =>
+          _telugu ? 'అసెంబ్లీ నియోజకవర్గం' : 'Assembly Constituency',
+        null => null,
+      };
 
   /// "2 రోజులు మిగిలి ఉన్నాయి" / "Ends in 3 h"; null when there is no end.
   String? _timeLeft(Poll poll) {
@@ -129,11 +293,38 @@ class _PollCardState extends State<PollCard> {
 
   @override
   Widget build(BuildContext context) {
-    final poll = widget.poll;
-    final hasVoted = poll.selectedOption != null;
-    final closed = poll.isExpired ||
-        (poll.endsAt != null && poll.endsAt!.isBefore(DateTime.now()));
+    final poll = _poll;
+    if (poll == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_loading)
+              const CircularProgressIndicator()
+            else if (_unavailable)
+              Text(_telugu ? 'పోల్ అందుబాటులో లేదు' : 'Poll unavailable',
+                  key: const Key('poll_unavailable'))
+            else ...[
+              Text(_message ?? (_telugu ? 'పోల్‌ను తెరవండి' : 'Load poll')),
+              TextButton(
+                onPressed: _cooldown == null ? () => _reload() : null,
+                child: Text(_telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+    final hasVoted = poll.hasVoted;
+    final coverage = _coverageLabel(poll);
+    final closed = poll.closed || _forceClosed;
     final showResults = hasVoted || closed;
+    final enabled = !showResults &&
+        !_isVoting &&
+        !_loading &&
+        !_requiresDetail &&
+        _cooldown == null;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBg = isDark ? AppColors.cardDarkNavy : Colors.white;
     final ink = isDark ? AppColors.textLight : AppColors.textDark;
@@ -143,11 +334,11 @@ class _PollCardState extends State<PollCard> {
     // The option with the most votes, for the "leading" mark.
     var leader = -1;
     if (showResults && poll.totalVotes > 0) {
-      var best = -1.0;
-      for (var i = 0; i < poll.options.length; i++) {
-        final p = poll.percentFor(i);
-        if (p > best) {
-          best = p;
+      var best = 0;
+      for (var i = 0; i < poll.votes.length; i++) {
+        final count = poll.votes[i];
+        if (count > best) {
+          best = count;
           leader = i;
         }
       }
@@ -217,6 +408,12 @@ class _PollCardState extends State<PollCard> {
                               letterSpacing: 0.2,
                             ),
                           ),
+                          if (coverage != null)
+                            Text(
+                              coverage,
+                              key: const Key('poll_coverage'),
+                              style: TextStyle(fontSize: 12, color: muted),
+                            ),
                           if (timeLeft != null)
                             Text(
                               timeLeft,
@@ -258,7 +455,7 @@ class _PollCardState extends State<PollCard> {
                           : (_telugu ? 'ప్రస్తుత ఫలితాలు' : 'Current results'))
                       : (_telugu
                           ? 'ఓటు వేయడానికి ఒక ఎంపికను నొక్కండి'
-                          : 'Tap an option to vote'),
+                          : 'Select an option to vote'),
                   style: TextStyle(fontSize: 12.5, color: muted),
                 ),
                 const SizedBox(height: 14),
@@ -270,10 +467,41 @@ class _PollCardState extends State<PollCard> {
                       label: poll.options[i],
                       percent: poll.percentFor(i).clamp(0.0, 1.0),
                       showResults: showResults,
-                      selected: poll.selectedOption == i,
+                      selected: showResults
+                          ? poll.selectedOption == i
+                          : i < poll.optionItems.length &&
+                              _choice == poll.optionItems[i].id,
                       leading: leader == i,
-                      enabled: !showResults && !_isVoting,
-                      onTap: () => _vote(i),
+                      enabled: enabled &&
+                          i < poll.optionItems.length &&
+                          poll.optionItems[i].canVote,
+                      onTap: () =>
+                          setState(() => _choice = poll.optionItems[i].id),
+                    ),
+                  ),
+                if (_message != null)
+                  Text(_message!, key: const Key('poll_message')),
+                if (_requiresDetail && !_loading)
+                  TextButton(
+                    onPressed: _cooldown == null ? () => _reload() : null,
+                    child: Text(_telugu ? 'మళ్లీ ప్రయత్నించండి' : 'Retry'),
+                  )
+                else if (!showResults)
+                  FilledButton(
+                    key: const Key('poll_vote'),
+                    onPressed: enabled && _choice != null ? _vote : null,
+                    child: Text(_telugu ? 'ఓటు వేయండి' : 'Vote'),
+                  ),
+                if (showResults && !_requiresDetail)
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TextButton(
+                      key: const Key('poll_refresh'),
+                      onPressed: _loading || _isVoting || _cooldown != null
+                          ? null
+                          : () => _reload(refreshResults: true),
+                      child: Text(
+                          _telugu ? 'ఫలితాలను నవీకరించండి' : 'Refresh results'),
                     ),
                   ),
                 const SizedBox(height: 4),
@@ -379,6 +607,7 @@ class _OptionRow extends StatelessWidget {
 
     return Semantics(
       button: enabled,
+      selected: selected,
       label: showResults ? '$label ${(percent * 100).round()}%' : label,
       child: Material(
         color: Colors.transparent,
@@ -429,6 +658,7 @@ class _OptionRow extends StatelessWidget {
                           width: 20,
                           height: 20,
                           decoration: BoxDecoration(
+                            color: selected ? AppColors.primary : null,
                             shape: BoxShape.circle,
                             border: Border.all(
                                 color: isDark ? Colors.white38 : Colors.black26,

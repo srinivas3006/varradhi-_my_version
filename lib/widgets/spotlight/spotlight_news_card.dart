@@ -30,6 +30,10 @@ class SpotlightNewsCard extends StatefulWidget {
   final NewsArticle article;
   final VoidCallback onTap;
   final VoidCallback onShare;
+  final ValueChanged<NewsArticle>? onShareResolved;
+  final String? topStoriesScope;
+  final bool isEditorialHighlight;
+  final bool Function()? claimQualifiedOpen;
   final VoidCallback onClose;
 
   // Parallax properties
@@ -137,6 +141,10 @@ class SpotlightNewsCard extends StatefulWidget {
     required this.article,
     required this.onTap,
     required this.onShare,
+    this.onShareResolved,
+    this.topStoriesScope,
+    this.isEditorialHighlight = false,
+    this.claimQualifiedOpen,
     required this.onClose,
     this.pageIndex = 0,
     this.pageCount = 0,
@@ -194,7 +202,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   void _trackView() {
     if (_inWidgetTest) return;
     if (widget.isCurrent) {
-      _view.shown(widget.article);
+      _view.shown(widget.article, claimQualifiedOpen: widget.claimQualifiedOpen);
     } else {
       _view.left();
     }
@@ -365,10 +373,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     super.initState();
     // Fetch full article detail by slug. The detail API takes the slug only
     // — /articles/{id}/ is a 404 — so an item without one keeps its feed copy.
-    final slugToFetch = widget.article.slug;
-    if (!widget.article.isUgc && slugToFetch.isNotEmpty) {
-      _loadDetail(slugToFetch);
-    }
+    _loadDetail();
     _scheduleSharePrep();
     _trackView();
     // Ramabhadra / Mandali load a moment after start: re-fit the story to
@@ -380,16 +385,15 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   void didUpdateWidget(covariant SpotlightNewsCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.article.id != widget.article.id ||
-        oldWidget.article.slug != widget.article.slug) {
+        oldWidget.article.slug != widget.article.slug ||
+        oldWidget.article.isUgc != widget.article.isUgc ||
+        oldWidget.topStoriesScope != widget.topStoriesScope) {
       _posterDownloaded = false;
       ++_detailGeneration;
       _detailArticle = null;
       _isLoadingDetail = false;
       _detailError = null;
-      final slug = widget.article.slug;
-      if (!widget.article.isUgc && slug.isNotEmpty) {
-        _loadDetail(slug);
-      }
+      _loadDetail();
       _scheduleSharePrep();
       _trackView();
     } else if (widget.isCurrent != oldWidget.isCurrent) {
@@ -431,6 +435,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         builder: (_) => NewsDetailScreen(
           article: _detailArticle ?? widget.article,
           slug: widget.article.slug,
+          topStoriesScope: widget.topStoriesScope,
+          claimQualifiedOpen: widget.claimQualifiedOpen,
         ),
       ),
     );
@@ -441,15 +447,23 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
   /// carries a short summary; drawing that and then swapping in the full
   /// story re-fitted the text a frame later — the "already loaded, then
   /// reloads" blink while swiping. A stale copy is refreshed quietly.
-  void _loadDetail(String slug) {
+  void _loadDetail() {
+    final story = widget.article;
+    final scope = widget.topStoriesScope;
     final repo = NewsArticleRepository.instance;
-    final cached = repo.peekDetail(slug);
-    if (cached != null) _detailArticle = cached;
-    if (cached == null || !repo.isFresh(slug)) _fetchArticleDetail(slug);
+    if (story.isUgc) {
+      if (scope == null || story.id.isEmpty) return;
+      _detailArticle = repo.peekUgcDetail(story.id, scope);
+      if (!repo.isUgcFresh(story.id, scope)) _fetchArticleDetail();
+    } else if (story.slug.isNotEmpty) {
+      _detailArticle = repo.peekDetail(story.slug);
+      if (!repo.isFresh(story.slug)) _fetchArticleDetail();
+    }
   }
 
-  Future<void> _fetchArticleDetail(String slug) async {
-    if (widget.article.isUgc) return;
+  Future<void> _fetchArticleDetail({bool forceRefresh = false}) async {
+    final story = widget.article;
+    final scope = widget.topStoriesScope;
     final generation = ++_detailGeneration;
 
     // A copy already on screen stays; the spinner is only for a card with
@@ -462,10 +476,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
     }
 
     try {
-      debugPrint('Spotlight: fetching detail for slug: $slug');
-      final full = await NewsArticleRepository.instance.getDetail(slug);
-      debugPrint(
-          'Spotlight: detail fetched for $slug. Content length: ${full.body.length}');
+      final repo = NewsArticleRepository.instance;
+      final full = story.isUgc
+          ? await repo.getUgcDetail(story.id, scope!, forceRefresh: forceRefresh)
+          : await repo.getDetail(story.slug, forceRefresh: forceRefresh);
       if (mounted && generation == _detailGeneration) {
         setState(() {
           _detailArticle = full;
@@ -473,7 +487,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
         });
       }
     } catch (e) {
-      debugPrint('Spotlight: failed to fetch detail for $slug: $e');
+      debugPrint('Spotlight: failed to fetch detail for ${story.id}: $e');
       if (mounted && generation == _detailGeneration) {
         setState(() {
           _detailError = e.toString();
@@ -526,6 +540,7 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
 
   Widget _buildCard(BuildContext context) {
     final article = _detailArticle ?? widget.article;
+    final te = AppState.instance.language == 'Telugu';
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenHeight = MediaQuery.sizeOf(context).height;
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -674,6 +689,8 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                               for (final m
                                                   in article.orderedMedia)
                                                 if (!m.isVideo) m.url,
+                                              if (widget.topStoriesScope != null)
+                                                widget.article.imageUrl,
                                             ],
                                           ),
                                         ),
@@ -787,6 +804,11 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const SizedBox(height: 10),
+                        if (widget.isEditorialHighlight)
+                          Text(
+                            te ? 'ఎడిటర్ ఎంపిక' : "Editor's Pick",
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
 
                         // Headline — directly under the image. Bold, with
                         // generous leading for the height of Telugu clusters
@@ -829,7 +851,10 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                   ? content
                                   : (article.body.trim().isNotEmpty
                                       ? article.body.trim()
-                                      : article.summary.trim());
+                                      : (widget.topStoriesScope != null &&
+                                              article.summary.trim().isEmpty
+                                          ? widget.article.summary.trim()
+                                          : article.summary.trim()));
                               // 400–600 letters on the card.
                               final excerpt =
                                   SpotlightNewsCard.storyExcerpt(toShow);
@@ -841,6 +866,18 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                       height: 24,
                                       child: CircularProgressIndicator(
                                           strokeWidth: 2)),
+                                );
+                              }
+
+                              if (toShow.isEmpty &&
+                                  widget.topStoriesScope != null &&
+                                  _detailError != null) {
+                                return Align(
+                                  alignment: Alignment.topLeft,
+                                  child: TextButton(
+                                    onPressed: () => _fetchArticleDetail(forceRefresh: true),
+                                    child: Text(te ? 'మళ్లీ ప్రయత్నించండి' : 'Retry loading story'),
+                                  ),
                                 );
                               }
 
@@ -1533,7 +1570,9 @@ class _SpotlightNewsCardState extends State<SpotlightNewsCard> {
                                 labelColor: isDark
                                     ? AppColors.readingMetaDark
                                     : const Color(0xFF6B7280),
-                                onTap: widget.onShare,
+                                onTap: widget.onShareResolved == null
+                                    ? widget.onShare
+                                    : () => widget.onShareResolved!(article),
                               ),
                               trailing: [
                                   // Comment (Opens directly without auth gate)

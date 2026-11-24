@@ -30,10 +30,11 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance
-        .recordClick(widget.ad, placementZone: widget.placementZone);
-    if (widget.ad.destinationUrl.isNotEmpty) {
-      final uri = Uri.tryParse(widget.ad.destinationUrl);
+    final destination = await AdManager.instance.resolveDestination(
+      widget.ad, widget.placementZone);
+    if (!mounted) return;
+    if (destination.isNotEmpty) {
+      final uri = Uri.tryParse(destination);
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
@@ -80,6 +81,7 @@ class _AdBannerWidgetState extends State<AdBannerWidget> {
               children: [
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
+                  imageBuilder: AdViewabilityDetector.imageBuilder(widget.ad),
                   fit: BoxFit
                       .cover, // Keep image BoxFit.cover inside fixed aspect ratio
                   placeholder: (context, url) => Container(

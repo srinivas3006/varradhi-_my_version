@@ -21,6 +21,7 @@ import '../models/video_item.dart';
 import '../repositories/news_article_repository.dart';
 import '../repositories/video_repository.dart';
 import '../screens/account_login_screen.dart';
+import '../screens/ad_booking_screen.dart';
 import '../screens/bookmarks_screen.dart';
 import '../screens/category_screen.dart';
 import '../screens/create_post_screen.dart';
@@ -97,6 +98,7 @@ class NotificationService {
   );
 
   Future<void> _pushChange = Future<void>.value();
+  Future<void> _accountPushChange = Future<void>.value();
 
   /// The reader's on/off for all notifications on this phone, with or without
   /// an account. Off removes the FCM token, because the app cannot hide a push
@@ -108,8 +110,16 @@ class NotificationService {
     // In order: off then on again must not end with the new token removed.
     _pushChange = _pushChange.then((_) => _applyPushSetting(tellBackend: true));
     if (syncAccount && AppState.instance.isLoggedIn) {
-      unawaited(ApiService.instance
-          .updateNotificationPreferences({'enabled': enabled}));
+      _accountPushChange = _accountPushChange.then((_) async {
+        final updated = await ApiService.instance
+            .updateNotificationPreferences({'enabled': enabled});
+        if (!updated) {
+          debugPrint(
+              '[Notifications] failed to sync push preference to account');
+        }
+      });
+      return Future.wait<void>([_pushChange, _accountPushChange])
+          .then<void>((_) {});
     }
     return _pushChange;
   }
@@ -791,6 +801,21 @@ class NotificationService {
     _routeOpened = true;
   }
 
+  bool _advertiseRouteOpen = false;
+
+  void _openAdvertiseWithUs(BuildContext context) {
+    if (_advertiseRouteOpen || !context.mounted) return;
+    _advertiseRouteOpen = true;
+    final closed = Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: '/advertise-with-us'),
+        builder: (_) => const AdBookingScreen(),
+      ),
+    );
+    _routeOpened = true;
+    unawaited(closed.whenComplete(() => _advertiseRouteOpen = false));
+  }
+
   /// Navigates to a typed [NotificationTarget] using [_openRoute]
   /// to ensure STEP 5 navigation stack safety, debounce protection, and auth challenge preservation.
   Future<void> navigateToTarget(
@@ -919,31 +944,12 @@ class NotificationService {
 
         case NotificationTargetType.poll:
           final pollId = target.identifier;
-          if (pollId != null && pollId.isNotEmpty) {
-            _showLoadingIndicator(navContext);
-            try {
-              final poll = await ApiService.instance
-                  .fetchPollDetail(pollId)
-                  .timeout(const Duration(seconds: 8));
-
-              _dismissLoadingIndicator();
-
-              if (navContext.mounted) {
-                _openRoute(
-                  navContext,
-                  MaterialPageRoute(
-                      builder: (_) => PollDetailScreen(poll: poll)),
-                );
-              }
-            } catch (e) {
-              _dismissLoadingIndicator();
-              debugPrint(
-                  '[NotificationService] Poll load error for "$pollId": $e');
-              if (navContext.mounted) {
-                _showLoadFailure(navContext, e,
-                    retry: () => navigateToTarget(target));
-              }
-            }
+          if (pollId != null && pollId.isNotEmpty && navContext.mounted) {
+            _openRoute(
+              navContext,
+              MaterialPageRoute(
+                  builder: (_) => PollDetailScreen(pollId: pollId)),
+            );
           }
           break;
 
@@ -1096,6 +1102,9 @@ class NotificationService {
 
         case NotificationTargetType.screen:
           switch (target.screenName?.toLowerCase()) {
+            case 'advertise-with-us':
+              _openAdvertiseWithUs(navContext);
+              break;
             case 'bookmarks':
               _openRoute(
                 navContext,

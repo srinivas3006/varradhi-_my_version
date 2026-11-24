@@ -29,7 +29,8 @@ class SpotlightShimmerCard extends StatelessWidget {
             ),
             
             Expanded(
-              child: Padding(
+              child: SingleChildScrollView(
+                physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

@@ -29,10 +29,11 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
   bool _hasError = false;
 
   Future<void> _handleTap() async {
-    AdManager.instance
-        .recordClick(widget.ad, placementZone: widget.placementZone);
-    if (widget.ad.destinationUrl.isNotEmpty) {
-      final uri = Uri.tryParse(widget.ad.destinationUrl);
+    final destination = await AdManager.instance.resolveDestination(
+      widget.ad, widget.placementZone);
+    if (!mounted) return;
+    if (destination.isNotEmpty) {
+      final uri = Uri.tryParse(destination);
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
@@ -78,6 +79,7 @@ class _BoxAdWidgetState extends State<BoxAdWidget> {
                 AdBadge.positioned(),
                 CachedNetworkImage(
                   imageUrl: widget.ad.imageUrl,
+                  imageBuilder: AdViewabilityDetector.imageBuilder(widget.ad),
                   fit: BoxFit.cover,
                   placeholder: (context, url) => Container(
                     color: isDark ? Colors.white10 : AppColors.chipBg,

@@ -40,11 +40,12 @@ class _NativeAdCardState extends State<NativeAdCard> {
   Future<void> _handleTap() async {
     if (widget.ad == null) return;
     HapticFeedback.selectionClick();
-    AdManager.instance
-        .recordClick(widget.ad!, placementZone: widget.placementZone);
+    final destination = await AdManager.instance.resolveDestination(
+      widget.ad!, widget.placementZone);
+    if (!mounted) return;
 
-    if (widget.ad!.destinationUrl.isNotEmpty) {
-      final uri = Uri.tryParse(widget.ad!.destinationUrl);
+    if (destination.isNotEmpty) {
+      final uri = Uri.tryParse(destination);
       if (uri != null && await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
@@ -154,6 +155,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
                   children: [
                     CachedNetworkImage(
                       imageUrl: ad.imageUrl,
+                      imageBuilder: AdViewabilityDetector.imageBuilder(ad),
                       fit: BoxFit.cover,
                       placeholder: (context, url) => Container(
                         color: isDark ? Colors.white10 : AppColors.chipBg,
